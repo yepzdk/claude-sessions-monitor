@@ -5,20 +5,29 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 ## Features
 
 - **Live dashboard** showing all active Claude Code sessions
-- **Status indicators**: Working, Needs Input, Waiting, Idle
+- **Process detection** distinguishes running vs inactive sessions
+- **Session summaries** from JSONL logs
+- **Status indicators**: Working, Needs Input, Waiting, Idle, Inactive
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap yepzdk/tools
+brew install csm
+```
+
 ### From releases
 
-Download the latest binary from [Releases](https://github.com/itk-dev/claude-sessions-monitor/releases) and add to your PATH.
+Download the latest binary from [Releases](https://github.com/yepzdk/claude-sessions-monitor/releases) and add to your PATH.
 
 ### Build from source
 
 ```bash
-git clone https://github.com/itk-dev/claude-sessions-monitor.git
+git clone https://github.com/yepzdk/claude-sessions-monitor.git
 cd claude-sessions-monitor
 make install
 ```
@@ -49,20 +58,22 @@ csm -v
 | ● | Working | Session is actively processing |
 | ⚠ | Needs Input | Waiting for user to approve a tool use |
 | ◉ | Waiting | Turn completed, waiting for next prompt |
-| ○ | Idle | No activity for 5+ minutes |
+| ○ | Idle | Claude running but no activity for 5+ minutes |
+| ◌ | Inactive | No Claude process running for this project |
 
 ## Screenshot
 
 ```
 🤖 Claude Code Sessions
 
-● Working: 2  ⚠ Needs Input: 1  ◉ Waiting: 0  ○ Idle: 1
+● Working: 1  ⚠ Needs Input: 1  ◉ Waiting: 0  ○ Idle: 2  ◌ Inactive: 5
 
-  STATUS          PROJECT                             LAST ACTIVITY   CURRENT TASK
-  ────────────────────────────────────────────────────────────────────────────────
-  ● Working       myorg/api-server                    5s ago          Implementing auth middleware...
-  ⚠ Needs Input   personal/side-project               45s ago         Using: Bash
-  ○ Idle          work/legacy-app                     15m ago         -
+  STATUS          PROJECT                             LAST ACTIVITY   SUMMARY
+  ───────────────────────────────────────────────────────────────────────────────────────────
+  ● Working       myorg/api-server                    5s ago          Implementing auth middleware
+  ⚠ Needs Input   work/claude-sessions-monitor        12s ago         Using: Bash
+  ○ Idle          personal/side-project               8m ago          Fix login validation
+  ○ Idle          work/frontend                       12m ago         Component refactoring
 
   Press Ctrl+C to quit
 ```
