@@ -28,6 +28,7 @@ const (
 	SymbolNeedsInput = "⚠"
 	SymbolWaiting    = "◉"
 	SymbolIdle       = "○"
+	SymbolInactive   = "◌"
 )
 
 // RenderList renders sessions as a simple list (for -l flag)
@@ -38,18 +39,24 @@ func RenderList(sessions []session.Session) {
 	}
 
 	// Header
-	fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "TASK")
-	fmt.Println(strings.Repeat("─", 80))
+	fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "SUMMARY")
+	fmt.Println(strings.Repeat("─", 100))
 
 	for _, s := range sessions {
 		symbol, color := getStatusDisplay(s.Status)
 		elapsed := formatElapsed(time.Since(s.LastActivity))
 
+		// Use summary if available, otherwise task
+		desc := s.Summary
+		if desc == "" {
+			desc = s.Task
+		}
+
 		fmt.Printf("%s%s %-13s%s %-35s %-15s %s\n",
 			color, symbol, s.Status, Reset,
 			truncate(s.Project, 35),
 			elapsed,
-			truncate(s.Task, 30))
+			truncate(desc, 40))
 	}
 }
 
@@ -68,29 +75,46 @@ func RenderLive(sessions []session.Session) {
 	// Header
 	fmt.Printf("%s🤖 Claude Code Sessions%s\n\n", Bold, Reset)
 
-	// Status summary
-	counts := countByStatus(sessions)
+	// Split sessions into active and inactive
+	var active, inactive []session.Session
+	for _, s := range sessions {
+		if s.Status == session.StatusInactive {
+			inactive = append(inactive, s)
+		} else {
+			active = append(active, s)
+		}
+	}
+
+	// Status summary (only active sessions)
+	counts := countByStatus(active)
 	fmt.Printf("%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
 	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
 	fmt.Printf("%s%s Waiting: %d%s  ", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
-	fmt.Printf("%s%s Idle: %d%s\n\n", Gray, SymbolIdle, counts[session.StatusIdle], Reset)
+	fmt.Printf("%s%s Idle: %d%s  ", Gray, SymbolIdle, counts[session.StatusIdle], Reset)
+	fmt.Printf("%s%s Inactive: %d%s\n\n", Dim, SymbolInactive, len(inactive), Reset)
 
-	if len(sessions) == 0 {
-		fmt.Printf("%sNo active Claude sessions found.%s\n", Dim, Reset)
+	if len(active) == 0 {
+		fmt.Printf("%sNo active Claude sessions.%s\n", Dim, Reset)
 	} else {
 		// Column headers
-		fmt.Printf("  %-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "CURRENT TASK")
-		fmt.Printf("  %s\n", strings.Repeat("─", 78))
+		fmt.Printf("  %-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "SUMMARY")
+		fmt.Printf("  %s\n", strings.Repeat("─", 95))
 
-		for _, s := range sessions {
+		for _, s := range active {
 			symbol, color := getStatusDisplay(s.Status)
 			elapsed := formatElapsed(time.Since(s.LastActivity))
+
+			// Use summary if available, otherwise task
+			desc := s.Summary
+			if desc == "" {
+				desc = s.Task
+			}
 
 			fmt.Printf("  %s%s %-13s%s %-35s %-15s %s\n",
 				color, symbol, s.Status, Reset,
 				truncate(s.Project, 35),
 				elapsed,
-				truncate(s.Task, 25))
+				truncate(desc, 35))
 		}
 	}
 
@@ -123,8 +147,10 @@ func getStatusDisplay(status session.Status) (string, string) {
 		return SymbolWaiting, Blue
 	case session.StatusIdle:
 		return SymbolIdle, Gray
+	case session.StatusInactive:
+		return SymbolInactive, Dim
 	default:
-		return SymbolIdle, Reset
+		return SymbolInactive, Reset
 	}
 }
 
