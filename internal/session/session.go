@@ -246,8 +246,8 @@ func parseSession(projectName, logFile string, runningDirs map[string]bool) (Ses
 		return session, nil
 	}
 
-	// Extract summary from entries
-	session.Summary = extractSummary(entries)
+	// Extract summary from the log file (scans entire file)
+	session.Summary = extractSummary(logFile)
 
 	// Determine status from log entries
 	session.Status, session.Task = determineStatus(entries, isRunning)
@@ -263,15 +263,42 @@ func parseSession(projectName, logFile string, runningDirs map[string]bool) (Ses
 	return session, nil
 }
 
-// extractSummary finds the most recent summary entry
-func extractSummary(entries []LogEntry) string {
-	// Look for the most recent summary entry
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].Type == "summary" && entries[i].Summary != "" {
-			return entries[i].Summary
+// extractSummary reads the entire file to find the most recent summary entry
+// Summaries are typically at the beginning of the file, so we need to scan it all
+func extractSummary(logFile string) string {
+	file, err := os.Open(logFile)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	var lastSummary string
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// Quick check before full JSON parse
+		if !strings.Contains(line, `"type":"summary"`) {
+			continue
+		}
+
+		var entry LogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		if entry.Type == "summary" && entry.Summary != "" {
+			lastSummary = entry.Summary
 		}
 	}
-	return ""
+
+	return lastSummary
 }
 
 // decodeProjectName converts the directory name to a readable project name

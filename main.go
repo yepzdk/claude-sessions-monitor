@@ -68,6 +68,7 @@ func runLiveView(interval time.Duration) {
 	ui.HideCursor()
 	defer func() {
 		ui.ShowCursor()
+		ui.ResetTerminalTitle()
 		ui.ClearScreen()
 		fmt.Println("Goodbye!")
 	}()

@@ -69,6 +69,9 @@ func RenderJSON(sessions []session.Session) error {
 
 // RenderLive renders the live dashboard view
 func RenderLive(sessions []session.Session) {
+	// Set terminal title with status summary
+	SetTerminalTitle(buildTerminalTitle(sessions))
+
 	// Clear screen and move cursor to top
 	fmt.Print("\033[2J\033[H")
 
@@ -134,6 +137,48 @@ func HideCursor() {
 // ShowCursor shows the terminal cursor
 func ShowCursor() {
 	fmt.Print("\033[?25h")
+}
+
+// SetTerminalTitle sets the terminal tab/window title
+func SetTerminalTitle(title string) {
+	fmt.Printf("\033]0;%s\007", title)
+}
+
+// ResetTerminalTitle resets the terminal title to default
+func ResetTerminalTitle() {
+	fmt.Print("\033]0;\007")
+}
+
+// buildTerminalTitle creates a status summary for the terminal title
+func buildTerminalTitle(sessions []session.Session) string {
+	counts := make(map[session.Status]int)
+	for _, s := range sessions {
+		if s.Status != session.StatusInactive {
+			counts[s.Status]++
+		}
+	}
+
+	// Priority: Needs Input > Working > Waiting > Idle
+	var parts []string
+
+	if n := counts[session.StatusNeedsInput]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d needs input", n))
+	}
+	if n := counts[session.StatusWorking]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d working", n))
+	}
+	if n := counts[session.StatusWaiting]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d waiting", n))
+	}
+	if n := counts[session.StatusIdle]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d idle", n))
+	}
+
+	if len(parts) == 0 {
+		return "CSM: no active sessions"
+	}
+
+	return "CSM: " + strings.Join(parts, ", ")
 }
 
 // getStatusDisplay returns the symbol and color for a status
