@@ -33,6 +33,7 @@ type Session struct {
 	LastMessage  string    `json:"last_message,omitempty"`
 	LogFile      string    `json:"-"`
 	ProjectPath  string    `json:"-"` // Full path to the project directory
+	IsDesktop    bool      `json:"is_desktop,omitempty"` // True if session appears to be from desktop app
 }
 
 // LogEntry represents a single line in the JSONL log
@@ -107,6 +108,22 @@ func getRunningClaudeDirs() map[string]bool {
 func encodeProjectPath(path string) string {
 	// /Users/username/Projects/org/project -> -Users-username-Projects-org-project
 	return strings.ReplaceAll(path, "/", "-")
+}
+
+// isDesktopSession checks if the project path appears to be from the desktop app
+// Desktop app sessions typically have cwd at the home directory (e.g., -Users-username)
+func isDesktopSession(projectName string) bool {
+	// Remove leading dash
+	name := strings.TrimPrefix(projectName, "-")
+	parts := strings.Split(name, "-")
+
+	// Desktop sessions are typically just home directory: Users-username (2 parts)
+	// or Users-username- with trailing dash (still 2 meaningful parts)
+	if len(parts) <= 2 && len(parts) >= 1 && parts[0] == "Users" {
+		return true
+	}
+
+	return false
 }
 
 // Discover finds all active Claude sessions
@@ -208,6 +225,11 @@ func findMostRecentLog(dir string) (string, error) {
 			continue
 		}
 
+		// Skip empty log files (often from desktop app)
+		if info.Size() == 0 {
+			continue
+		}
+
 		if info.ModTime().After(mostRecentTime) {
 			mostRecentTime = info.ModTime()
 			mostRecent = filePath
@@ -224,6 +246,7 @@ func parseSession(projectName, logFile string, runningDirs map[string]bool) (Ses
 		LogFile:     logFile,
 		Status:      StatusInactive, // Default to inactive
 		ProjectPath: projectName,    // Store the encoded name for matching
+		IsDesktop:   isDesktopSession(projectName),
 	}
 
 	// Check if Claude is running in this project directory

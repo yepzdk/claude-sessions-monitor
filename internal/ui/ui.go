@@ -54,7 +54,7 @@ func RenderList(sessions []session.Session) {
 
 		fmt.Printf("%s%s %-13s%s %-35s %-15s %s\n",
 			color, symbol, s.Status, Reset,
-			truncate(s.Project, 35),
+			formatProject(s, 35),
 			elapsed,
 			truncate(desc, 40))
 	}
@@ -115,7 +115,7 @@ func RenderLive(sessions []session.Session) {
 
 			fmt.Printf("%s%s %-13s%s %-35s %-15s %s\n",
 				color, symbol, s.Status, Reset,
-				truncate(s.Project, 35),
+				formatProject(s, 35),
 				elapsed,
 				truncate(desc, 35))
 		}
@@ -234,4 +234,17 @@ func truncate(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+// formatProject formats the project name with optional desktop indicator
+func formatProject(s session.Session, maxLen int) string {
+	name := s.Project
+	if s.IsDesktop {
+		// Add subtle desktop indicator
+		indicator := Dim + " [D]" + Reset
+		// Account for indicator in truncation (4 visible chars)
+		truncated := truncate(name, maxLen-4)
+		return truncated + indicator
+	}
+	return truncate(name, maxLen)
 }
