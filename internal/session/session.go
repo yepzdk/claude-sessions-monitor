@@ -30,6 +30,7 @@ type Session struct {
 	LastActivity time.Time `json:"last_activity"`
 	Task         string    `json:"task"`
 	Summary      string    `json:"summary,omitempty"`
+	LastMessage  string    `json:"last_message,omitempty"`
 	LogFile      string    `json:"-"`
 	ProjectPath  string    `json:"-"` // Full path to the project directory
 }
@@ -249,6 +250,9 @@ func parseSession(projectName, logFile string, runningDirs map[string]bool) (Ses
 	// Extract summary from the log file (scans entire file)
 	session.Summary = extractSummary(logFile)
 
+	// Extract last assistant message text
+	session.LastMessage = extractLastAssistantMessage(entries)
+
 	// Determine status from log entries
 	session.Status, session.Task = determineStatus(entries, isRunning)
 
@@ -299,6 +303,37 @@ func extractSummary(logFile string) string {
 	}
 
 	return lastSummary
+}
+
+// extractLastAssistantMessage extracts the last text message from an assistant entry
+func extractLastAssistantMessage(entries []LogEntry) string {
+	// Search from the end to find the most recent assistant message with text
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if entry.Type != "assistant" || entry.Message == nil {
+			continue
+		}
+
+		// Look for text content in the message
+		for _, content := range entry.Message.Content {
+			if content.Type == "text" && content.Text != "" {
+				text := strings.TrimSpace(content.Text)
+				if text == "" {
+					continue
+				}
+				// Take first line only
+				if idx := strings.Index(text, "\n"); idx > 0 {
+					text = text[:idx]
+				}
+				// Clean up any leading markdown or formatting
+				text = strings.TrimPrefix(text, "# ")
+				text = strings.TrimPrefix(text, "## ")
+				text = strings.TrimPrefix(text, "### ")
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 // decodeProjectName converts the directory name to a readable project name

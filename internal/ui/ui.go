@@ -39,15 +39,15 @@ func RenderList(sessions []session.Session) {
 	}
 
 	// Header
-	fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "SUMMARY")
+	fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "LAST MESSAGE")
 	fmt.Println(strings.Repeat("─", 100))
 
 	for _, s := range sessions {
 		symbol, color := getStatusDisplay(s.Status)
 		elapsed := formatElapsed(time.Since(s.LastActivity))
 
-		// Use summary if available, otherwise task
-		desc := s.Summary
+		// Use last message if available, otherwise task
+		desc := s.LastMessage
 		if desc == "" {
 			desc = s.Task
 		}
@@ -76,7 +76,7 @@ func RenderLive(sessions []session.Session) {
 	fmt.Print("\033[2J\033[H")
 
 	// Header
-	fmt.Printf("%s🤖 Claude Code Sessions%s\n\n", Bold, Reset)
+	fmt.Printf("%sClaude Code Sessions%s\n\n", Bold, Reset)
 
 	// Split sessions into active and inactive
 	var active, inactive []session.Session
@@ -100,20 +100,20 @@ func RenderLive(sessions []session.Session) {
 		fmt.Printf("%sNo active Claude sessions.%s\n", Dim, Reset)
 	} else {
 		// Column headers
-		fmt.Printf("  %-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "SUMMARY")
-		fmt.Printf("  %s\n", strings.Repeat("─", 95))
+		fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "LAST MESSAGE")
+		fmt.Printf("%s\n", strings.Repeat("─", 95))
 
 		for _, s := range active {
 			symbol, color := getStatusDisplay(s.Status)
 			elapsed := formatElapsed(time.Since(s.LastActivity))
 
-			// Use summary if available, otherwise task
-			desc := s.Summary
+			// Use last message if available, otherwise task
+			desc := s.LastMessage
 			if desc == "" {
 				desc = s.Task
 			}
 
-			fmt.Printf("  %s%s %-13s%s %-35s %-15s %s\n",
+			fmt.Printf("%s%s %-13s%s %-35s %-15s %s\n",
 				color, symbol, s.Status, Reset,
 				truncate(s.Project, 35),
 				elapsed,
@@ -121,7 +121,7 @@ func RenderLive(sessions []session.Session) {
 		}
 	}
 
-	fmt.Printf("\n  %sPress Ctrl+C to quit%s\n", Dim, Reset)
+	fmt.Printf("\n%sPress Ctrl+C to quit%s\n", Dim, Reset)
 }
 
 // ClearScreen clears the terminal screen
