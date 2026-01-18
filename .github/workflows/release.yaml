@@ -19,6 +19,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache: false  # No external dependencies
 
       - name: Build binaries
         run: make build-all
