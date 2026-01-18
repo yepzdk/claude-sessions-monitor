@@ -44,10 +44,6 @@ main.go     - CLI entry point and flag handling
    - Updates `Formula/csm.rb` with new version and hashes
    - Commits and pushes automatically
 
-**Note:** Both workflows need to be in place for full automation:
-- This repo: release.yaml must include the `repository_dispatch` step
-- homebrew-tools: must have a workflow listening for `update-csm` events
-
 ### Troubleshooting releases
 
 **Homebrew not seeing new version:**
@@ -56,7 +52,12 @@ main.go     - CLI entry point and flag handling
 3. Check homebrew-tools workflow: `gh run list -R yepzdk/homebrew-tools`
 4. Verify formula was updated: `gh api repos/yepzdk/homebrew-tools/contents/Formula/csm.rb --jq '.content' | base64 -d | head -5`
 
-**Manual formula update (if automation fails):**
+**Manual trigger (if dispatch failed):**
+```bash
+gh workflow run update-csm.yml -R yepzdk/homebrew-tools -f version=X.X.X
+```
+
+**Manual formula update (if automation completely fails):**
 1. Get SHA256 hashes for binaries:
    ```bash
    for arch in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do

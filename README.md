@@ -6,7 +6,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 
 - **Live dashboard** showing all active Claude Code sessions
 - **Process detection** distinguishes running vs inactive sessions
-- **Session summaries** from JSONL logs
+- **Last message display** shows recent Claude responses
 - **Status indicators**: Working, Needs Input, Waiting, Idle, Inactive
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
@@ -64,18 +64,18 @@ csm -v
 ## Screenshot
 
 ```
-🤖 Claude Code Sessions
+Claude Code Sessions
 
 ● Working: 1  ⚠ Needs Input: 1  ◉ Waiting: 0  ○ Idle: 2  ◌ Inactive: 5
 
-  STATUS          PROJECT                             LAST ACTIVITY   SUMMARY
-  ───────────────────────────────────────────────────────────────────────────────────────────
-  ● Working       myorg/api-server                    5s ago          Implementing auth middleware
-  ⚠ Needs Input   work/claude-sessions-monitor        12s ago         Using: Bash
-  ○ Idle          personal/side-project               8m ago          Fix login validation
-  ○ Idle          work/frontend                       12m ago         Component refactoring
+STATUS          PROJECT                             LAST ACTIVITY   LAST MESSAGE
+───────────────────────────────────────────────────────────────────────────────────────────
+● Working       myorg/api-server                    5s ago          Implementing auth middleware
+⚠ Needs Input   work/claude-sessions-monitor        12s ago         Let me check the git status
+○ Idle          personal/side-project               8m ago          Done. The tests are passing.
+○ Idle          work/frontend                       12m ago         I've updated the component.
 
-  Press Ctrl+C to quit
+Press Ctrl+C to quit
 ```
 
 ## Building
