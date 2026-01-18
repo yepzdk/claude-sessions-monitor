@@ -68,6 +68,7 @@ func RenderJSON(sessions []session.Session) error {
 }
 
 // RenderLive renders the live dashboard view
+// Uses \r\n for newlines to work correctly in raw terminal mode
 func RenderLive(sessions []session.Session) {
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
@@ -76,7 +77,7 @@ func RenderLive(sessions []session.Session) {
 	fmt.Print("\033[2J\033[H")
 
 	// Header
-	fmt.Printf("%sClaude Code Sessions%s\n\n", Bold, Reset)
+	fmt.Printf("%sClaude Code Sessions%s\r\n\r\n", Bold, Reset)
 
 	// Split sessions into active and inactive
 	var active, inactive []session.Session
@@ -94,14 +95,14 @@ func RenderLive(sessions []session.Session) {
 	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
 	fmt.Printf("%s%s Waiting: %d%s  ", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
 	fmt.Printf("%s%s Idle: %d%s  ", Gray, SymbolIdle, counts[session.StatusIdle], Reset)
-	fmt.Printf("%s%s Inactive: %d%s\n\n", Dim, SymbolInactive, len(inactive), Reset)
+	fmt.Printf("%s%s Inactive: %d%s\r\n\r\n", Dim, SymbolInactive, len(inactive), Reset)
 
 	if len(active) == 0 {
-		fmt.Printf("%sNo active Claude sessions.%s\n", Dim, Reset)
+		fmt.Printf("%sNo active Claude sessions.%s\r\n", Dim, Reset)
 	} else {
 		// Column headers
-		fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "LAST MESSAGE")
-		fmt.Printf("%s\n", strings.Repeat("─", 95))
+		fmt.Printf("%-15s %-35s %-15s %s\r\n", "STATUS", "PROJECT", "LAST ACTIVITY", "LAST MESSAGE")
+		fmt.Printf("%s\r\n", strings.Repeat("─", 95))
 
 		for _, s := range active {
 			symbol, color := getStatusDisplay(s.Status)
@@ -113,7 +114,7 @@ func RenderLive(sessions []session.Session) {
 				desc = s.Task
 			}
 
-			fmt.Printf("%s%s %-13s%s %-35s %-15s %s\n",
+			fmt.Printf("%s%s %-13s%s %-35s %-15s %s\r\n",
 				color, symbol, s.Status, Reset,
 				formatProject(s, 35),
 				elapsed,
@@ -121,7 +122,7 @@ func RenderLive(sessions []session.Session) {
 		}
 	}
 
-	fmt.Printf("\n%sh: history | Ctrl+C: quit%s\n", Dim, Reset)
+	fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
 }
 
 // ClearScreen clears the terminal screen

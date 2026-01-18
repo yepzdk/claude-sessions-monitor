@@ -9,14 +9,21 @@ import (
 )
 
 // RenderHistory renders the session history view with date grouping
+// When showFooter is true, uses \r\n for raw terminal mode
 func RenderHistory(sessions []session.HistorySession, days int, showFooter bool) {
+	// Use \r\n when in interactive mode (showFooter=true means raw terminal)
+	nl := "\n"
+	if showFooter {
+		nl = "\r\n"
+	}
+
 	if len(sessions) == 0 {
-		fmt.Printf("No sessions found in the past %d days.\n", days)
+		fmt.Printf("No sessions found in the past %d days.%s", days, nl)
 		return
 	}
 
 	// Header
-	fmt.Printf("%sSession History%s (past %d days)\n\n", Bold, Reset, days)
+	fmt.Printf("%sSession History%s (past %d days)%s%s", Bold, Reset, days, nl, nl)
 
 	// Group sessions by date
 	var currentGroup string
@@ -29,10 +36,10 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 		// Print date header when group changes
 		if group != currentGroup {
 			if currentGroup != "" {
-				fmt.Println() // Empty line between groups
+				fmt.Print(nl) // Empty line between groups
 			}
-			fmt.Printf("%s━━━ %s %s%s\n", Dim, group, strings.Repeat("━", 60-len(group)), Reset)
-			fmt.Printf("%-27s %-10s %-10s %-6s %s\n", "PROJECT", "BRANCH", "DURATION", "MSGS", "CONTEXT")
+			fmt.Printf("%s━━━ %s %s%s%s", Dim, group, strings.Repeat("━", 60-len(group)), Reset, nl)
+			fmt.Printf("%-27s %-10s %-10s %-6s %s%s", "PROJECT", "BRANCH", "DURATION", "MSGS", "CONTEXT", nl)
 			currentGroup = group
 		}
 
@@ -45,23 +52,24 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 			context = "-"
 		}
 
-		fmt.Printf("%-27s %s%-10s%s %-10s %-6d %s\n",
+		fmt.Printf("%-27s %s%-10s%s %-10s %-6d %s%s",
 			truncate(s.Project, 27),
 			Gray, truncate(s.GitBranch, 10), Reset,
 			duration,
 			s.MessageCount,
-			truncate(context, 35))
+			truncate(context, 35),
+			nl)
 
 		totalDuration += s.Duration
 		totalSessions++
 	}
 
 	// Footer with totals
-	fmt.Printf("\n%s%s%s\n", Dim, strings.Repeat("─", 70), Reset)
-	fmt.Printf("%sTotal: %d sessions, %s%s\n", Dim, totalSessions, formatDuration(totalDuration), Reset)
+	fmt.Printf("%s%s%s%s%s", nl, Dim, strings.Repeat("─", 70), Reset, nl)
+	fmt.Printf("%sTotal: %d sessions, %s%s%s", Dim, totalSessions, formatDuration(totalDuration), Reset, nl)
 
 	if showFooter {
-		fmt.Printf("\n%sPress l: live view | Ctrl+C: quit%s\n", Dim, Reset)
+		fmt.Printf("%s%sl: live view | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
 }
 
