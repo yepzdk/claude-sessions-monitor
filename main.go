@@ -11,7 +11,6 @@ import (
 
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 	"github.com/itk-dev/claude-sessions-monitor/internal/ui"
-	"github.com/itk-dev/claude-sessions-monitor/internal/watcher"
 )
 
 var version = "dev"
@@ -22,12 +21,25 @@ func main() {
 	jsonOutput := flag.Bool("json", false, "Output as JSON (requires -l)")
 	showVersion := flag.Bool("v", false, "Show version")
 	interval := flag.Duration("interval", 2*time.Second, "Refresh interval for live view")
+	historyMode := flag.Bool("history", false, "Show session history")
+	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
 	flag.Parse()
 
 	// Handle version
 	if *showVersion {
 		fmt.Printf("csm version %s\n", version)
 		os.Exit(0)
+	}
+
+	// Handle history mode
+	if *historyMode {
+		sessions, err := session.DiscoverHistory(*historyDays)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error discovering history: %v\n", err)
+			os.Exit(1)
+		}
+		ui.RenderHistory(sessions, *historyDays, false)
+		return
 	}
 
 	// Handle list mode
@@ -53,29 +65,90 @@ func main() {
 	runLiveView(*interval)
 }
 
+// ViewMode represents the current display mode
+type ViewMode int
+
+const (
+	ViewModeLive ViewMode = iota
+	ViewModeHistory
+)
+
 func runLiveView(interval time.Duration) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigCh
-		cancel()
-	}()
+	// Set up keyboard input
+	if err := ui.SetupRawInput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error setting up keyboard input: %v\n", err)
+		os.Exit(1)
+	}
 
-	// Hide cursor and ensure we show it again on exit
+	// Start keyboard reader
+	keyCh := make(chan rune, 1)
+	done := make(chan struct{})
+	go ui.ReadKey(keyCh, done)
+
+	// Track current view mode
+	viewMode := ViewModeLive
+	historyDays := 7
+
+	// Hide cursor and ensure cleanup on exit
 	ui.HideCursor()
 	defer func() {
+		close(done)
+		ui.CleanupRawInput()
 		ui.ShowCursor()
 		ui.ResetTerminalTitle()
 		ui.ClearScreen()
 		fmt.Println("Goodbye!")
 	}()
 
-	// Start watching
-	w := watcher.New(interval)
-	w.Watch(ctx, func(sessions []session.Session) {
-		ui.RenderLive(sessions)
-	})
+	// Render function that respects current mode
+	render := func() {
+		if viewMode == ViewModeHistory {
+			ui.ClearScreen()
+			sessions, _ := session.DiscoverHistory(historyDays)
+			ui.RenderHistory(sessions, historyDays, true)
+		} else {
+			sessions, _ := session.Discover()
+			ui.RenderLive(sessions)
+		}
+	}
+
+	// Initial render
+	render()
+
+	// Main loop with both watcher and keyboard input
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-sigCh:
+			cancel()
+			return
+		case <-ctx.Done():
+			return
+		case key := <-keyCh:
+			switch key {
+			case 'h', 'H':
+				if viewMode != ViewModeHistory {
+					viewMode = ViewModeHistory
+					render()
+				}
+			case 'l', 'L':
+				if viewMode != ViewModeLive {
+					viewMode = ViewModeLive
+					render()
+				}
+			case 3: // Ctrl+C
+				cancel()
+				return
+			}
+		case <-ticker.C:
+			render()
+		}
+	}
 }

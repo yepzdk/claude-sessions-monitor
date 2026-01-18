@@ -121,7 +121,7 @@ func RenderLive(sessions []session.Session) {
 		}
 	}
 
-	fmt.Printf("\n%sPress Ctrl+C to quit%s\n", Dim, Reset)
+	fmt.Printf("\n%sh: history | Ctrl+C: quit%s\n", Dim, Reset)
 }
 
 // ClearScreen clears the terminal screen
