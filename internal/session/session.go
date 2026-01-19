@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -32,8 +34,16 @@ type Session struct {
 	Summary      string    `json:"summary,omitempty"`
 	LastMessage  string    `json:"last_message,omitempty"`
 	LogFile      string    `json:"-"`
-	ProjectPath  string    `json:"-"` // Full path to the project directory
-	IsDesktop    bool      `json:"is_desktop,omitempty"` // True if session appears to be from desktop app
+	ProjectPath  string    `json:"-"`                     // Full path to the project directory
+	IsDesktop    bool      `json:"is_desktop,omitempty"`  // True if session appears to be from desktop app
+	IsGhost      bool      `json:"is_ghost,omitempty"`    // True if process running but log is stale
+	GhostPID     int       `json:"ghost_pid,omitempty"`   // PID of the ghost process (for killing)
+}
+
+// RunningProcess represents a Claude process with its PID and working directory
+type RunningProcess struct {
+	PID int
+	Dir string // Encoded directory name
 }
 
 // LogEntry represents a single line in the JSONL log
@@ -64,10 +74,10 @@ func ClaudeProjectsDir() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-// getRunningClaudeDirs returns a set of encoded directory names where Claude processes are running
+// getRunningClaudeDirs returns a map of encoded directory names to PIDs where Claude processes are running
 // The keys are in the same format as the project directory names (e.g., -Users-username-Projects-...)
-func getRunningClaudeDirs() map[string]bool {
-	dirs := make(map[string]bool)
+func getRunningClaudeDirs() map[string]int {
+	dirs := make(map[string]int)
 
 	// Use ps to get Claude process IDs (more reliable than pgrep)
 	cmd := exec.Command("sh", "-c", "ps ax -o pid,comm | grep '[c]laude$' | awk '{print $1}'")
@@ -77,9 +87,15 @@ func getRunningClaudeDirs() map[string]bool {
 	}
 
 	pids := strings.Fields(string(output))
-	for _, pid := range pids {
+	for _, pidStr := range pids {
+		pid := 0
+		fmt.Sscanf(pidStr, "%d", &pid)
+		if pid == 0 {
+			continue
+		}
+
 		// Get cwd for each process using lsof
-		lsofCmd := exec.Command("lsof", "-p", pid)
+		lsofCmd := exec.Command("lsof", "-p", pidStr)
 		lsofOutput, err := lsofCmd.Output()
 		if err != nil {
 			continue
@@ -95,7 +111,7 @@ func getRunningClaudeDirs() map[string]bool {
 					path := string(fields[len(fields)-1])
 					// Convert to encoded format (same as project directory names)
 					encoded := encodeProjectPath(path)
-					dirs[encoded] = true
+					dirs[encoded] = pid
 				}
 			}
 		}
@@ -161,6 +177,7 @@ func Discover() ([]Session, error) {
 			continue
 		}
 
+		// Skip ghost processes when they have no recent activity and are truly stale
 		sessions = append(sessions, session)
 	}
 
@@ -240,7 +257,7 @@ func findMostRecentLog(dir string) (string, error) {
 }
 
 // parseSession parses a session from its log file
-func parseSession(projectName, logFile string, runningDirs map[string]bool) (Session, error) {
+func parseSession(projectName, logFile string, runningDirs map[string]int) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
 		LogFile:     logFile,
@@ -251,7 +268,7 @@ func parseSession(projectName, logFile string, runningDirs map[string]bool) (Ses
 
 	// Check if Claude is running in this project directory
 	// runningDirs keys are in the same encoded format as projectName
-	isRunning := runningDirs[projectName]
+	pid, isRunning := runningDirs[projectName]
 
 	// Get file modification time as fallback for last activity
 	info, err := os.Stat(logFile)
@@ -277,7 +294,12 @@ func parseSession(projectName, logFile string, runningDirs map[string]bool) (Ses
 	session.LastMessage = extractLastAssistantMessage(entries)
 
 	// Determine status from log entries
-	session.Status, session.Task = determineStatus(entries, isRunning)
+	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning)
+
+	// If it's a ghost process, store the PID for potential cleanup
+	if session.IsGhost && pid > 0 {
+		session.GhostPID = pid
+	}
 
 	// Get actual last activity timestamp from entries
 	for i := len(entries) - 1; i >= 0; i-- {
@@ -434,13 +456,19 @@ func readLastEntries(filePath string, count int) ([]LogEntry, error) {
 	return entries, scanner.Err()
 }
 
+// GhostThreshold is the duration after which a running process with no log activity
+// is considered a ghost (orphaned) process
+const GhostThreshold = 10 * time.Minute
+
 // determineStatus analyzes log entries to determine session status
-func determineStatus(entries []LogEntry, isRunning bool) (Status, string) {
+// Returns: status, task description, and whether this is a ghost process
+func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) {
 	if len(entries) == 0 {
 		if isRunning {
-			return StatusIdle, "-"
+			// Process running but no log entries - likely a ghost
+			return StatusInactive, "-", true
 		}
-		return StatusInactive, "-"
+		return StatusInactive, "-", false
 	}
 
 	var lastAssistant *LogEntry
@@ -479,12 +507,18 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string) {
 
 	// If Claude is not running, session is inactive
 	if !isRunning {
-		return StatusInactive, "-"
+		return StatusInactive, "-", false
 	}
 
-	// Check for idle (5+ minutes since last activity)
+	// Check for ghost process: running but log is very stale (> GhostThreshold)
+	if time.Since(lastTimestamp) > GhostThreshold {
+		// This is likely a ghost/orphaned process - mark as inactive with ghost flag
+		return StatusInactive, "-", true
+	}
+
+	// Check for idle (5+ minutes since last activity, but less than ghost threshold)
 	if time.Since(lastTimestamp) > 5*time.Minute {
-		return StatusIdle, "-"
+		return StatusIdle, "-", false
 	}
 
 	// Check if assistant ended with tool_use (needs approval)
@@ -497,13 +531,13 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string) {
 						if uc.Type == "tool_result" {
 							// Tool was approved, check if still working
 							if lastSystem != nil && lastSystem.Timestamp.After(lastUser.Timestamp) {
-								return StatusWaiting, "-"
+								return StatusWaiting, "-", false
 							}
-							return StatusWorking, "Processing..."
+							return StatusWorking, "Processing...", false
 						}
 					}
 				}
-				return StatusNeedsInput, "Using: " + content.Name
+				return StatusNeedsInput, "Using: " + content.Name, false
 			}
 		}
 	}
@@ -511,7 +545,7 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string) {
 	// Check if turn completed (system message with turn_duration)
 	if lastSystem != nil {
 		if lastAssistant == nil || lastSystem.Timestamp.After(lastAssistant.Timestamp) {
-			return StatusWaiting, "-"
+			return StatusWaiting, "-", false
 		}
 	}
 
@@ -519,11 +553,11 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string) {
 	if lastAssistant != nil {
 		task := extractTask(lastAssistant)
 		if time.Since(lastAssistant.Timestamp) < 30*time.Second {
-			return StatusWorking, task
+			return StatusWorking, task, false
 		}
 	}
 
-	return StatusWaiting, "-"
+	return StatusWaiting, "-", false
 }
 
 // extractTask extracts a task description from an assistant entry
@@ -551,4 +585,88 @@ func extractTask(entry *LogEntry) string {
 	}
 
 	return "-"
+}
+
+// GhostProcess represents an orphaned Claude process
+type GhostProcess struct {
+	PID     int
+	Project string
+	Age     time.Duration
+}
+
+// FindGhostProcesses returns a list of ghost (orphaned) Claude processes
+func FindGhostProcesses() ([]GhostProcess, error) {
+	sessions, err := Discover()
+	if err != nil {
+		return nil, err
+	}
+
+	var ghosts []GhostProcess
+	for _, s := range sessions {
+		if s.IsGhost && s.GhostPID > 0 {
+			ghosts = append(ghosts, GhostProcess{
+				PID:     s.GhostPID,
+				Project: s.Project,
+				Age:     time.Since(s.LastActivity),
+			})
+		}
+	}
+
+	return ghosts, nil
+}
+
+// KillGhostProcesses terminates all ghost Claude processes
+// Returns the number of processes killed and any errors
+func KillGhostProcesses() ([]GhostProcess, error) {
+	ghosts, err := FindGhostProcesses()
+	if err != nil {
+		return nil, err
+	}
+
+	var killed []GhostProcess
+	for _, ghost := range ghosts {
+		// Send SIGTERM to gracefully terminate the process
+		process, err := os.FindProcess(ghost.PID)
+		if err != nil {
+			continue
+		}
+
+		err = process.Signal(syscall.SIGTERM)
+		if err != nil {
+			// Process might already be gone
+			continue
+		}
+
+		killed = append(killed, ghost)
+	}
+
+	return killed, nil
+}
+
+// FormatAge formats a duration as a human-readable age string
+func FormatAge(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// GetGhostPIDs returns just the PIDs of ghost processes (for simple listing)
+func GetGhostPIDs() ([]int, error) {
+	ghosts, err := FindGhostProcesses()
+	if err != nil {
+		return nil, err
+	}
+
+	pids := make([]int, len(ghosts))
+	for i, g := range ghosts {
+		pids[i] = g.PID
+	}
+	return pids, nil
 }

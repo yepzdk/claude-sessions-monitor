@@ -23,12 +23,19 @@ func main() {
 	interval := flag.Duration("interval", 2*time.Second, "Refresh interval for live view")
 	historyMode := flag.Bool("history", false, "Show session history")
 	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
+	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
 	flag.Parse()
 
 	// Handle version
 	if *showVersion {
 		fmt.Printf("csm version %s\n", version)
 		os.Exit(0)
+	}
+
+	// Handle kill-ghosts mode
+	if *killGhosts {
+		handleKillGhosts()
+		return
 	}
 
 	// Handle history mode
@@ -150,5 +157,37 @@ func runLiveView(interval time.Duration) {
 		case <-ticker.C:
 			render()
 		}
+	}
+}
+
+// handleKillGhosts finds and terminates ghost Claude processes
+func handleKillGhosts() {
+	ghosts, err := session.FindGhostProcesses()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error finding ghost processes: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(ghosts) == 0 {
+		fmt.Println("No ghost processes found.")
+		return
+	}
+
+	fmt.Printf("Found %d ghost process(es):\n\n", len(ghosts))
+	for _, g := range ghosts {
+		fmt.Printf("  PID %d - %s (inactive for %s)\n", g.PID, g.Project, session.FormatAge(g.Age))
+	}
+	fmt.Println()
+
+	killed, err := session.KillGhostProcesses()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error killing ghost processes: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(killed) == 0 {
+		fmt.Println("No processes were terminated (they may have already exited).")
+	} else {
+		fmt.Printf("Terminated %d ghost process(es).\n", len(killed))
 	}
 }

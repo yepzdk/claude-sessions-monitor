@@ -18,6 +18,7 @@ const (
 	Green   = "\033[32m"
 	Yellow  = "\033[33m"
 	Blue    = "\033[34m"
+	Red     = "\033[31m"
 	Gray    = "\033[90m"
 	BgGreen = "\033[42m"
 )
@@ -29,6 +30,7 @@ const (
 	SymbolWaiting    = "◉"
 	SymbolIdle       = "○"
 	SymbolInactive   = "◌"
+	SymbolGhost      = "👻"
 )
 
 // RenderList renders sessions as a simple list (for -l flag)
@@ -79,10 +81,14 @@ func RenderLive(sessions []session.Session) {
 	// Header
 	fmt.Printf("%sClaude Code Sessions%s\r\n\r\n", Bold, Reset)
 
-	// Split sessions into active and inactive
+	// Split sessions into active, inactive, and ghost
 	var active, inactive []session.Session
+	var ghostCount int
 	for _, s := range sessions {
-		if s.Status == session.StatusInactive {
+		if s.IsGhost {
+			ghostCount++
+			inactive = append(inactive, s) // Ghosts are shown with inactive
+		} else if s.Status == session.StatusInactive {
 			inactive = append(inactive, s)
 		} else {
 			active = append(active, s)
@@ -95,7 +101,11 @@ func RenderLive(sessions []session.Session) {
 	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
 	fmt.Printf("%s%s Waiting: %d%s  ", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
 	fmt.Printf("%s%s Idle: %d%s  ", Gray, SymbolIdle, counts[session.StatusIdle], Reset)
-	fmt.Printf("%s%s Inactive: %d%s\r\n\r\n", Dim, SymbolInactive, len(inactive), Reset)
+	fmt.Printf("%s%s Inactive: %d%s", Dim, SymbolInactive, len(inactive)-ghostCount, Reset)
+	if ghostCount > 0 {
+		fmt.Printf("  %s%s Ghost: %d%s", Red, SymbolGhost, ghostCount, Reset)
+	}
+	fmt.Print("\r\n\r\n")
 
 	if len(active) == 0 {
 		fmt.Printf("%sNo active Claude sessions.%s\r\n", Dim, Reset)
@@ -122,7 +132,12 @@ func RenderLive(sessions []session.Session) {
 		}
 	}
 
-	fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
+	// Show help footer, with kill-ghosts hint if ghosts detected
+	if ghostCount > 0 {
+		fmt.Printf("\r\n%sh: history | Ctrl+C: quit | run 'csm --kill-ghosts' to terminate ghost processes%s\r\n", Dim, Reset)
+	} else {
+		fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
+	}
 }
 
 // ClearScreen clears the terminal screen
@@ -237,9 +252,18 @@ func truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-// formatProject formats the project name with optional desktop indicator
+// formatProject formats the project name with optional indicators
 func formatProject(s session.Session, maxLen int) string {
 	name := s.Project
+
+	// Ghost indicator takes priority (more important to show)
+	if s.IsGhost {
+		indicator := Red + " [ghost]" + Reset
+		// Account for indicator in truncation (8 visible chars)
+		truncated := truncate(name, maxLen-8)
+		return truncated + indicator
+	}
+
 	if s.IsDesktop {
 		// Add subtle desktop indicator
 		indicator := Dim + " [D]" + Reset
