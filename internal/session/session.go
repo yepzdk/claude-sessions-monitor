@@ -27,17 +27,19 @@ const (
 
 // Session represents a Claude Code session
 type Session struct {
-	Project      string    `json:"project"`
-	Status       Status    `json:"status"`
-	LastActivity time.Time `json:"last_activity"`
-	Task         string    `json:"task"`
-	Summary      string    `json:"summary,omitempty"`
-	LastMessage  string    `json:"last_message,omitempty"`
-	LogFile      string    `json:"-"`
-	ProjectPath  string    `json:"-"`                     // Full path to the project directory
-	IsDesktop    bool      `json:"is_desktop,omitempty"`  // True if session appears to be from desktop app
-	IsGhost      bool      `json:"is_ghost,omitempty"`    // True if process running but log is stale
-	GhostPID     int       `json:"ghost_pid,omitempty"`   // PID of the ghost process (for killing)
+	Project        string    `json:"project"`
+	Status         Status    `json:"status"`
+	LastActivity   time.Time `json:"last_activity"`
+	Task           string    `json:"task"`
+	Summary        string    `json:"summary,omitempty"`
+	LastMessage    string    `json:"last_message,omitempty"`
+	LogFile        string    `json:"-"`
+	ProjectPath    string    `json:"-"`                        // Full path to the project directory
+	IsDesktop      bool      `json:"is_desktop,omitempty"`     // True if session appears to be from desktop app
+	IsGhost        bool      `json:"is_ghost,omitempty"`       // True if process running but log is stale
+	GhostPID       int       `json:"ghost_pid,omitempty"`      // PID of the ghost process (for killing)
+	GitBranch      string    `json:"git_branch,omitempty"`     // Current git branch
+	HasUnsandboxed bool      `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
 }
 
 // RunningProcess represents a Claude process with its PID and working directory
@@ -53,6 +55,7 @@ type LogEntry struct {
 	Timestamp time.Time `json:"timestamp"`
 	Message   *Message  `json:"message,omitempty"`
 	Summary   string    `json:"summary,omitempty"` // For type: "summary" entries
+	GitBranch string    `json:"gitBranch,omitempty"`
 }
 
 // Message represents the message field in a log entry
@@ -63,9 +66,16 @@ type Message struct {
 
 // ContentItem represents an item in the content array
 type ContentItem struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-	Name string `json:"name,omitempty"` // For tool_use
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`  // For tool_use
+	Input json.RawMessage `json:"input,omitempty"` // For tool_use inputs
+}
+
+// BashToolInput represents the input for a Bash tool_use entry
+type BashToolInput struct {
+	Command                   string `json:"command"`
+	DangerouslyDisableSandbox bool   `json:"dangerouslyDisableSandbox"`
 }
 
 // ClaudeProjectsDir returns the path to the Claude projects directory
@@ -293,6 +303,12 @@ func parseSession(projectName, logFile string, runningDirs map[string]int) (Sess
 	// Extract last assistant message text
 	session.LastMessage = extractLastAssistantMessage(entries)
 
+	// Extract git branch (use most recent non-empty)
+	session.GitBranch = extractGitBranch(entries)
+
+	// Detect if any commands ran without sandbox
+	session.HasUnsandboxed = detectUnsandboxedCommands(entries)
+
 	// Determine status from log entries
 	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning)
 
@@ -381,6 +397,36 @@ func extractLastAssistantMessage(entries []LogEntry) string {
 	return ""
 }
 
+// extractGitBranch extracts the most recent git branch from entries
+func extractGitBranch(entries []LogEntry) string {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].GitBranch != "" {
+			return entries[i].GitBranch
+		}
+	}
+	return ""
+}
+
+// detectUnsandboxedCommands checks if any Bash commands ran with sandbox disabled
+func detectUnsandboxedCommands(entries []LogEntry) bool {
+	for _, entry := range entries {
+		if entry.Type != "assistant" || entry.Message == nil {
+			continue
+		}
+		for _, content := range entry.Message.Content {
+			if content.Type == "tool_use" && content.Name == "Bash" && len(content.Input) > 0 {
+				var input BashToolInput
+				if json.Unmarshal(content.Input, &input) == nil {
+					if input.DangerouslyDisableSandbox {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // decodeProjectName converts the directory name to a readable project name
 func decodeProjectName(name string) string {
 	// Format: -Users-username-Projects-org-project
@@ -430,9 +476,9 @@ func readLastEntries(filePath string, count int) ([]LogEntry, error) {
 
 	var entries []LogEntry
 	scanner := bufio.NewScanner(file)
-	// Increase buffer size for long lines
+	// Increase buffer size for very long lines (some entries can be several MB)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024) // 10MB max
 
 	for scanner.Scan() {
 		line := scanner.Text()

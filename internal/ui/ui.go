@@ -255,21 +255,45 @@ func truncate(s string, max int) string {
 // formatProject formats the project name with optional indicators
 func formatProject(s session.Session, maxLen int) string {
 	name := s.Project
+	var suffixes []string
+	suffixLen := 0
 
-	// Ghost indicator takes priority (more important to show)
+	// Add git branch if present (show first, most useful)
+	if s.GitBranch != "" {
+		branch := s.GitBranch
+		if len(branch) > 12 {
+			branch = branch[:12]
+		}
+		suffixes = append(suffixes, Dim+"@"+branch+Reset)
+		suffixLen += 1 + len(branch) // @branch
+	}
+
+	// Ghost indicator (highest priority warning)
 	if s.IsGhost {
-		indicator := Red + " [ghost]" + Reset
-		// Account for indicator in truncation (8 visible chars)
-		truncated := truncate(name, maxLen-8)
-		return truncated + indicator
+		suffixes = append(suffixes, Red+"[ghost]"+Reset)
+		suffixLen += 8 // " [ghost]"
 	}
 
-	if s.IsDesktop {
-		// Add subtle desktop indicator
-		indicator := Dim + " [D]" + Reset
-		// Account for indicator in truncation (4 visible chars)
-		truncated := truncate(name, maxLen-4)
-		return truncated + indicator
+	// Unsandboxed indicator (security warning)
+	if s.HasUnsandboxed {
+		suffixes = append(suffixes, Yellow+"[!S]"+Reset)
+		suffixLen += 5 // " [!S]"
 	}
-	return truncate(name, maxLen)
+
+	// Desktop indicator (lowest priority)
+	if s.IsDesktop {
+		suffixes = append(suffixes, Dim+"[D]"+Reset)
+		suffixLen += 4 // " [D]"
+	}
+
+	// Truncate name to fit with suffixes
+	truncated := truncate(name, maxLen-suffixLen-len(suffixes)) // -len for spaces
+
+	// Build result
+	result := truncated
+	for _, suffix := range suffixes {
+		result += " " + suffix
+	}
+
+	return result
 }
