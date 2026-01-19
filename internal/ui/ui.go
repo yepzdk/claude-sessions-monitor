@@ -30,7 +30,6 @@ const (
 	SymbolWaiting    = "◉"
 	SymbolIdle       = "○"
 	SymbolInactive   = "◌"
-	SymbolGhost      = "👻"
 )
 
 // RenderList renders sessions as a simple list (for -l flag)
@@ -81,14 +80,10 @@ func RenderLive(sessions []session.Session) {
 	// Header
 	fmt.Printf("%sClaude Code Sessions%s\r\n\r\n", Bold, Reset)
 
-	// Split sessions into active, inactive, and ghost
+	// Split sessions into active and inactive (ghosts are included in inactive)
 	var active, inactive []session.Session
-	var ghostCount int
 	for _, s := range sessions {
-		if s.IsGhost {
-			ghostCount++
-			inactive = append(inactive, s) // Ghosts are shown with inactive
-		} else if s.Status == session.StatusInactive {
+		if s.IsGhost || s.Status == session.StatusInactive {
 			inactive = append(inactive, s)
 		} else {
 			active = append(active, s)
@@ -101,10 +96,7 @@ func RenderLive(sessions []session.Session) {
 	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
 	fmt.Printf("%s%s Waiting: %d%s  ", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
 	fmt.Printf("%s%s Idle: %d%s  ", Gray, SymbolIdle, counts[session.StatusIdle], Reset)
-	fmt.Printf("%s%s Inactive: %d%s", Dim, SymbolInactive, len(inactive)-ghostCount, Reset)
-	if ghostCount > 0 {
-		fmt.Printf("  %s%s Ghost: %d%s", Red, SymbolGhost, ghostCount, Reset)
-	}
+	fmt.Printf("%s%s Inactive: %d%s", Dim, SymbolInactive, len(inactive), Reset)
 	fmt.Print("\r\n\r\n")
 
 	if len(active) == 0 {
@@ -132,12 +124,8 @@ func RenderLive(sessions []session.Session) {
 		}
 	}
 
-	// Show help footer, with kill-ghosts hint if ghosts detected
-	if ghostCount > 0 {
-		fmt.Printf("\r\n%sh: history | Ctrl+C: quit | run 'csm --kill-ghosts' to terminate ghost processes%s\r\n", Dim, Reset)
-	} else {
-		fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
-	}
+	// Show help footer
+	fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
 }
 
 // ClearScreen clears the terminal screen
