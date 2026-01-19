@@ -139,16 +139,11 @@ func encodeProjectPath(path string) string {
 // isDesktopSession checks if the project path appears to be from the desktop app
 // Desktop app sessions typically have cwd at the home directory (e.g., -Users-username)
 func isDesktopSession(projectName string) bool {
-	// Remove leading dash
-	name := strings.TrimPrefix(projectName, "-")
-	parts := strings.Split(name, "-")
-
-	// Desktop sessions are typically just home directory: Users-username (2 parts)
-	// or Users-username- with trailing dash (still 2 meaningful parts)
-	if len(parts) <= 2 && len(parts) >= 1 && parts[0] == "Users" {
-		return true
-	}
-
+	// NOTE: Desktop detection is disabled because the previous heuristic
+	// (home directory = desktop) was unreliable - terminal sessions can also
+	// be started from the home directory.
+	// TODO: Find a more reliable detection method (e.g., check parent process)
+	_ = projectName
 	return false
 }
 
@@ -556,25 +551,19 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 		return StatusInactive, "-", false
 	}
 
-	// Check for ghost process: running but log is very stale (> GhostThreshold)
-	if time.Since(lastTimestamp) > GhostThreshold {
-		// This is likely a ghost/orphaned process - mark as inactive with ghost flag
-		return StatusInactive, "-", true
-	}
-
-	// Check for idle (5+ minutes since last activity, but less than ghost threshold)
-	if time.Since(lastTimestamp) > 5*time.Minute {
-		return StatusIdle, "-", false
-	}
-
-	// Check if assistant ended with tool_use (needs approval)
+	// Check if assistant ended with tool_use (needs approval) - BEFORE ghost check
+	// A session waiting for user input is NOT a ghost, even if stale
+	hasPendingToolUse := false
+	pendingToolName := ""
 	if lastAssistant != nil && lastAssistant.Message != nil {
 		for _, content := range lastAssistant.Message.Content {
 			if content.Type == "tool_use" {
 				// Check if there's a corresponding tool_result after
+				hasToolResult := false
 				if lastUser != nil && lastUser.Timestamp.After(lastAssistant.Timestamp) {
 					for _, uc := range lastUser.Message.Content {
 						if uc.Type == "tool_result" {
+							hasToolResult = true
 							// Tool was approved, check if still working
 							if lastSystem != nil && lastSystem.Timestamp.After(lastUser.Timestamp) {
 								return StatusWaiting, "-", false
@@ -583,9 +572,30 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 						}
 					}
 				}
-				return StatusNeedsInput, "Using: " + content.Name, false
+				if !hasToolResult {
+					hasPendingToolUse = true
+					pendingToolName = content.Name
+				}
+				break
 			}
 		}
+	}
+
+	// If there's a pending tool_use, session is waiting for input (not ghost/idle)
+	if hasPendingToolUse {
+		return StatusNeedsInput, "Using: " + pendingToolName, false
+	}
+
+	// Check for ghost process: running but log is very stale (> GhostThreshold)
+	// Only applies if there's no pending user action
+	if time.Since(lastTimestamp) > GhostThreshold {
+		// This is likely a ghost/orphaned process - mark as inactive with ghost flag
+		return StatusInactive, "-", true
+	}
+
+	// Check for idle (5+ minutes since last activity, but less than ghost threshold)
+	if time.Since(lastTimestamp) > 5*time.Minute {
+		return StatusIdle, "-", false
 	}
 
 	// Check if turn completed (system message with turn_duration)
