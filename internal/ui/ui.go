@@ -44,7 +44,6 @@ func RenderList(sessions []session.Session) {
 	fmt.Println(strings.Repeat("─", 100))
 
 	for _, s := range sessions {
-		symbol, color := getStatusDisplay(s.Status)
 		elapsed := formatElapsed(time.Since(s.LastActivity))
 
 		// Use last message if available, otherwise task
@@ -53,8 +52,8 @@ func RenderList(sessions []session.Session) {
 			desc = s.Task
 		}
 
-		fmt.Printf("%s%s %-13s%s %s %-15s %s\n",
-			color, symbol, s.Status, Reset,
+		fmt.Printf("%s %s %-15s %s\n",
+			formatStatus(s.Status, 14),
 			formatProject(s, 35),
 			elapsed,
 			truncate(desc, 40))
@@ -107,7 +106,6 @@ func RenderLive(sessions []session.Session) {
 		fmt.Printf("%s\r\n", strings.Repeat("─", 95))
 
 		for _, s := range active {
-			symbol, color := getStatusDisplay(s.Status)
 			elapsed := formatElapsed(time.Since(s.LastActivity))
 
 			// Use last message if available, otherwise task
@@ -116,8 +114,8 @@ func RenderLive(sessions []session.Session) {
 				desc = s.Task
 			}
 
-			fmt.Printf("%s%s %-13s%s %s %-15s %s\r\n",
-				color, symbol, s.Status, Reset,
+			fmt.Printf("%s %s %-15s %s\r\n",
+				formatStatus(s.Status, 14),
 				formatProject(s, 35),
 				elapsed,
 				truncate(desc, 35))
@@ -203,6 +201,20 @@ func getStatusDisplay(status session.Status) (string, string) {
 	}
 }
 
+// formatStatus formats the status cell with symbol and padding to exact width
+func formatStatus(status session.Status, width int) string {
+	symbol, color := getStatusDisplay(status)
+	text := symbol + " " + string(status)
+	visibleLen := 2 + len(string(status)) // symbol(1) + space(1) + status text
+
+	// Pad to width
+	if visibleLen < width {
+		text += strings.Repeat(" ", width-visibleLen)
+	}
+
+	return color + text + Reset
+}
+
 // countByStatus counts sessions by their status
 func countByStatus(sessions []session.Session) map[session.Status]int {
 	counts := make(map[session.Status]int)
@@ -244,7 +256,7 @@ func truncate(s string, max int) string {
 func formatProject(s session.Session, maxLen int) string {
 	name := s.Project
 	var suffixes []string
-	suffixLen := 0
+	var suffixLens []int // visible length of each suffix (excluding space)
 
 	// Add git branch if present (show first, most useful)
 	if s.GitBranch != "" {
@@ -253,38 +265,43 @@ func formatProject(s session.Session, maxLen int) string {
 			branch = branch[:12]
 		}
 		suffixes = append(suffixes, Dim+"@"+branch+Reset)
-		suffixLen += 1 + len(branch) // @branch
+		suffixLens = append(suffixLens, 1+len(branch)) // @branch
 	}
 
 	// Ghost indicator (highest priority warning)
 	if s.IsGhost {
 		suffixes = append(suffixes, Red+"[ghost]"+Reset)
-		suffixLen += 8 // " [ghost]"
+		suffixLens = append(suffixLens, 7) // [ghost]
 	}
 
 	// Unsandboxed indicator (security warning)
 	if s.HasUnsandboxed {
 		suffixes = append(suffixes, Yellow+"[!S]"+Reset)
-		suffixLen += 5 // " [!S]"
+		suffixLens = append(suffixLens, 4) // [!S]
 	}
 
 	// Desktop indicator (lowest priority)
 	if s.IsDesktop {
 		suffixes = append(suffixes, Dim+"[D]"+Reset)
-		suffixLen += 4 // " [D]"
+		suffixLens = append(suffixLens, 3) // [D]
 	}
 
-	// Truncate name to fit with suffixes
-	truncated := truncate(name, maxLen-suffixLen-len(suffixes)) // -len for spaces
+	// Calculate total suffix visible length (indicators + spaces)
+	totalSuffixLen := 0
+	for _, l := range suffixLens {
+		totalSuffixLen += 1 + l // space + indicator
+	}
+
+	// Truncate name to fit
+	truncated := truncate(name, maxLen-totalSuffixLen)
 	visibleLen := len(truncated)
 
 	// Build result
 	result := truncated
-	for _, suffix := range suffixes {
+	for i, suffix := range suffixes {
 		result += " " + suffix
-		visibleLen++ // space before suffix
+		visibleLen += 1 + suffixLens[i] // space + indicator visible length
 	}
-	visibleLen += suffixLen
 
 	// Pad to maxLen with spaces (ANSI codes don't count for visual width)
 	if visibleLen < maxLen {
