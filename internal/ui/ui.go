@@ -53,7 +53,7 @@ func RenderList(sessions []session.Session) {
 			desc = s.Task
 		}
 
-		fmt.Printf("%s%s %-13s%s %-35s %-15s %s\n",
+		fmt.Printf("%s%s %-13s%s %s %-15s %s\n",
 			color, symbol, s.Status, Reset,
 			formatProject(s, 35),
 			elapsed,
@@ -116,7 +116,7 @@ func RenderLive(sessions []session.Session) {
 				desc = s.Task
 			}
 
-			fmt.Printf("%s%s %-13s%s %-35s %-15s %s\r\n",
+			fmt.Printf("%s%s %-13s%s %s %-15s %s\r\n",
 				color, symbol, s.Status, Reset,
 				formatProject(s, 35),
 				elapsed,
@@ -240,7 +240,7 @@ func truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-// formatProject formats the project name with optional indicators
+// formatProject formats the project name with optional indicators, padded to maxLen visible chars
 func formatProject(s session.Session, maxLen int) string {
 	name := s.Project
 	var suffixes []string
@@ -276,11 +276,19 @@ func formatProject(s session.Session, maxLen int) string {
 
 	// Truncate name to fit with suffixes
 	truncated := truncate(name, maxLen-suffixLen-len(suffixes)) // -len for spaces
+	visibleLen := len(truncated)
 
 	// Build result
 	result := truncated
 	for _, suffix := range suffixes {
 		result += " " + suffix
+		visibleLen++ // space before suffix
+	}
+	visibleLen += suffixLen
+
+	// Pad to maxLen with spaces (ANSI codes don't count for visual width)
+	if visibleLen < maxLen {
+		result += strings.Repeat(" ", maxLen-visibleLen)
 	}
 
 	return result
