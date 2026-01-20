@@ -307,8 +307,8 @@ func parseSession(projectName, logFile string, runningDirs map[string]int) (Sess
 	// Determine status from log entries
 	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning)
 
-	// If it's a ghost process, store the PID for potential cleanup
-	if session.IsGhost && pid > 0 {
+	// Store PID for all running sessions (used by --kill-ghosts)
+	if isRunning && pid > 0 {
 		session.GhostPID = pid
 	}
 
@@ -506,8 +506,8 @@ const GhostThreshold = 10 * time.Minute
 func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) {
 	if len(entries) == 0 {
 		if isRunning {
-			// Process running but no log entries - likely a ghost
-			return StatusInactive, "-", true
+			// Process running but no log entries - new session starting up
+			return StatusWaiting, "-", false
 		}
 		return StatusInactive, "-", false
 	}
@@ -586,16 +586,11 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 		return StatusNeedsInput, "Using: " + pendingToolName, false
 	}
 
-	// Check for ghost process: running but log is very stale (> GhostThreshold)
-	// Only applies if there's no pending user action
-	if time.Since(lastTimestamp) > GhostThreshold {
-		// This is likely a ghost/orphaned process - mark as inactive with ghost flag
-		return StatusInactive, "-", true
-	}
-
-	// Check for idle (5+ minutes since last activity, but less than ghost threshold)
+	// If process is running but log is stale, it's Waiting (not ghost)
+	// The user may be away or thinking - this is a valid active session
+	// Ghost detection is only for --kill-ghosts to find truly orphaned processes
 	if time.Since(lastTimestamp) > 5*time.Minute {
-		return StatusIdle, "-", false
+		return StatusWaiting, "-", false
 	}
 
 	// Check if turn completed (system message with turn_duration)
@@ -650,7 +645,8 @@ type GhostProcess struct {
 	Age     time.Duration
 }
 
-// FindGhostProcesses returns a list of ghost (orphaned) Claude processes
+// FindGhostProcesses returns a list of potentially orphaned Claude processes
+// Uses a 1-hour threshold to identify processes with no recent log activity
 func FindGhostProcesses() ([]GhostProcess, error) {
 	sessions, err := Discover()
 	if err != nil {
@@ -659,11 +655,17 @@ func FindGhostProcesses() ([]GhostProcess, error) {
 
 	var ghosts []GhostProcess
 	for _, s := range sessions {
-		if s.IsGhost && s.GhostPID > 0 {
+		// Only consider sessions with a running process
+		if s.GhostPID == 0 {
+			continue
+		}
+		// Check if log is stale (> 1 hour since last activity)
+		age := time.Since(s.LastActivity)
+		if age > time.Hour {
 			ghosts = append(ghosts, GhostProcess{
 				PID:     s.GhostPID,
 				Project: s.Project,
-				Age:     time.Since(s.LastActivity),
+				Age:     age,
 			})
 		}
 	}

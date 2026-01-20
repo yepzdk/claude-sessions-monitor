@@ -23,10 +23,10 @@ const (
 	BgGreen = "\033[42m"
 )
 
-// Status symbols
+// Status symbols (all narrow/single-column width for consistent alignment)
 const (
 	SymbolWorking    = "●"
-	SymbolNeedsInput = "⚠"
+	SymbolNeedsInput = "▲"
 	SymbolWaiting    = "◉"
 	SymbolIdle       = "○"
 	SymbolInactive   = "◌"
@@ -53,7 +53,7 @@ func RenderList(sessions []session.Session) {
 		}
 
 		fmt.Printf("%s %s %-15s %s\n",
-			formatStatus(s.Status, 14),
+			formatStatus(s.Status, 15),
 			formatProject(s, 35),
 			elapsed,
 			truncate(desc, 40))
@@ -115,7 +115,7 @@ func RenderLive(sessions []session.Session) {
 			}
 
 			fmt.Printf("%s %s %-15s %s\r\n",
-				formatStatus(s.Status, 14),
+				formatStatus(s.Status, 15),
 				formatProject(s, 35),
 				elapsed,
 				truncate(desc, 35))
