@@ -3,3 +3,5 @@ csm
 
 # Build artifacts
 dist/
+claude-sessions-monitor
+csm
