@@ -57,18 +57,15 @@ The `main` branch is protected:
 
 Releases are fully automated. When a PR is merged to `main`:
 
-1. **Auto-tagging** (`.github/workflows/auto-tag.yaml`):
+1. **Auto Tag and Release** (`.github/workflows/auto-tag.yaml`):
    - Triggers on push to `main` branch
    - Gets the latest tag and increments the patch version (e.g., v0.3.8 → v0.3.9)
    - Creates and pushes the new tag
-
-2. **Release build** (`.github/workflows/release.yaml`):
-   - Triggers on the new tag push
    - Builds binaries for darwin/linux × amd64/arm64
    - Creates GitHub release with binaries attached
    - Sends `repository_dispatch` event to `yepzdk/homebrew-tools`
 
-3. **Homebrew tap update** (`yepzdk/homebrew-tools`):
+2. **Homebrew tap update** (`yepzdk/homebrew-tools`):
    - Workflow triggers on `repository_dispatch` with type `update-csm`
    - Downloads the new binaries and calculates SHA256 hashes
    - Updates `Formula/csm.rb` with new version and hashes
@@ -76,14 +73,15 @@ Releases are fully automated. When a PR is merged to `main`:
 
 ### Manual Version Bumps
 
-For major or minor version changes, manually create a tag before merging:
+For major or minor version changes, manually push a tag:
 
 ```bash
 git tag v1.0.0  # or v0.4.0 for minor bump
 git push origin v1.0.0
 ```
 
-The auto-tag workflow will then continue from that version for subsequent patch releases.
+This triggers `.github/workflows/release.yaml` which builds and releases.
+The auto-tag workflow will continue from that version for subsequent patch releases.
 
 ### Troubleshooting releases
 
