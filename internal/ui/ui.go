@@ -93,9 +93,7 @@ func RenderLive(sessions []session.Session) {
 	counts := countByStatus(active)
 	fmt.Printf("%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
 	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
-	fmt.Printf("%s%s Waiting: %d%s  ", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
-	fmt.Printf("%s%s Idle: %d%s  ", Gray, SymbolIdle, counts[session.StatusIdle], Reset)
-	fmt.Printf("%s%s Inactive: %d%s", Dim, SymbolInactive, len(inactive), Reset)
+	fmt.Printf("%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
 	fmt.Print("\r\n\r\n")
 
 	if len(active) == 0 {
@@ -167,12 +165,12 @@ func ResetTerminalTitle() {
 func buildTerminalTitle(sessions []session.Session) string {
 	counts := make(map[session.Status]int)
 	for _, s := range sessions {
-		if s.Status != session.StatusInactive {
+		if s.Status != session.StatusInactive && !s.IsGhost {
 			counts[s.Status]++
 		}
 	}
 
-	// Priority: Needs Input > Working > Waiting > Idle
+	// Priority: Needs Input > Working > Waiting
 	var parts []string
 
 	if n := counts[session.StatusNeedsInput]; n > 0 {
@@ -183,9 +181,6 @@ func buildTerminalTitle(sessions []session.Session) string {
 	}
 	if n := counts[session.StatusWaiting]; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d waiting", n))
-	}
-	if n := counts[session.StatusIdle]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d idle", n))
 	}
 
 	if len(parts) == 0 {
