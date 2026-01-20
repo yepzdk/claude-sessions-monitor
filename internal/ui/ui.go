@@ -142,8 +142,20 @@ func ShowCursor() {
 }
 
 // SetTerminalTitle sets the terminal tab/window title
+// The title is sanitized to prevent terminal escape sequence injection
 func SetTerminalTitle(title string) {
-	fmt.Printf("\033]0;%s\007", title)
+	fmt.Printf("\033]0;%s\007", sanitizeForTerminal(title))
+}
+
+// sanitizeForTerminal removes control characters that could be used
+// for terminal escape sequence injection attacks
+func sanitizeForTerminal(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1 // Remove control characters
+		}
+		return r
+	}, s)
 }
 
 // ResetTerminalTitle resets the terminal title to default
