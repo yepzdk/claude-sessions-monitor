@@ -19,30 +19,71 @@ internal/
 main.go     - CLI entry point and flag handling
 ```
 
-## Release Workflow
+## Development Workflow
 
-### How to release a new version
+### Branch Protection
 
-1. Commit your changes to `main`
-2. Create and push a version tag:
+The `main` branch is protected:
+- Direct pushes are not allowed
+- All changes must go through pull requests
+- PRs must be reviewed before merging
+
+### Making Changes
+
+1. Create a feature branch from `main`:
    ```bash
-   git tag v0.x.x
-   git push origin v0.x.x
+   git checkout main
+   git pull origin main
+   git checkout -b feature/your-feature-name
    ```
 
-### What happens automatically
+2. Make your changes and commit:
+   ```bash
+   git add .
+   git commit -m "Description of changes"
+   ```
 
-1. **GitHub Actions** (`.github/workflows/release.yaml`):
-   - Triggers on tag push matching `v*`
+3. Push and create a pull request:
+   ```bash
+   git push -u origin feature/your-feature-name
+   gh pr create
+   ```
+
+4. After review, merge the PR to `main`
+
+## Release Workflow
+
+### Automatic Releases (Recommended)
+
+Releases are fully automated. When a PR is merged to `main`:
+
+1. **Auto-tagging** (`.github/workflows/auto-tag.yaml`):
+   - Triggers on push to `main` branch
+   - Gets the latest tag and increments the patch version (e.g., v0.3.8 → v0.3.9)
+   - Creates and pushes the new tag
+
+2. **Release build** (`.github/workflows/release.yaml`):
+   - Triggers on the new tag push
    - Builds binaries for darwin/linux × amd64/arm64
    - Creates GitHub release with binaries attached
    - Sends `repository_dispatch` event to `yepzdk/homebrew-tools`
 
-2. **Homebrew tap update** (`yepzdk/homebrew-tools`):
+3. **Homebrew tap update** (`yepzdk/homebrew-tools`):
    - Workflow triggers on `repository_dispatch` with type `update-csm`
    - Downloads the new binaries and calculates SHA256 hashes
    - Updates `Formula/csm.rb` with new version and hashes
    - Commits and pushes automatically
+
+### Manual Version Bumps
+
+For major or minor version changes, manually create a tag before merging:
+
+```bash
+git tag v1.0.0  # or v0.4.0 for minor bump
+git push origin v1.0.0
+```
+
+The auto-tag workflow will then continue from that version for subsequent patch releases.
 
 ### Troubleshooting releases
 
