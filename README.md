@@ -5,9 +5,13 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 ## Features
 
 - **Live dashboard** showing all active Claude Code sessions
+- **History view** to browse past sessions with activity summaries
 - **Process detection** distinguishes running vs inactive sessions
+- **Ghost detection** identifies orphaned Claude processes
 - **Last message display** shows recent Claude responses
-- **Status indicators**: Working, Needs Input, Waiting, Idle, Inactive
+- **Git branch display** shows current branch for each session
+- **Status indicators**: Working, Needs Input, Waiting
+- **Session badges**: Desktop [D], Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
 
@@ -44,6 +48,15 @@ csm -l
 # Output as JSON
 csm -l -json
 
+# Show session history (last 7 days)
+csm -history
+
+# Show session history for last 30 days
+csm -history -days 30
+
+# Find and kill ghost (orphaned) processes
+csm -kill-ghosts
+
 # Custom refresh interval
 csm -interval 5s
 
@@ -51,31 +64,36 @@ csm -interval 5s
 csm -v
 ```
 
+### Keyboard shortcuts (live view)
+
+| Key | Action |
+|-----|--------|
+| `h` | Switch to history view |
+| `l` | Switch to live view |
+| `Ctrl+C` | Quit |
+
 ## Status Types
 
 | Symbol | Status | Description |
 |--------|--------|-------------|
 | ● | Working | Session is actively processing |
-| ⚠ | Needs Input | Waiting for user to approve a tool use |
+| ▲ | Needs Input | Waiting for user to approve a tool use |
 | ◉ | Waiting | Turn completed, waiting for next prompt |
-| ○ | Idle | Claude running but no activity for 5+ minutes |
-| ◌ | Inactive | No Claude process running for this project |
+| ◌ | Inactive | No Claude process running (shown in history) |
 
 ## Screenshot
 
 ```
 Claude Code Sessions
 
-● Working: 1  ⚠ Needs Input: 1  ◉ Waiting: 0  ○ Idle: 2  ◌ Inactive: 5
+● Working: 1  ▲ Needs Input: 1  ◉ Waiting: 0
 
 STATUS          PROJECT                             LAST ACTIVITY   LAST MESSAGE
 ───────────────────────────────────────────────────────────────────────────────────────────
-● Working       myorg/api-server                    5s ago          Implementing auth middleware
-⚠ Needs Input   work/claude-sessions-monitor        12s ago         Let me check the git status
-○ Idle          personal/side-project               8m ago          Done. The tests are passing.
-○ Idle          work/frontend                       12m ago         I've updated the component.
+● Working       myorg/api-server @main              5s ago          Implementing auth middleware
+▲ Needs Input   work/claude-sessions-monitor @feat  12s ago         Let me check the git status
 
-Press Ctrl+C to quit
+h: history | Ctrl+C: quit
 ```
 
 ## Building
