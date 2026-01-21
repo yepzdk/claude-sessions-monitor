@@ -133,7 +133,10 @@ func getRunningClaudeDirs() map[string]int {
 // encodeProjectPath converts a filesystem path to the encoded directory name format
 func encodeProjectPath(path string) string {
 	// /Users/username/Projects/org/project -> -Users-username-Projects-org-project
-	return strings.ReplaceAll(path, "/", "-")
+	// Also replace dots with dashes (Claude's encoding scheme)
+	encoded := strings.ReplaceAll(path, "/", "-")
+	encoded = strings.ReplaceAll(encoded, ".", "-")
+	return encoded
 }
 
 // isDesktopSession checks if the project path appears to be from the desktop app
