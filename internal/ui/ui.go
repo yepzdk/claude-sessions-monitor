@@ -39,25 +39,22 @@ func RenderList(sessions []session.Session) {
 		return
 	}
 
+	l := calcSessionLayout(getTerminalWidth())
+
 	// Header
-	fmt.Printf("%-15s %-35s %-16s %-15s %s\n", "STATUS", "PROJECT", "CONTEXT", "LAST ACTIVITY", "LAST MESSAGE")
-	fmt.Println(strings.Repeat("─", 115))
+	header := fmt.Sprintf("%-*s %-*s %-*s %-*s",
+		l.status, "STATUS",
+		l.project, "PROJECT",
+		l.context, "CONTEXT",
+		l.activity, "LAST ACTIVITY")
+	if l.showMessage {
+		header += fmt.Sprintf(" %s", "LAST MESSAGE")
+	}
+	fmt.Println(header)
+	fmt.Println(strings.Repeat("─", l.totalWidth))
 
 	for _, s := range sessions {
-		elapsed := formatElapsed(time.Since(s.LastActivity))
-
-		// Use last message if available, otherwise task
-		desc := s.LastMessage
-		if desc == "" {
-			desc = s.Task
-		}
-
-		fmt.Printf("%s %s %s %-15s %s\n",
-			formatStatus(s.Status, 15),
-			formatProject(s, 35),
-			formatContext(s, 16),
-			elapsed,
-			truncate(desc, 40))
+		renderSessionRow(s, l, "\n")
 	}
 }
 
@@ -100,25 +97,22 @@ func RenderLive(sessions []session.Session) {
 	if len(active) == 0 {
 		fmt.Printf("%sNo active Claude sessions.%s\r\n", Dim, Reset)
 	} else {
+		l := calcSessionLayout(getTerminalWidth())
+
 		// Column headers
-		fmt.Printf("%-15s %-35s %-16s %-15s %s\r\n", "STATUS", "PROJECT", "CONTEXT", "LAST ACTIVITY", "LAST MESSAGE")
-		fmt.Printf("%s\r\n", strings.Repeat("─", 115))
+		header := fmt.Sprintf("%-*s %-*s %-*s %-*s",
+			l.status, "STATUS",
+			l.project, "PROJECT",
+			l.context, "CONTEXT",
+			l.activity, "LAST ACTIVITY")
+		if l.showMessage {
+			header += fmt.Sprintf(" %s", "LAST MESSAGE")
+		}
+		fmt.Printf("%s\r\n", header)
+		fmt.Printf("%s\r\n", strings.Repeat("─", l.totalWidth))
 
 		for i, s := range active {
-			elapsed := formatElapsed(time.Since(s.LastActivity))
-
-			// Use last message if available, otherwise task
-			desc := s.LastMessage
-			if desc == "" {
-				desc = s.Task
-			}
-
-			fmt.Printf("%s %s %s %-15s %s\r\n",
-				formatStatus(s.Status, 15),
-				formatProject(s, 35),
-				formatContext(s, 16),
-				elapsed,
-				truncate(desc, 35))
+			renderSessionRow(s, l, "\r\n")
 
 			// Add spacing between rows so progress bars don't merge visually
 			if i < len(active)-1 {
@@ -257,6 +251,9 @@ func formatElapsed(d time.Duration) string {
 
 // truncate truncates a string to a maximum length
 func truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
 	}
@@ -319,6 +316,28 @@ func formatContext(s session.Session, width int) string {
 	return bar
 }
 
+// renderSessionRow renders a single session row using the given layout.
+func renderSessionRow(s session.Session, l sessionLayout, nl string) {
+	elapsed := formatElapsed(time.Since(s.LastActivity))
+
+	desc := s.LastMessage
+	if desc == "" {
+		desc = s.Task
+	}
+
+	row := fmt.Sprintf("%s %s %s %-*s",
+		formatStatus(s.Status, l.status),
+		formatProject(s, l.project),
+		formatContext(s, l.context),
+		l.activity, elapsed)
+
+	if l.showMessage {
+		row += " " + truncate(desc, l.message-1)
+	}
+
+	fmt.Print(row + nl)
+}
+
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars
 func formatProject(s session.Session, maxLen int) string {
 	name := s.Project
@@ -353,14 +372,25 @@ func formatProject(s session.Session, maxLen int) string {
 		suffixLens = append(suffixLens, 3) // [D]
 	}
 
-	// Calculate total suffix visible length (indicators + spaces)
+	// Drop suffixes from the end until they fit, keeping at least 4 chars for the name
+	const minNameWidth = 4
 	totalSuffixLen := 0
 	for _, l := range suffixLens {
 		totalSuffixLen += 1 + l // space + indicator
 	}
+	for len(suffixes) > 0 && maxLen-totalSuffixLen < minNameWidth {
+		last := len(suffixLens) - 1
+		totalSuffixLen -= 1 + suffixLens[last]
+		suffixes = suffixes[:last]
+		suffixLens = suffixLens[:last]
+	}
 
 	// Truncate name to fit
-	truncated := truncate(name, maxLen-totalSuffixLen)
+	nameWidth := maxLen - totalSuffixLen
+	if nameWidth < 1 {
+		nameWidth = 1
+	}
+	truncated := truncate(name, nameWidth)
 	visibleLen := len(truncated)
 
 	// Build result
