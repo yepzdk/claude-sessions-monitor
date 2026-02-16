@@ -40,8 +40,8 @@ func RenderList(sessions []session.Session) {
 	}
 
 	// Header
-	fmt.Printf("%-15s %-35s %-15s %s\n", "STATUS", "PROJECT", "LAST ACTIVITY", "LAST MESSAGE")
-	fmt.Println(strings.Repeat("─", 100))
+	fmt.Printf("%-15s %-35s %-16s %-15s %s\n", "STATUS", "PROJECT", "CONTEXT", "LAST ACTIVITY", "LAST MESSAGE")
+	fmt.Println(strings.Repeat("─", 115))
 
 	for _, s := range sessions {
 		elapsed := formatElapsed(time.Since(s.LastActivity))
@@ -52,9 +52,10 @@ func RenderList(sessions []session.Session) {
 			desc = s.Task
 		}
 
-		fmt.Printf("%s %s %-15s %s\n",
+		fmt.Printf("%s %s %s %-15s %s\n",
 			formatStatus(s.Status, 15),
 			formatProject(s, 35),
+			formatContext(s, 16),
 			elapsed,
 			truncate(desc, 40))
 	}
@@ -100,10 +101,10 @@ func RenderLive(sessions []session.Session) {
 		fmt.Printf("%sNo active Claude sessions.%s\r\n", Dim, Reset)
 	} else {
 		// Column headers
-		fmt.Printf("%-15s %-35s %-15s %s\r\n", "STATUS", "PROJECT", "LAST ACTIVITY", "LAST MESSAGE")
-		fmt.Printf("%s\r\n", strings.Repeat("─", 95))
+		fmt.Printf("%-15s %-35s %-16s %-15s %s\r\n", "STATUS", "PROJECT", "CONTEXT", "LAST ACTIVITY", "LAST MESSAGE")
+		fmt.Printf("%s\r\n", strings.Repeat("─", 115))
 
-		for _, s := range active {
+		for i, s := range active {
 			elapsed := formatElapsed(time.Since(s.LastActivity))
 
 			// Use last message if available, otherwise task
@@ -112,11 +113,17 @@ func RenderLive(sessions []session.Session) {
 				desc = s.Task
 			}
 
-			fmt.Printf("%s %s %-15s %s\r\n",
+			fmt.Printf("%s %s %s %-15s %s\r\n",
 				formatStatus(s.Status, 15),
 				formatProject(s, 35),
+				formatContext(s, 16),
 				elapsed,
 				truncate(desc, 35))
+
+			// Add spacing between rows so progress bars don't merge visually
+			if i < len(active)-1 {
+				fmt.Print("\r\n")
+			}
 		}
 	}
 
@@ -257,6 +264,59 @@ func truncate(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+// contextBarWidth is the number of block characters in the progress bar
+const contextBarWidth = 10
+
+// formatContext renders a visual progress bar with percentage label
+// Example: "████████░░ 80%"
+func formatContext(s session.Session, width int) string {
+	if s.ContextTokens == 0 {
+		text := "-"
+		if len(text) < width {
+			text += strings.Repeat(" ", width-len(text))
+		}
+		return Dim + text + Reset
+	}
+
+	// Clamp percentage to 0-100
+	pct := s.ContextPercent
+	if pct > 100 {
+		pct = 100
+	}
+
+	// Calculate filled vs empty blocks
+	filled := int(pct / 100 * float64(contextBarWidth))
+	if filled > contextBarWidth {
+		filled = contextBarWidth
+	}
+	empty := contextBarWidth - filled
+
+	// Color based on percentage
+	var color string
+	switch {
+	case pct >= 91:
+		color = Red
+	case pct >= 76:
+		color = Yellow
+	default:
+		color = Green
+	}
+
+	// Build bar: colored filled blocks + dim empty blocks + percentage
+	label := fmt.Sprintf(" %.0f%%", pct)
+	bar := color + strings.Repeat("█", filled) + Reset +
+		Dim + strings.Repeat("░", empty) + Reset +
+		label
+
+	// Pad to width (visible length = bar chars + label chars)
+	visibleLen := contextBarWidth + len(label)
+	if visibleLen < width {
+		bar += strings.Repeat(" ", width-visibleLen)
+	}
+
+	return bar
 }
 
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars

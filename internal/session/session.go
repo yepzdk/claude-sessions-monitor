@@ -40,6 +40,8 @@ type Session struct {
 	GhostPID       int       `json:"ghost_pid,omitempty"`      // PID of the ghost process (for killing)
 	GitBranch      string    `json:"git_branch,omitempty"`     // Current git branch
 	HasUnsandboxed bool      `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
+	ContextPercent float64   `json:"context_percent,omitempty"` // Percentage of context window used
+	ContextTokens  int       `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
 }
 
 // RunningProcess represents a Claude process with its PID and working directory
@@ -61,7 +63,17 @@ type LogEntry struct {
 // Message represents the message field in a log entry
 type Message struct {
 	Role    string        `json:"role,omitempty"`
+	Model   string        `json:"model,omitempty"`
 	Content []ContentItem `json:"content,omitempty"`
+	Usage   *Usage        `json:"usage,omitempty"`
+}
+
+// Usage represents token usage data from the API response
+type Usage struct {
+	InputTokens              int `json:"input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
 }
 
 // ContentItem represents an item in the content array
@@ -307,6 +319,9 @@ func parseSession(projectName, logFile string, runningDirs map[string]int) (Sess
 	// Detect if any commands ran without sandbox
 	session.HasUnsandboxed = detectUnsandboxedCommands(entries)
 
+	// Extract context usage
+	session.ContextPercent, session.ContextTokens = extractContextUsage(entries)
+
 	// Determine status from log entries
 	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning)
 
@@ -425,6 +440,28 @@ func detectUnsandboxedCommands(entries []LogEntry) bool {
 	return false
 }
 
+// extractContextUsage extracts context usage from the last assistant entry with usage data
+// Returns the percentage of context window used and total input tokens
+func extractContextUsage(entries []LogEntry) (float64, int) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
+			continue
+		}
+
+		usage := entry.Message.Usage
+		totalTokens := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+		if totalTokens == 0 {
+			continue
+		}
+
+		percent := float64(totalTokens) / float64(DefaultContextWindow) * 100
+		return percent, totalTokens
+	}
+
+	return 0, 0
+}
+
 // decodeProjectName converts the directory name to a readable project name
 func decodeProjectName(name string) string {
 	// Format: -Users-username-Projects-org-project
@@ -499,6 +536,9 @@ func readLastEntries(filePath string, count int) ([]LogEntry, error) {
 
 	return entries, scanner.Err()
 }
+
+// DefaultContextWindow is the context window size for Claude models (200K tokens)
+const DefaultContextWindow = 200000
 
 // GhostThreshold is the duration after which a running process with no log activity
 // is considered a ghost (orphaned) process
