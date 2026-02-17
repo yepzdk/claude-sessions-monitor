@@ -14,14 +14,13 @@ func TestCalcSessionLayout_WideTerminal(t *testing.T) {
 	if l.activity != 15 {
 		t.Errorf("expected activity=15, got %d", l.activity)
 	}
-	// All remaining space goes to project
-	expectedProject := 140 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth
+	// All remaining space goes to project (minus 3 column gaps)
+	expectedProject := 140 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth - 3
 	if l.project != expectedProject {
 		t.Errorf("expected project=%d, got %d", expectedProject, l.project)
 	}
-	total := l.status + l.project + l.context + l.activity
-	if total != 140 {
-		t.Errorf("expected columns to sum to 140, got %d", total)
+	if l.totalWidth != 140 {
+		t.Errorf("expected totalWidth=140, got %d", l.totalWidth)
 	}
 }
 
@@ -31,27 +30,25 @@ func TestCalcSessionLayout_NarrowTerminal(t *testing.T) {
 	if l.status != 14 {
 		t.Errorf("expected status=14, got %d", l.status)
 	}
-	total := l.status + l.project + l.context + l.activity
-	if total != 80 {
-		t.Errorf("expected columns to sum to 80, got %d (status=%d project=%d context=%d activity=%d)",
-			total, l.status, l.project, l.context, l.activity)
+	if l.totalWidth != 80 {
+		t.Errorf("expected totalWidth=80, got %d (status=%d project=%d context=%d activity=%d)",
+			l.totalWidth, l.status, l.project, l.context, l.activity)
 	}
 }
 
 func TestCalcSessionLayout_VeryNarrowTerminal(t *testing.T) {
 	l := calcSessionLayout(55)
 
-	total := l.status + l.project + l.context + l.activity
-	if total != 55 {
-		t.Errorf("expected columns to sum to 55, got %d", total)
+	if l.totalWidth != 55 {
+		t.Errorf("expected totalWidth=55, got %d", l.totalWidth)
 	}
 }
 
 func TestCalcSessionLayout_MinWidth(t *testing.T) {
 	l := calcSessionLayout(40)
 
-	// At tiny widths, project uses whatever space remains
-	expected := 40 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth
+	// At tiny widths, project uses whatever space remains (minus 3 column gaps)
+	expected := 40 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth - 3
 	if expected < 1 {
 		expected = 1
 	}

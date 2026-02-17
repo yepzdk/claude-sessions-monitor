@@ -318,19 +318,22 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 		l.activity, elapsed)
 	fmt.Print(row + nl)
 
-	// Second line: indented last message
+	// Second line: last message aligned with status text (after "● ")
 	desc := s.LastMessage
 	if desc == "" {
 		desc = s.Task
 	}
 	if desc != "" && desc != "-" {
-		indent := l.status // align under project column
+		indent := 2 // align with status text (after symbol + space)
 		msgWidth := l.totalWidth - indent
 		if msgWidth > 0 {
 			msg := truncate(desc, msgWidth)
 			fmt.Printf("%s%s%s%s", strings.Repeat(" ", indent), Dim, msg, Reset+nl)
 		}
 	}
+
+	// Blank line after each session block for visual grouping
+	fmt.Print(nl)
 }
 
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars

@@ -21,6 +21,7 @@ type sessionLayout struct {
 // calcSessionLayout computes column widths for the given terminal width.
 // Fixed columns (status, context, activity) keep their size.
 // All remaining space goes to the project column.
+// Accounts for 3 separator spaces between the 4 columns.
 func calcSessionLayout(width int) sessionLayout {
 	l := sessionLayout{
 		status:   fixedStatusWidth,
@@ -28,14 +29,15 @@ func calcSessionLayout(width int) sessionLayout {
 		activity: fixedActivityWidth,
 	}
 
-	fixed := l.status + l.context + l.activity
+	const columnGaps = 3 // spaces between 4 columns
+	fixed := l.status + l.context + l.activity + columnGaps
 	remaining := width - fixed
 	if remaining < 1 {
 		remaining = 1
 	}
 	l.project = remaining
 
-	l.totalWidth = l.status + l.project + l.context + l.activity
+	l.totalWidth = l.status + l.project + l.context + l.activity + columnGaps
 
 	return l
 }
