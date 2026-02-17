@@ -115,6 +115,85 @@ func TestExtractContextUsage(t *testing.T) {
 			wantTokens:     180100,
 			wantHasContext: true,
 		},
+		{
+			name: "compact_boundary after last assistant resets context",
+			entries: []LogEntry{
+				{
+					Type: "assistant",
+					Message: &Message{
+						Role:  "assistant",
+						Model: "claude-opus-4-6",
+						Usage: &Usage{
+							InputTokens:              100,
+							CacheCreationInputTokens: 10000,
+							CacheReadInputTokens:     170000,
+							OutputTokens:             1000,
+						},
+					},
+				},
+				{Type: "system", Subtype: "compact_boundary"},
+			},
+			wantPercent:    0,
+			wantTokens:     0,
+			wantHasContext: false,
+		},
+		{
+			name: "microcompact_boundary after last assistant resets context",
+			entries: []LogEntry{
+				{
+					Type: "assistant",
+					Message: &Message{
+						Role:  "assistant",
+						Model: "claude-opus-4-6",
+						Usage: &Usage{
+							InputTokens:              100,
+							CacheCreationInputTokens: 10000,
+							CacheReadInputTokens:     170000,
+							OutputTokens:             1000,
+						},
+					},
+				},
+				{Type: "system", Subtype: "microcompact_boundary"},
+			},
+			wantPercent:    0,
+			wantTokens:     0,
+			wantHasContext: false,
+		},
+		{
+			name: "assistant after compact_boundary returns correct usage",
+			entries: []LogEntry{
+				{
+					Type: "assistant",
+					Message: &Message{
+						Role:  "assistant",
+						Model: "claude-opus-4-6",
+						Usage: &Usage{
+							InputTokens:              100,
+							CacheCreationInputTokens: 10000,
+							CacheReadInputTokens:     170000,
+							OutputTokens:             1000,
+						},
+					},
+				},
+				{Type: "system", Subtype: "compact_boundary"},
+				{
+					Type: "assistant",
+					Message: &Message{
+						Role:  "assistant",
+						Model: "claude-opus-4-6",
+						Usage: &Usage{
+							InputTokens:              10,
+							CacheCreationInputTokens: 1000,
+							CacheReadInputTokens:     19000,
+							OutputTokens:             500,
+						},
+					},
+				},
+			},
+			wantPercent:    10.005, // (10 + 1000 + 19000) / 200000 * 100
+			wantTokens:     20010,
+			wantHasContext: true,
+		},
 	}
 
 	for _, tt := range tests {

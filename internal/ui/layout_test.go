@@ -5,9 +5,6 @@ import "testing"
 func TestCalcSessionLayout_WideTerminal(t *testing.T) {
 	l := calcSessionLayout(140)
 
-	if !l.showMessage {
-		t.Error("expected LAST MESSAGE column visible at 140 cols")
-	}
 	if l.status != 14 {
 		t.Errorf("expected status=14, got %d", l.status)
 	}
@@ -17,8 +14,12 @@ func TestCalcSessionLayout_WideTerminal(t *testing.T) {
 	if l.activity != 15 {
 		t.Errorf("expected activity=15, got %d", l.activity)
 	}
-	// project + message should use the remaining space
-	total := l.status + l.project + l.context + l.activity + l.message
+	// All remaining space goes to project
+	expectedProject := 140 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth
+	if l.project != expectedProject {
+		t.Errorf("expected project=%d, got %d", expectedProject, l.project)
+	}
+	total := l.status + l.project + l.context + l.activity
 	if total != 140 {
 		t.Errorf("expected columns to sum to 140, got %d", total)
 	}
@@ -27,26 +28,19 @@ func TestCalcSessionLayout_WideTerminal(t *testing.T) {
 func TestCalcSessionLayout_NarrowTerminal(t *testing.T) {
 	l := calcSessionLayout(80)
 
-	// At 80 cols the LAST MESSAGE column should still be visible but narrow
 	if l.status != 14 {
 		t.Errorf("expected status=14, got %d", l.status)
 	}
 	total := l.status + l.project + l.context + l.activity
-	if l.showMessage {
-		total += l.message
-	}
 	if total != 80 {
-		t.Errorf("expected columns to sum to 80, got %d (status=%d project=%d context=%d activity=%d message=%d show=%v)",
-			total, l.status, l.project, l.context, l.activity, l.message, l.showMessage)
+		t.Errorf("expected columns to sum to 80, got %d (status=%d project=%d context=%d activity=%d)",
+			total, l.status, l.project, l.context, l.activity)
 	}
 }
 
 func TestCalcSessionLayout_VeryNarrowTerminal(t *testing.T) {
 	l := calcSessionLayout(55)
 
-	if l.showMessage {
-		t.Error("expected LAST MESSAGE column hidden at 55 cols")
-	}
 	total := l.status + l.project + l.context + l.activity
 	if total != 55 {
 		t.Errorf("expected columns to sum to 55, got %d", total)
@@ -56,9 +50,6 @@ func TestCalcSessionLayout_VeryNarrowTerminal(t *testing.T) {
 func TestCalcSessionLayout_MinWidth(t *testing.T) {
 	l := calcSessionLayout(40)
 
-	if l.showMessage {
-		t.Error("expected LAST MESSAGE hidden at 40 cols")
-	}
 	// At tiny widths, project uses whatever space remains
 	expected := 40 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth
 	if expected < 1 {

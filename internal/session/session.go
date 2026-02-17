@@ -239,8 +239,11 @@ func findMostRecentLog(dir string) (string, error) {
 		return "", err
 	}
 
+	// Track both most recent non-empty and most recent overall
 	var mostRecent string
 	var mostRecentTime time.Time
+	var newestOverall string
+	var newestOverallTime time.Time
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -262,15 +265,23 @@ func findMostRecentLog(dir string) (string, error) {
 			continue
 		}
 
-		// Skip empty log files (often from desktop app)
-		if info.Size() == 0 {
-			continue
+		// Track newest file regardless of size (for detecting fresh sessions)
+		if info.ModTime().After(newestOverallTime) {
+			newestOverallTime = info.ModTime()
+			newestOverall = filePath
 		}
 
-		if info.ModTime().After(mostRecentTime) {
+		// Track newest non-empty file
+		if info.Size() > 0 && info.ModTime().After(mostRecentTime) {
 			mostRecentTime = info.ModTime()
 			mostRecent = filePath
 		}
+	}
+
+	// If there's a newer empty file, a fresh session just started;
+	// return it so parseSession sees 0 entries and shows "-" context
+	if newestOverall != mostRecent && newestOverallTime.After(mostRecentTime) {
+		return newestOverall, nil
 	}
 
 	return mostRecent, nil
@@ -441,9 +452,26 @@ func detectUnsandboxedCommands(entries []LogEntry) bool {
 }
 
 // extractContextUsage extracts context usage from the last assistant entry with usage data
-// Returns the percentage of context window used and total input tokens
+// Returns the percentage of context window used and total input tokens.
+// Only considers entries after the most recent compact/microcompact boundary,
+// since context is reset during compaction.
 func extractContextUsage(entries []LogEntry) (float64, int) {
+	// Find the most recent compact/microcompact boundary
+	lastBoundaryIdx := -1
 	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Type == "system" &&
+			(entries[i].Subtype == "compact_boundary" || entries[i].Subtype == "microcompact_boundary") {
+			lastBoundaryIdx = i
+			break
+		}
+	}
+
+	// Only look for usage data AFTER the last boundary
+	for i := len(entries) - 1; i >= 0; i-- {
+		if i <= lastBoundaryIdx {
+			break // Don't use pre-compact data
+		}
+
 		entry := entries[i]
 		if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
 			continue

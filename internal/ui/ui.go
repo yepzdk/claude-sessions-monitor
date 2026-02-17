@@ -47,9 +47,6 @@ func RenderList(sessions []session.Session) {
 		l.project, "PROJECT",
 		l.context, "CONTEXT",
 		l.activity, "LAST ACTIVITY")
-	if l.showMessage {
-		header += fmt.Sprintf(" %s", "LAST MESSAGE")
-	}
 	fmt.Println(header)
 	fmt.Println(strings.Repeat("─", l.totalWidth))
 
@@ -105,19 +102,11 @@ func RenderLive(sessions []session.Session) {
 			l.project, "PROJECT",
 			l.context, "CONTEXT",
 			l.activity, "LAST ACTIVITY")
-		if l.showMessage {
-			header += fmt.Sprintf(" %s", "LAST MESSAGE")
-		}
 		fmt.Printf("%s\r\n", header)
 		fmt.Printf("%s\r\n", strings.Repeat("─", l.totalWidth))
 
-		for i, s := range active {
+		for _, s := range active {
 			renderSessionRow(s, l, "\r\n")
-
-			// Add spacing between rows so progress bars don't merge visually
-			if i < len(active)-1 {
-				fmt.Print("\r\n")
-			}
 		}
 	}
 
@@ -317,25 +306,31 @@ func formatContext(s session.Session, width int) string {
 }
 
 // renderSessionRow renders a single session row using the given layout.
+// The main row shows status, project, context, and activity.
+// A second indented line shows the last message using the full width.
 func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 	elapsed := formatElapsed(time.Since(s.LastActivity))
-
-	desc := s.LastMessage
-	if desc == "" {
-		desc = s.Task
-	}
 
 	row := fmt.Sprintf("%s %s %s %-*s",
 		formatStatus(s.Status, l.status),
 		formatProject(s, l.project),
 		formatContext(s, l.context),
 		l.activity, elapsed)
-
-	if l.showMessage {
-		row += " " + truncate(desc, l.message-1)
-	}
-
 	fmt.Print(row + nl)
+
+	// Second line: indented last message
+	desc := s.LastMessage
+	if desc == "" {
+		desc = s.Task
+	}
+	if desc != "" && desc != "-" {
+		indent := l.status // align under project column
+		msgWidth := l.totalWidth - indent
+		if msgWidth > 0 {
+			msg := truncate(desc, msgWidth)
+			fmt.Printf("%s%s%s%s", strings.Repeat(" ", indent), Dim, msg, Reset+nl)
+		}
+	}
 }
 
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars
