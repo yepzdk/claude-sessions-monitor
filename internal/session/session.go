@@ -91,9 +91,12 @@ type BashToolInput struct {
 }
 
 // ClaudeProjectsDir returns the path to the Claude projects directory
-func ClaudeProjectsDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects")
+func ClaudeProjectsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("unable to determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude", "projects"), nil
 }
 
 // getRunningClaudeDirs returns a map of encoded directory names to PIDs where Claude processes are running
@@ -164,7 +167,10 @@ func isDesktopSession(projectName string) bool {
 
 // Discover finds all active Claude sessions
 func Discover() ([]Session, error) {
-	projectsDir := ClaudeProjectsDir()
+	projectsDir, err := ClaudeProjectsDir()
+	if err != nil {
+		return nil, err
+	}
 
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {

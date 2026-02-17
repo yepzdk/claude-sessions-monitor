@@ -43,7 +43,10 @@ type IndexEntry struct {
 
 // DiscoverHistory finds all sessions from the past N days
 func DiscoverHistory(days int) ([]HistorySession, error) {
-	projectsDir := ClaudeProjectsDir()
+	projectsDir, err := ClaudeProjectsDir()
+	if err != nil {
+		return nil, err
+	}
 	cutoff := time.Now().AddDate(0, 0, -days)
 
 	var sessions []HistorySession
