@@ -33,6 +33,7 @@
         currentView = view;
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === view));
         document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view + '-view'));
+        statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
         window.location.hash = view;
     }
@@ -151,18 +152,21 @@
             groups[group].push(s);
         });
 
-        let html = '';
+        let html = `<div class="history-row history-header">
+            <span class="history-project">Project</span>
+            <span class="history-branch">Branch</span>
+            <span class="history-messages">Prompts</span>
+            <span class="history-duration">Duration</span>
+        </div>`;
         for (const [group, sessions] of Object.entries(groups)) {
             html += `<div class="date-group-header">${esc(group)} (${sessions.length})</div>`;
             sessions.forEach(s => {
                 const dur = formatDuration(s.duration);
-                const time = new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
                     <span class="history-project">${esc(s.project)}</span>
-                    ${s.git_branch ? `<span class="history-branch">${esc(s.git_branch)}</span>` : ''}
-                    <span class="history-messages">${s.message_count || 0} msg</span>
+                    <span class="history-branch">${s.git_branch ? esc(s.git_branch) : ''}</span>
+                    <span class="history-messages">${s.message_count || 0}</span>
                     <span class="history-duration">${dur}</span>
-                    <span class="history-time">${time}</span>
                 </div>`;
             });
         }

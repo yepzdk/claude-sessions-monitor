@@ -82,13 +82,25 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 			if seen[s.LogFile] {
 				continue
 			}
+
+			// Enrich with stats from the JSONL file
+			msgCount, start, end := session.QuickSessionStats(s.LogFile)
+			if start.IsZero() {
+				start = s.LastActivity
+			}
+			if end.IsZero() {
+				end = s.LastActivity
+			}
+
 			sessions = append(sessions, session.HistorySession{
-				Project:     s.Project,
-				GitBranch:   s.GitBranch,
-				StartTime:   s.LastActivity,
-				EndTime:     s.LastActivity,
-				LastMessage: s.LastMessage,
-				LogFile:     s.LogFile,
+				Project:      s.Project,
+				GitBranch:    s.GitBranch,
+				StartTime:    start,
+				EndTime:      end,
+				Duration:     end.Sub(start),
+				MessageCount: msgCount,
+				LastMessage:  s.LastMessage,
+				LogFile:      s.LogFile,
 			})
 		}
 

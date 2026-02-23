@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -70,8 +71,8 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				continue
 			}
 
-			// Parse timestamps
-			startTime, err := time.Parse(time.RFC3339, entry.Created)
+			// Parse timestamps (index files use RFC3339 with milliseconds)
+			startTime, err := time.Parse(time.RFC3339Nano, entry.Created)
 			if err != nil {
 				continue
 			}
@@ -81,7 +82,7 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				continue
 			}
 
-			endTime, err := time.Parse(time.RFC3339, entry.Modified)
+			endTime, err := time.Parse(time.RFC3339Nano, entry.Modified)
 			if err != nil {
 				endTime = startTime
 			}
@@ -142,6 +143,62 @@ func extractProjectName(fullPath string) string {
 	}
 
 	return filepath.Base(fullPath)
+}
+
+// QuickSessionStats does a fast scan of a JSONL log file to get the message
+// count and time range without full JSON parsing of every line.
+func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time) {
+	file, err := os.Open(logFile)
+	if err != nil {
+		return 0, time.Time{}, time.Time{}
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// Count user prompts only (exclude tool results and assistant messages)
+		if strings.Contains(line, `"type":"user"`) && !strings.Contains(line, `"type":"tool_result"`) {
+			messageCount++
+		}
+
+		// Extract timestamp via string matching (avoids full JSON parse)
+		if ts := extractTimestampFromLine(line); !ts.IsZero() {
+			if startTime.IsZero() {
+				startTime = ts
+			}
+			endTime = ts
+		}
+	}
+
+	return messageCount, startTime, endTime
+}
+
+// extractTimestampFromLine extracts a timestamp from a JSONL line using fast
+// string matching rather than full JSON parsing.
+func extractTimestampFromLine(line string) time.Time {
+	const prefix = `"timestamp":"`
+	idx := strings.Index(line, prefix)
+	if idx < 0 {
+		return time.Time{}
+	}
+	start := idx + len(prefix)
+	end := strings.IndexByte(line[start:], '"')
+	if end < 0 {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339Nano, line[start:start+end])
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
 }
 
 // GetDateGroup returns a human-readable date group for a session

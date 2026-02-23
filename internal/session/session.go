@@ -772,6 +772,10 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 	// Check if turn completed (system message with turn_duration)
 	if lastSystem != nil {
 		if lastAssistant == nil || lastSystem.Timestamp.After(lastAssistant.Timestamp) {
+			// If a new user message arrived after the turn completed, Claude is working on it
+			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) {
+				return StatusWorking, "Processing...", false
+			}
 			return StatusWaiting, "-", false
 		}
 	}
@@ -782,6 +786,12 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 		if time.Since(lastAssistant.Timestamp) < 30*time.Second {
 			return StatusWorking, task, false
 		}
+	}
+
+	// If user message is the most recent entry (e.g. first message in session),
+	// Claude is processing it
+	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) {
+		return StatusWorking, "Processing...", false
 	}
 
 	return StatusWaiting, "-", false
