@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -26,7 +28,7 @@ func main() {
 	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
 	webMode := flag.Bool("web", false, "Start web dashboard server")
-	webPort := flag.Int("port", 8080, "Port for web dashboard (default 8080)")
+	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
 	flag.Parse()
 
 	// Handle version
@@ -90,6 +92,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start web server in background if requested
+	var webURL string
 	if webEnabled {
 		srv := web.NewServer(webPort)
 		webErrCh, err := srv.Start(ctx)
@@ -102,7 +105,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 				fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
 			}
 		}()
-		fmt.Fprintf(os.Stderr, "Web dashboard running at http://%s\n", srv.Addr())
+		webURL = "http://" + srv.Addr()
 	}
 
 	// Set up keyboard input
@@ -139,7 +142,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			ui.RenderHistory(sessions, historyDays, true)
 		} else {
 			sessions, _ := session.Discover()
-			ui.RenderLive(sessions)
+			ui.RenderLive(sessions, webURL)
 		}
 	}
 
@@ -168,6 +171,10 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 				if viewMode != ViewModeLive {
 					viewMode = ViewModeLive
 					render()
+				}
+			case 'w', 'W':
+				if webURL != "" {
+					openBrowser(webURL)
 				}
 			case 3: // Ctrl+C
 				cancel()
@@ -209,4 +216,18 @@ func handleKillGhosts() {
 	} else {
 		fmt.Printf("Terminated %d ghost process(es).\n", len(killed))
 	}
+}
+
+// openBrowser opens the given URL in the default browser
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return
+	}
+	cmd.Start()
 }

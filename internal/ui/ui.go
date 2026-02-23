@@ -64,7 +64,8 @@ func RenderJSON(sessions []session.Session) error {
 
 // RenderLive renders the live dashboard view
 // Uses \r\n for newlines to work correctly in raw terminal mode
-func RenderLive(sessions []session.Session) {
+// If webURL is non-empty, the web dashboard shortcut is shown in the footer.
+func RenderLive(sessions []session.Session, webURL string) {
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
 
@@ -111,7 +112,11 @@ func RenderLive(sessions []session.Session) {
 	}
 
 	// Show help footer
-	fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
+	if webURL != "" {
+		fmt.Printf("\r\n%sh: history | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
+	} else {
+		fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
+	}
 }
 
 // ClearScreen clears the terminal screen
