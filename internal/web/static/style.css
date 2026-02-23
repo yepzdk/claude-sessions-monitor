@@ -176,7 +176,7 @@ main {
 .context-bar {
     width: 60px;
     height: 6px;
-    background: var(--bg);
+    background: var(--border);
     border-radius: 3px;
     overflow: hidden;
 }
