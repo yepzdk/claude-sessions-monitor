@@ -3,7 +3,9 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
+	"time"
 
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
@@ -37,7 +39,8 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, active)
 }
 
-// handleHistory returns past sessions as JSON
+// handleHistory returns past sessions as JSON, merging index-based history
+// with inactive sessions from Discover() so they always appear somewhere.
 func handleHistory(w http.ResponseWriter, r *http.Request) {
 	days := 7
 	if d := r.URL.Query().Get("days"); d != "" {
@@ -54,6 +57,42 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []session.HistorySession{}
 	}
+
+	// Merge inactive sessions from Discover() so they are visible in history
+	liveSessions, err := session.Discover()
+	if err == nil {
+		// Track log files already in history to avoid duplicates
+		seen := make(map[string]bool, len(sessions))
+		for _, s := range sessions {
+			seen[s.LogFile] = true
+		}
+
+		cutoff := time.Now().AddDate(0, 0, -days)
+		for _, s := range liveSessions {
+			if s.Status != session.StatusInactive {
+				continue
+			}
+			if s.LastActivity.Before(cutoff) {
+				continue
+			}
+			if seen[s.LogFile] {
+				continue
+			}
+			sessions = append(sessions, session.HistorySession{
+				Project:     s.Project,
+				GitBranch:   s.GitBranch,
+				StartTime:   s.LastActivity,
+				EndTime:     s.LastActivity,
+				LastMessage: s.LastMessage,
+				LogFile:     s.LogFile,
+			})
+		}
+
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].StartTime.After(sessions[j].StartTime)
+		})
+	}
+
 	writeJSON(w, sessions)
 }
 
