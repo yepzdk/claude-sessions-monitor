@@ -279,6 +279,12 @@ main {
     margin-bottom: 0.25rem;
 }
 
+.history-header span {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
 .history-project {
     flex: 1;
     min-width: 0;
