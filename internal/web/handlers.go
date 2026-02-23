@@ -21,14 +21,20 @@ func writeError(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// handleSessions returns active sessions as JSON
+// handleSessions returns active (non-inactive) sessions as JSON
 func handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := session.Discover()
 	if err != nil {
 		writeError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, sessions)
+	active := make([]session.Session, 0, len(sessions))
+	for _, s := range sessions {
+		if s.Status != session.StatusInactive {
+			active = append(active, s)
+		}
+	}
+	writeJSON(w, active)
 }
 
 // handleHistory returns past sessions as JSON
@@ -44,6 +50,9 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if sessions == nil {
+		sessions = []session.HistorySession{}
 	}
 	writeJSON(w, sessions)
 }

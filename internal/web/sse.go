@@ -60,11 +60,17 @@ func (h *SSEHub) Run(ctx context.Context) {
 			h.mu.Unlock()
 
 		case <-ticker.C:
-			sessions, err := session.Discover()
+			allSessions, err := session.Discover()
 			if err != nil {
 				continue
 			}
-			data, err := json.Marshal(sessions)
+			active := make([]session.Session, 0, len(allSessions))
+			for _, s := range allSessions {
+				if s.Status != session.StatusInactive {
+					active = append(active, s)
+				}
+			}
+			data, err := json.Marshal(active)
 			if err != nil {
 				continue
 			}
@@ -107,10 +113,16 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	client := make(chan []byte, 16)
 	h.register <- client
 
-	// Send initial data immediately
-	sessions, err := session.Discover()
+	// Send initial data immediately (active sessions only)
+	allSessions, err := session.Discover()
 	if err == nil {
-		data, err := json.Marshal(sessions)
+		active := make([]session.Session, 0, len(allSessions))
+		for _, s := range allSessions {
+			if s.Status != session.StatusInactive {
+				active = append(active, s)
+			}
+		}
+		data, err := json.Marshal(active)
 		if err == nil {
 			fmt.Fprintf(w, "event: sessions\ndata: %s\n\n", data)
 			flusher.Flush()

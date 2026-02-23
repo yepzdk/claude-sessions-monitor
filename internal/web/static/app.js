@@ -124,7 +124,7 @@
         const days = historyDays.value;
         try {
             const resp = await fetch(`/api/history?days=${days}`);
-            historyData = await resp.json();
+            historyData = (await resp.json()) || [];
             renderHistory();
         } catch (err) {
             historyList.innerHTML = `<div class="empty-state">Failed to load history</div>`;
