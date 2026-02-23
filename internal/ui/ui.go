@@ -327,9 +327,10 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 	fmt.Print(row + nl)
 
 	// Second line: last message aligned with status text (after "● ")
-	desc := s.LastMessage
+	// Sanitize to prevent ANSI escape injection from log content
+	desc := sanitizeForTerminal(s.LastMessage)
 	if desc == "" {
-		desc = s.Task
+		desc = sanitizeForTerminal(s.Task)
 	}
 	if desc != "" && desc != "-" {
 		indent := 2 // align with status text (after symbol + space)
@@ -346,13 +347,14 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars
 func formatProject(s session.Session, maxLen int) string {
-	name := s.Project
+	// Sanitize to prevent ANSI escape injection from log/filesystem content
+	name := sanitizeForTerminal(s.Project)
 	var suffixes []string
 	var suffixLens []int // visible length of each suffix (excluding space)
 
 	// Add git branch if present (show first, most useful)
 	if s.GitBranch != "" {
-		branch := s.GitBranch
+		branch := sanitizeForTerminal(s.GitBranch)
 		if len(branch) > 12 {
 			branch = branch[:12]
 		}

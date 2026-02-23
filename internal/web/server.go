@@ -50,7 +50,7 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	addr := fmt.Sprintf("localhost:%d", s.port)
 	s.server = &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: securityHeaders(mux),
 	}
 
 	// Start SSE hub
@@ -77,6 +77,18 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	}()
 
 	return errCh, nil
+}
+
+// securityHeaders wraps an http.Handler to set standard security headers
+// on every response.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Addr returns the address the server is configured to listen on.

@@ -187,15 +187,25 @@ func ClaudeProjectsDir() (string, error) {
 func getRunningClaudeDirs() map[string]int {
 	dirs := make(map[string]int)
 
-	// Use ps to get Claude process IDs (more reliable than pgrep)
-	cmd := exec.Command("sh", "-c", "ps ax -o pid,comm | grep '[c]laude$' | awk '{print $1}'")
+	// Use ps directly without a shell pipeline to avoid shell injection risks
+	cmd := exec.Command("ps", "ax", "-o", "pid=,comm=")
 	output, err := cmd.Output()
 	if err != nil {
 		return dirs
 	}
 
-	pids := strings.Fields(string(output))
-	for _, pidStr := range pids {
+	// Parse ps output to find claude processes
+	for _, line := range bytes.Split(output, []byte("\n")) {
+		fields := bytes.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		comm := string(fields[len(fields)-1])
+		if !strings.HasSuffix(comm, "claude") {
+			continue
+		}
+
+		pidStr := string(fields[0])
 		pid := 0
 		fmt.Sscanf(pidStr, "%d", &pid)
 		if pid == 0 {
@@ -211,12 +221,12 @@ func getRunningClaudeDirs() map[string]int {
 
 		// Parse lsof output to find cwd
 		lines := bytes.Split(lsofOutput, []byte("\n"))
-		for _, line := range lines {
-			if bytes.Contains(line, []byte(" cwd ")) {
-				fields := bytes.Fields(line)
-				if len(fields) >= 9 {
+		for _, l := range lines {
+			if bytes.Contains(l, []byte(" cwd ")) {
+				lFields := bytes.Fields(l)
+				if len(lFields) >= 9 {
 					// Last field is the path
-					path := string(fields[len(fields)-1])
+					path := string(lFields[len(lFields)-1])
 					// Convert to encoded format (same as project directory names)
 					encoded := encodeProjectPath(path)
 					dirs[encoded] = pid
@@ -839,6 +849,17 @@ func FindGhostProcesses() ([]GhostProcess, error) {
 	return ghosts, nil
 }
 
+// isClaudeProcess checks whether the given PID belongs to a process named "claude".
+// This guards against PID reuse where a stale PID now belongs to an unrelated process.
+func isClaudeProcess(pid int) bool {
+	out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "comm=").Output()
+	if err != nil {
+		return false
+	}
+	comm := strings.TrimSpace(string(out))
+	return strings.HasSuffix(comm, "claude")
+}
+
 // KillGhostProcesses terminates all ghost Claude processes
 // Returns the number of processes killed and any errors
 func KillGhostProcesses() ([]GhostProcess, error) {
@@ -849,6 +870,11 @@ func KillGhostProcesses() ([]GhostProcess, error) {
 
 	var killed []GhostProcess
 	for _, ghost := range ghosts {
+		// Verify the PID still belongs to a claude process (guards against PID reuse)
+		if !isClaudeProcess(ghost.PID) {
+			continue
+		}
+
 		// Send SIGTERM to gracefully terminate the process
 		process, err := os.FindProcess(ghost.PID)
 		if err != nil {
