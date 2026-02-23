@@ -1,9 +1,9 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -74,14 +74,29 @@ func (h *SSEHub) Run(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			msg := fmt.Appendf(nil, "event: sessions\ndata: %s\n\n", data)
-			h.broadcast(msg)
+			h.broadcast(formatSSE("sessions", data))
 
 		case <-heartbeat.C:
-			msg := []byte("event: heartbeat\ndata: {}\n\n")
-			h.broadcast(msg)
+			h.broadcast(formatSSE("heartbeat", []byte("{}")))
 		}
 	}
+}
+
+// formatSSE formats an SSE message safely. If data contains literal newlines
+// (which json.Marshal should not produce, but as defense-in-depth), each line
+// gets its own "data:" prefix per the SSE specification.
+func formatSSE(event string, data []byte) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("event: ")
+	buf.WriteString(event)
+	buf.WriteByte('\n')
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		buf.WriteString("data: ")
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	buf.WriteByte('\n')
+	return buf.Bytes()
 }
 
 func (h *SSEHub) broadcast(msg []byte) {
@@ -124,7 +139,7 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		}
 		data, err := json.Marshal(active)
 		if err == nil {
-			fmt.Fprintf(w, "event: sessions\ndata: %s\n\n", data)
+			w.Write(formatSSE("sessions", data))
 			flusher.Flush()
 		}
 	}

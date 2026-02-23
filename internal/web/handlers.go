@@ -13,7 +13,7 @@ import (
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
 }
 
@@ -27,7 +27,7 @@ func writeError(w http.ResponseWriter, msg string, code int) {
 func handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := session.Discover()
 	if err != nil {
-		writeError(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, "failed to discover sessions", http.StatusInternalServerError)
 		return
 	}
 	active := make([]session.Session, 0, len(sessions))
@@ -42,16 +42,20 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 // handleHistory returns past sessions as JSON, merging index-based history
 // with inactive sessions from Discover() so they always appear somewhere.
 func handleHistory(w http.ResponseWriter, r *http.Request) {
+	const maxDays = 365
 	days := 7
 	if d := r.URL.Query().Get("days"); d != "" {
 		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
 			days = parsed
+			if days > maxDays {
+				days = maxDays
+			}
 		}
 	}
 
 	sessions, err := session.DiscoverHistory(days)
 	if err != nil {
-		writeError(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, "failed to load history", http.StatusInternalServerError)
 		return
 	}
 	if sessions == nil {
@@ -111,16 +115,20 @@ func handleTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	const maxLimit = 500
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
 			limit = parsed
+			if limit > maxLimit {
+				limit = maxLimit
+			}
 		}
 	}
 
 	entries, total, err := session.ParseTimeline(filePath, offset, limit)
 	if err != nil {
-		writeError(w, err.Error(), http.StatusBadRequest)
+		writeError(w, "failed to parse timeline", http.StatusBadRequest)
 		return
 	}
 
@@ -142,7 +150,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	metrics, err := session.ParseMetrics(filePath)
 	if err != nil {
-		writeError(w, err.Error(), http.StatusBadRequest)
+		writeError(w, "failed to parse metrics", http.StatusBadRequest)
 		return
 	}
 
