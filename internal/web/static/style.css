@@ -540,8 +540,6 @@ main {
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 1.5;
-    max-height: 12rem;
-    overflow-y: auto;
 }
 
 .timeline-tool {
@@ -565,8 +563,6 @@ main {
     color: var(--text-muted);
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 10rem;
-    overflow-y: auto;
 }
 
 .timeline-usage {
