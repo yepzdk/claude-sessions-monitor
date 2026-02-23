@@ -314,13 +314,16 @@ func formatContext(s session.Session, width int) string {
 // The main row shows status, project, context, and activity.
 // A second indented line shows the last message using the full width.
 func renderSessionRow(s session.Session, l sessionLayout, nl string) {
-	elapsed := formatElapsed(time.Since(s.LastActivity))
+	activity := formatElapsed(time.Since(s.LastActivity))
+	if s.Status == session.StatusWorking {
+		activity = "Now"
+	}
 
 	row := fmt.Sprintf("%s %s %s %-*s",
 		formatStatus(s.Status, l.status),
 		formatProject(s, l.project),
 		formatContext(s, l.context),
-		l.activity, elapsed)
+		l.activity, activity)
 	fmt.Print(row + nl)
 
 	// Second line: last message aligned with status text (after "● ")

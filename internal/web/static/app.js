@@ -90,7 +90,7 @@
         sessionsList.innerHTML = currentSessions.map(s => {
             const cls = statusClass(s.status);
             const symbol = statusSymbol(s.status);
-            const age = formatAge(s.last_activity);
+            const age = s.status === 'Working' ? 'Now' : formatAge(s.last_activity);
             const pct = s.context_percent || 0;
             const ctxCls = pct > 90 ? 'high' : pct > 75 ? 'medium' : 'low';
 

@@ -741,8 +741,14 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 		}
 	}
 
-	// If there's a pending tool_use, session is waiting for input (not ghost/idle)
+	// If there's a pending tool_use, check recency to decide status.
+	// Many tools (Task, Read, Grep, Write, Edit, etc.) are auto-approved and
+	// execute without user interaction. A recent pending tool_use likely means
+	// the tool is currently executing, not waiting for approval.
 	if hasPendingToolUse {
+		if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < 2*time.Minute {
+			return StatusWorking, "Using: " + pendingToolName, false
+		}
 		return StatusNeedsInput, "Using: " + pendingToolName, false
 	}
 
