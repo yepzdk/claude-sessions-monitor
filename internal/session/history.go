@@ -164,8 +164,8 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 			continue
 		}
 
-		// Fast type detection via string matching (avoids full JSON parse)
-		if strings.Contains(line, `"type":"user"`) || strings.Contains(line, `"type":"assistant"`) {
+		// Count user prompts only (exclude tool results and assistant messages)
+		if strings.Contains(line, `"type":"user"`) && !strings.Contains(line, `"type":"tool_result"`) {
 			messageCount++
 		}
 
