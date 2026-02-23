@@ -33,6 +33,7 @@
         currentView = view;
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === view));
         document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view + '-view'));
+        statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
         window.location.hash = view;
     }
@@ -156,13 +157,11 @@
             html += `<div class="date-group-header">${esc(group)} (${sessions.length})</div>`;
             sessions.forEach(s => {
                 const dur = formatDuration(s.duration);
-                const time = new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
                     <span class="history-project">${esc(s.project)}</span>
                     ${s.git_branch ? `<span class="history-branch">${esc(s.git_branch)}</span>` : ''}
                     <span class="history-messages">${s.message_count || 0} msg</span>
                     <span class="history-duration">${dur}</span>
-                    <span class="history-time">${time}</span>
                 </div>`;
             });
         }

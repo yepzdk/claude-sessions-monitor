@@ -303,13 +303,6 @@ main {
     text-align: right;
 }
 
-.history-time {
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    min-width: 3.5rem;
-    text-align: right;
-}
-
 /* Detail overlay */
 .detail-overlay {
     position: fixed;
