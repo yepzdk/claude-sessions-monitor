@@ -186,11 +186,13 @@
     let timelineTotal = 0;
     let timelineEntries = [];
     let currentLogFile = '';
+    let timelineFilter = 'all'; // all, assistant, user
 
     function openDetail(logFile, project) {
         currentLogFile = logFile;
         timelineOffset = 0;
         timelineEntries = [];
+        timelineFilter = 'all';
         detailTitle.textContent = project;
         detailOverlay.classList.remove('hidden');
 
@@ -305,8 +307,24 @@
             return;
         }
 
-        let html = '<div class="timeline">';
-        timelineEntries.forEach(e => {
+        const filters = ['all', 'assistant', 'user'];
+        let html = '<div class="timeline-filters">';
+        filters.forEach(f => {
+            const active = f === timelineFilter ? ' active' : '';
+            html += `<button class="filter-btn${active}" data-filter="${f}">${f.charAt(0).toUpperCase() + f.slice(1)}</button>`;
+        });
+        html += '</div>';
+
+        const filtered = timelineFilter === 'all'
+            ? timelineEntries
+            : timelineEntries.filter(e => e.type === timelineFilter);
+
+        if (filtered.length === 0) {
+            html += '<div class="empty-state">No matching entries</div>';
+        }
+
+        html += '<div class="timeline">';
+        filtered.forEach(e => {
             const cls = e.type;
             const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
 
@@ -356,6 +374,13 @@
         }
 
         detailTimeline.innerHTML = html;
+
+        detailTimeline.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                timelineFilter = btn.dataset.filter;
+                renderTimeline();
+            });
+        });
 
         const loadMoreBtn = document.getElementById('load-more-btn');
         if (loadMoreBtn) {

@@ -494,6 +494,28 @@ main {
 .tool-chip .tool-name { color: var(--cyan); }
 .tool-chip .tool-count { color: var(--text-dim); margin-left: 0.25rem; }
 
+/* Timeline filters */
+.timeline-filters {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.filter-btn {
+    padding: 0.25rem 0.625rem;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.filter-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.filter-btn.active { color: var(--text); background: var(--bg); border-color: var(--blue); }
+
 /* Timeline */
 .timeline {
     display: flex;
