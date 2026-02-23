@@ -452,12 +452,13 @@ main {
 .token-bar-track {
     flex: 1;
     height: 8px;
-    background: var(--bg);
+    background: var(--border);
     border-radius: 4px;
     overflow: hidden;
 }
 
 .token-bar-fill {
+    display: block;
     height: 100%;
     border-radius: 4px;
 }
