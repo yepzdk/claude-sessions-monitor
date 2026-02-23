@@ -258,8 +258,9 @@
             { label: 'Cache Create', value: m.total_cache_creation_tokens, color: 'var(--yellow)' },
             { label: 'Cache Read', value: m.total_cache_read_tokens, color: 'var(--purple)' },
         ];
+        const logMax = Math.log(maxToken + 1);
         bars.forEach(b => {
-            const pct = (b.value / maxToken) * 100;
+            const pct = b.value > 0 ? (Math.log(b.value + 1) / logMax) * 100 : 0;
             html += `<div class="token-bar-row">
                 <span class="token-bar-label">${b.label}</span>
                 <div class="token-bar-track"><div class="token-bar-fill" style="width:${pct}%;background:${b.color}"></div></div>
