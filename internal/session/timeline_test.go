@@ -137,7 +137,7 @@ func TestParseTimeline(t *testing.T) {
 	logFile := filepath.Join(tmpDir, "test.jsonl")
 	writeLines(t, logFile, lines)
 
-	// Test full fetch
+	// Test full fetch (newest first)
 	entries, total, err := parseTimelineFromFile(logFile, 0, 100)
 	if err != nil {
 		t.Fatalf("ParseTimeline failed: %v", err)
@@ -149,23 +149,24 @@ func TestParseTimeline(t *testing.T) {
 		t.Errorf("len(entries) = %d, want 3", len(entries))
 	}
 
-	// Verify first entry
-	if entries[0].Type != "user" {
-		t.Errorf("entries[0].Type = %q, want %q", entries[0].Type, "user")
+	// Verify entries are newest-first: system, assistant, user
+	if entries[0].Type != "system" {
+		t.Errorf("entries[0].Type = %q, want %q", entries[0].Type, "system")
 	}
-	if len(entries[0].Content) != 1 || entries[0].Content[0].Text != "hello" {
-		t.Errorf("entries[0] content mismatch")
-	}
-
-	// Verify second entry
 	if entries[1].Type != "assistant" {
 		t.Errorf("entries[1].Type = %q, want %q", entries[1].Type, "assistant")
 	}
 	if entries[1].Model != "claude-opus-4-6" {
 		t.Errorf("entries[1].Model = %q, want %q", entries[1].Model, "claude-opus-4-6")
 	}
+	if entries[2].Type != "user" {
+		t.Errorf("entries[2].Type = %q, want %q", entries[2].Type, "user")
+	}
+	if len(entries[2].Content) != 1 || entries[2].Content[0].Text != "hello" {
+		t.Errorf("entries[2] content mismatch")
+	}
 
-	// Test pagination
+	// Test pagination (offset=1 should be the assistant entry)
 	entries, total, err = parseTimelineFromFile(logFile, 1, 1)
 	if err != nil {
 		t.Fatalf("ParseTimeline paginated failed: %v", err)

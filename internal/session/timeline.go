@@ -128,6 +128,11 @@ func parseTimelineInternal(logFile string, offset, limit int) ([]TimelineEntry, 
 
 	total := len(all)
 
+	// Reverse so newest entries come first
+	for i, j := 0, total-1; i < j; i, j = i+1, j-1 {
+		all[i], all[j] = all[j], all[i]
+	}
+
 	// Apply pagination
 	if offset >= total {
 		return []TimelineEntry{}, total, nil
@@ -255,6 +260,14 @@ func logEntryToTimeline(entry LogEntry) *TimelineEntry {
 		if entry.Message == nil {
 			return nil
 		}
+
+		// Skip user entries that only contain tool_result content —
+		// these are automatic tool responses, not actual user messages,
+		// and the tool usage is already visible on the assistant side.
+		if entry.Type == "user" && hasToolResult(entry.Message.Content) {
+			return nil
+		}
+
 		te.Model = entry.Message.Model
 		te.Usage = entry.Message.Usage
 
