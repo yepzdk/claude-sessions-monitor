@@ -79,8 +79,8 @@ func TestParseMetrics(t *testing.T) {
 		t.Fatalf("ParseMetrics failed: %v", err)
 	}
 
-	if m.UserMessageCount != 2 {
-		t.Errorf("UserMessageCount = %d, want 2", m.UserMessageCount)
+	if m.UserPromptCount != 2 {
+		t.Errorf("UserPromptCount = %d, want 2", m.UserPromptCount)
 	}
 	if m.AssistantMessageCount != 2 {
 		t.Errorf("AssistantMessageCount = %d, want 2", m.AssistantMessageCount)

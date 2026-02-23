@@ -240,7 +240,8 @@
 
         let html = `<div class="metrics-grid">
             <div class="metric-card"><div class="metric-label">Turns</div><div class="metric-value blue">${m.turn_count}</div></div>
-            <div class="metric-card"><div class="metric-label">User Messages</div><div class="metric-value green">${m.user_message_count}</div></div>
+            <div class="metric-card"><div class="metric-label">User Prompts</div><div class="metric-value green">${m.user_prompt_count}</div></div>
+            <div class="metric-card"><div class="metric-label">Tool Results</div><div class="metric-value">${m.tool_result_count}</div></div>
             <div class="metric-card"><div class="metric-label">Assistant Messages</div><div class="metric-value purple">${m.assistant_message_count}</div></div>
             <div class="metric-card"><div class="metric-label">Duration</div><div class="metric-value">${duration}</div></div>
             <div class="metric-card"><div class="metric-label">Total Tokens</div><div class="metric-value yellow">${fmtNum(totalTokens)}</div></div>

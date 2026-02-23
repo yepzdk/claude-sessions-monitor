@@ -37,7 +37,8 @@ type SessionMetrics struct {
 	TotalCacheCreationTokens int            `json:"total_cache_creation_tokens"`
 	TotalCacheReadTokens     int            `json:"total_cache_read_tokens"`
 	ToolUsageCounts          map[string]int `json:"tool_usage_counts"`
-	UserMessageCount         int            `json:"user_message_count"`
+	UserPromptCount          int            `json:"user_prompt_count"`
+	ToolResultCount          int            `json:"tool_result_count"`
 	AssistantMessageCount    int            `json:"assistant_message_count"`
 	TurnCount                int            `json:"turn_count"`
 	CompactCount             int            `json:"compact_count"`
@@ -188,7 +189,11 @@ func parseMetricsInternal(logFile string) (*SessionMetrics, error) {
 
 		switch entry.Type {
 		case "user":
-			m.UserMessageCount++
+			if entry.Message != nil && hasToolResult(entry.Message.Content) {
+				m.ToolResultCount++
+			} else {
+				m.UserPromptCount++
+			}
 
 		case "assistant":
 			m.AssistantMessageCount++
@@ -284,4 +289,14 @@ func logEntryToTimeline(entry LogEntry) *TimelineEntry {
 	}
 
 	return te
+}
+
+// hasToolResult returns true if the content items contain a tool_result entry
+func hasToolResult(items []ContentItem) bool {
+	for _, c := range items {
+		if c.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
 }
