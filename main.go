@@ -11,6 +11,7 @@ import (
 
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 	"github.com/itk-dev/claude-sessions-monitor/internal/ui"
+	"github.com/itk-dev/claude-sessions-monitor/internal/web"
 )
 
 var version = "dev"
@@ -24,6 +25,8 @@ func main() {
 	historyMode := flag.Bool("history", false, "Show session history")
 	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
+	webMode := flag.Bool("web", false, "Start web dashboard server")
+	webPort := flag.Int("port", 8080, "Port for web dashboard (default 8080)")
 	flag.Parse()
 
 	// Handle version
@@ -69,7 +72,7 @@ func main() {
 	}
 
 	// Live view mode
-	runLiveView(*interval)
+	runLiveView(*interval, *webMode, *webPort)
 }
 
 // ViewMode represents the current display mode
@@ -80,11 +83,27 @@ const (
 	ViewModeHistory
 )
 
-func runLiveView(interval time.Duration) {
+func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start web server in background if requested
+	if webEnabled {
+		srv := web.NewServer(webPort)
+		webErrCh, err := srv.Start(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
+			os.Exit(1)
+		}
+		go func() {
+			if err := <-webErrCh; err != nil {
+				fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
+			}
+		}()
+		fmt.Fprintf(os.Stderr, "Web dashboard running at http://%s\n", srv.Addr())
+	}
 
 	// Set up keyboard input
 	if err := ui.SetupRawInput(); err != nil {

@@ -19,7 +19,7 @@ type HistorySession struct {
 	MessageCount int           `json:"message_count"`
 	FirstPrompt  string        `json:"first_prompt"`
 	LastMessage  string        `json:"last_message,omitempty"`
-	LogFile      string        `json:"-"`
+	LogFile      string        `json:"log_file"`
 }
 
 // SessionIndex represents the structure of sessions-index.json

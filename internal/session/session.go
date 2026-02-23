@@ -33,7 +33,7 @@ type Session struct {
 	Task           string    `json:"task"`
 	Summary        string    `json:"summary,omitempty"`
 	LastMessage    string    `json:"last_message,omitempty"`
-	LogFile        string    `json:"-"`
+	LogFile        string    `json:"log_file"`
 	ProjectPath    string    `json:"-"`                        // Full path to the project directory
 	IsDesktop      bool      `json:"is_desktop,omitempty"`     // True if session appears to be from desktop app
 	IsGhost        bool      `json:"is_ghost,omitempty"`       // True if process running but log is stale

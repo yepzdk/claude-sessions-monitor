@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Sessions Monitor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Claude Sessions Monitor</h1>
+        <nav>
+            <a href="#live" class="tab active" data-tab="live">Live Sessions</a>
+            <a href="#history" class="tab" data-tab="history">History</a>
+        </nav>
+        <div id="connection-status" class="connected" title="SSE connected"></div>
+    </header>
+
+    <div id="status-bar" class="status-bar"></div>
+
+    <main>
+        <section id="live-view" class="view active">
+            <div id="sessions-list" class="sessions-list">
+                <div class="empty-state">Connecting...</div>
+            </div>
+        </section>
+
+        <section id="history-view" class="view">
+            <div class="history-controls">
+                <input type="text" id="history-search" placeholder="Search projects..." />
+                <select id="history-days">
+                    <option value="1">Last 24h</option>
+                    <option value="3">Last 3 days</option>
+                    <option value="7" selected>Last 7 days</option>
+                    <option value="14">Last 14 days</option>
+                    <option value="30">Last 30 days</option>
+                </select>
+            </div>
+            <div id="history-list" class="history-list">
+                <div class="empty-state">Loading history...</div>
+            </div>
+        </section>
+    </main>
+
+    <div id="detail-overlay" class="detail-overlay hidden">
+        <div class="detail-panel">
+            <div class="detail-header">
+                <h2 id="detail-title"></h2>
+                <button id="detail-close" class="close-btn">&times;</button>
+            </div>
+            <div class="detail-tabs">
+                <button class="detail-tab active" data-detail="metrics">Metrics</button>
+                <button class="detail-tab" data-detail="timeline">Timeline</button>
+            </div>
+            <div id="detail-metrics" class="detail-content active">
+                <div class="loading">Loading metrics...</div>
+            </div>
+            <div id="detail-timeline" class="detail-content">
+                <div class="loading">Loading timeline...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
