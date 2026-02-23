@@ -5,6 +5,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 ## Features
 
 - **Live dashboard** showing all active Claude Code sessions
+- **Web dashboard** with `--web` flag for rich session inspection in the browser
 - **History view** to browse past sessions with activity summaries
 - **Process detection** distinguishes running vs inactive sessions
 - **Ghost detection** identifies orphaned Claude processes
@@ -42,6 +43,12 @@ make install
 # Live view (default)
 csm
 
+# Live view with web dashboard
+csm --web
+
+# Web dashboard on custom port
+csm --web --port 3000
+
 # List sessions once
 csm -l
 
@@ -70,7 +77,19 @@ csm -v
 |-----|--------|
 | `h` | Switch to history view |
 | `l` | Switch to live view |
+| `w` | Open web dashboard in browser (when `--web` is active) |
 | `Ctrl+C` | Quit |
+
+### Web dashboard
+
+Start with `csm --web` to run the web dashboard alongside the terminal UI. The dashboard is available at `http://localhost:9847` by default.
+
+Features:
+- **Live sessions** with status indicators, context bars, and auto-refresh via SSE
+- **History view** with search/filter and date grouping
+- **Session detail panels** with metrics (token usage, tool breakdown, turn count) and full message timeline
+- **Timeline filters** to show All, Assistant, or User messages
+- Embedded in the binary via `go:embed` — no external files or build step needed
 
 ## Status Types
 

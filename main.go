@@ -5,12 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 	"github.com/itk-dev/claude-sessions-monitor/internal/ui"
+	"github.com/itk-dev/claude-sessions-monitor/internal/web"
 )
 
 var version = "dev"
@@ -24,6 +27,8 @@ func main() {
 	historyMode := flag.Bool("history", false, "Show session history")
 	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
+	webMode := flag.Bool("web", false, "Start web dashboard server")
+	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
 	flag.Parse()
 
 	// Handle version
@@ -69,7 +74,7 @@ func main() {
 	}
 
 	// Live view mode
-	runLiveView(*interval)
+	runLiveView(*interval, *webMode, *webPort)
 }
 
 // ViewMode represents the current display mode
@@ -80,11 +85,28 @@ const (
 	ViewModeHistory
 )
 
-func runLiveView(interval time.Duration) {
+func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start web server in background if requested
+	var webURL string
+	if webEnabled {
+		srv := web.NewServer(webPort)
+		webErrCh, err := srv.Start(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
+			os.Exit(1)
+		}
+		go func() {
+			if err := <-webErrCh; err != nil {
+				fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
+			}
+		}()
+		webURL = "http://" + srv.Addr()
+	}
 
 	// Set up keyboard input
 	if err := ui.SetupRawInput(); err != nil {
@@ -120,7 +142,7 @@ func runLiveView(interval time.Duration) {
 			ui.RenderHistory(sessions, historyDays, true)
 		} else {
 			sessions, _ := session.Discover()
-			ui.RenderLive(sessions)
+			ui.RenderLive(sessions, webURL)
 		}
 	}
 
@@ -149,6 +171,10 @@ func runLiveView(interval time.Duration) {
 				if viewMode != ViewModeLive {
 					viewMode = ViewModeLive
 					render()
+				}
+			case 'w', 'W':
+				if webURL != "" {
+					openBrowser(webURL)
 				}
 			case 3: // Ctrl+C
 				cancel()
@@ -190,4 +216,18 @@ func handleKillGhosts() {
 	} else {
 		fmt.Printf("Terminated %d ghost process(es).\n", len(killed))
 	}
+}
+
+// openBrowser opens the given URL in the default browser
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return
+	}
+	cmd.Start()
 }

@@ -33,7 +33,7 @@ type Session struct {
 	Task           string    `json:"task"`
 	Summary        string    `json:"summary,omitempty"`
 	LastMessage    string    `json:"last_message,omitempty"`
-	LogFile        string    `json:"-"`
+	LogFile        string    `json:"log_file"`
 	ProjectPath    string    `json:"-"`                        // Full path to the project directory
 	IsDesktop      bool      `json:"is_desktop,omitempty"`     // True if session appears to be from desktop app
 	IsGhost        bool      `json:"is_ghost,omitempty"`       // True if process running but log is stale
@@ -64,8 +64,91 @@ type LogEntry struct {
 type Message struct {
 	Role    string        `json:"role,omitempty"`
 	Model   string        `json:"model,omitempty"`
-	Content []ContentItem `json:"content,omitempty"`
+	Content []ContentItem `json:"-"`
 	Usage   *Usage        `json:"usage,omitempty"`
+
+	// RawContent holds the unparsed content array for custom unmarshalling.
+	// Content arrays can contain either objects ({"type":"text",...}) or
+	// bare strings (individual characters of user prompts).
+	RawContent json.RawMessage `json:"content,omitempty"`
+}
+
+// MarshalJSON writes Content as the "content" field so that round-tripping works.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type Alias Message
+	aux := struct {
+		Alias
+		Content []ContentItem `json:"content,omitempty"`
+	}{
+		Alias:   (Alias)(m),
+		Content: m.Content,
+	}
+	// Clear RawContent so it doesn't double-write
+	aux.RawContent = nil
+	return json.Marshal(aux)
+}
+
+// UnmarshalJSON handles mixed content arrays where elements can be
+// either ContentItem objects or bare strings (user prompt characters).
+func (m *Message) UnmarshalJSON(data []byte) error {
+	// Use an alias to avoid infinite recursion
+	type Alias Message
+	aux := &struct {
+		*Alias
+	}{Alias: (*Alias)(m)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	if len(m.RawContent) == 0 {
+		return nil
+	}
+
+	// Content can be either a plain string (user prompts) or an array
+	// of ContentItem objects (possibly mixed with bare strings).
+	if len(m.RawContent) > 0 && m.RawContent[0] == '"' {
+		var s string
+		if json.Unmarshal(m.RawContent, &s) == nil && s != "" {
+			m.Content = []ContentItem{{Type: "text", Text: s}}
+		}
+		return nil
+	}
+
+	// Parse as array, handling both object and string elements
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(m.RawContent, &rawItems); err != nil {
+		return nil
+	}
+
+	var items []ContentItem
+	var textBuf strings.Builder
+
+	flushText := func() {
+		if textBuf.Len() > 0 {
+			items = append(items, ContentItem{Type: "text", Text: textBuf.String()})
+			textBuf.Reset()
+		}
+	}
+
+	for _, raw := range rawItems {
+		// Check if this element is a bare string
+		var s string
+		if json.Unmarshal(raw, &s) == nil && len(raw) > 0 && raw[0] == '"' {
+			textBuf.WriteString(s)
+			continue
+		}
+
+		// Otherwise parse as a ContentItem object
+		flushText()
+		var item ContentItem
+		if json.Unmarshal(raw, &item) == nil {
+			items = append(items, item)
+		}
+	}
+	flushText()
+
+	m.Content = items
+	return nil
 }
 
 // Usage represents token usage data from the API response

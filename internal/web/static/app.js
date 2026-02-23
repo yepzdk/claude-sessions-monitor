@@ -1,0 +1,462 @@
+(function () {
+    'use strict';
+
+    // --- State ---
+    let currentSessions = [];
+    let currentView = 'live';
+    let historyData = [];
+    let sseSource = null;
+    let reconnectTimer = null;
+
+    // --- DOM refs ---
+    const statusBar = document.getElementById('status-bar');
+    const sessionsList = document.getElementById('sessions-list');
+    const historyList = document.getElementById('history-list');
+    const historySearch = document.getElementById('history-search');
+    const historyDays = document.getElementById('history-days');
+    const detailOverlay = document.getElementById('detail-overlay');
+    const detailTitle = document.getElementById('detail-title');
+    const detailClose = document.getElementById('detail-close');
+    const detailMetrics = document.getElementById('detail-metrics');
+    const detailTimeline = document.getElementById('detail-timeline');
+    const connStatus = document.getElementById('connection-status');
+
+    // --- Tab navigation ---
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', e => {
+            e.preventDefault();
+            switchView(tab.dataset.tab);
+        });
+    });
+
+    function switchView(view) {
+        currentView = view;
+        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === view));
+        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view + '-view'));
+        if (view === 'history') loadHistory();
+        window.location.hash = view;
+    }
+
+    // Init from hash
+    if (window.location.hash === '#history') switchView('history');
+
+    // --- SSE ---
+    function connectSSE() {
+        if (sseSource) sseSource.close();
+        sseSource = new EventSource('/api/events');
+
+        sseSource.addEventListener('sessions', e => {
+            try {
+                currentSessions = JSON.parse(e.data);
+                if (currentView === 'live') renderSessions();
+            } catch (err) { /* ignore parse errors */ }
+        });
+
+        sseSource.addEventListener('heartbeat', () => {});
+
+        sseSource.addEventListener('open', () => {
+            connStatus.className = 'connected';
+            connStatus.title = 'SSE connected';
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        });
+
+        sseSource.addEventListener('error', () => {
+            connStatus.className = 'disconnected';
+            connStatus.title = 'SSE disconnected - reconnecting...';
+            sseSource.close();
+            sseSource = null;
+            reconnectTimer = setTimeout(connectSSE, 3000);
+        });
+    }
+
+    connectSSE();
+
+    // --- Render live sessions ---
+    function renderSessions() {
+        if (!currentSessions || currentSessions.length === 0) {
+            sessionsList.innerHTML = '<div class="empty-state">No active sessions found</div>';
+            statusBar.innerHTML = '';
+            return;
+        }
+
+        // Status summary
+        const counts = {};
+        currentSessions.forEach(s => { counts[s.status] = (counts[s.status] || 0) + 1; });
+        statusBar.innerHTML = Object.entries(counts).map(([status, count]) => {
+            const cls = statusClass(status);
+            return `<span class="status-badge"><span class="status-dot ${cls}"></span>${count} ${status}</span>`;
+        }).join('');
+
+        sessionsList.innerHTML = currentSessions.map(s => {
+            const cls = statusClass(s.status);
+            const symbol = statusSymbol(s.status);
+            const age = formatAge(s.last_activity);
+            const pct = s.context_percent || 0;
+            const ctxCls = pct > 90 ? 'high' : pct > 75 ? 'medium' : 'low';
+
+            return `<div class="session-card" data-logfile="${esc(s.log_file || '')}">
+                <div class="session-top">
+                    <span class="session-status ${cls}" title="${esc(s.status)}">${symbol}</span>
+                    <span class="session-project">${esc(s.project)}</span>
+                    ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
+                    <span class="session-context">
+                        <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
+                        <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>
+                    </span>
+                    <span class="session-activity">${age}</span>
+                </div>
+                ${s.last_message ? `<div class="session-bottom">${esc(s.last_message)}</div>` : ''}
+            </div>`;
+        }).join('');
+
+        // Attach click handlers
+        sessionsList.querySelectorAll('.session-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const logFile = card.dataset.logfile;
+                const project = card.querySelector('.session-project').textContent;
+                if (logFile) openDetail(logFile, project);
+            });
+        });
+    }
+
+    // --- History ---
+    async function loadHistory() {
+        const days = historyDays.value;
+        try {
+            const resp = await fetch(`/api/history?days=${days}`);
+            historyData = (await resp.json()) || [];
+            renderHistory();
+        } catch (err) {
+            historyList.innerHTML = `<div class="empty-state">Failed to load history</div>`;
+        }
+    }
+
+    function renderHistory() {
+        const query = (historySearch.value || '').toLowerCase();
+        const filtered = historyData.filter(s =>
+            !query || s.project.toLowerCase().includes(query) ||
+            (s.git_branch && s.git_branch.toLowerCase().includes(query))
+        );
+
+        if (filtered.length === 0) {
+            historyList.innerHTML = '<div class="empty-state">No sessions found</div>';
+            return;
+        }
+
+        // Group by date
+        const groups = {};
+        filtered.forEach(s => {
+            const group = dateGroup(s.start_time);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(s);
+        });
+
+        let html = '';
+        for (const [group, sessions] of Object.entries(groups)) {
+            html += `<div class="date-group-header">${esc(group)} (${sessions.length})</div>`;
+            sessions.forEach(s => {
+                const dur = formatDuration(s.duration);
+                const time = new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
+                    <span class="history-project">${esc(s.project)}</span>
+                    ${s.git_branch ? `<span class="history-branch">${esc(s.git_branch)}</span>` : ''}
+                    <span class="history-messages">${s.message_count || 0} msg</span>
+                    <span class="history-duration">${dur}</span>
+                    <span class="history-time">${time}</span>
+                </div>`;
+            });
+        }
+
+        historyList.innerHTML = html;
+
+        historyList.querySelectorAll('.history-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const logFile = row.dataset.logfile;
+                const project = row.querySelector('.history-project').textContent;
+                if (logFile) openDetail(logFile, project);
+            });
+        });
+    }
+
+    historySearch.addEventListener('input', renderHistory);
+    historyDays.addEventListener('change', loadHistory);
+
+    // --- Detail panel ---
+    let timelineOffset = 0;
+    let timelineTotal = 0;
+    let timelineEntries = [];
+    let currentLogFile = '';
+    let timelineFilter = 'all'; // all, assistant, user
+
+    function openDetail(logFile, project) {
+        currentLogFile = logFile;
+        timelineOffset = 0;
+        timelineEntries = [];
+        timelineFilter = 'all';
+        detailTitle.textContent = project;
+        detailOverlay.classList.remove('hidden');
+
+        // Reset to metrics tab
+        document.querySelectorAll('.detail-tab').forEach(t => t.classList.toggle('active', t.dataset.detail === 'metrics'));
+        detailMetrics.classList.add('active');
+        detailTimeline.classList.remove('active');
+
+        loadMetrics(logFile);
+        loadTimeline(logFile, true);
+    }
+
+    detailClose.addEventListener('click', () => detailOverlay.classList.add('hidden'));
+    detailOverlay.addEventListener('click', e => {
+        if (e.target === detailOverlay) detailOverlay.classList.add('hidden');
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') detailOverlay.classList.add('hidden');
+    });
+
+    document.querySelectorAll('.detail-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.detail-tab').forEach(t => t.classList.toggle('active', t === tab));
+            detailMetrics.classList.toggle('active', tab.dataset.detail === 'metrics');
+            detailTimeline.classList.toggle('active', tab.dataset.detail === 'timeline');
+        });
+    });
+
+    async function loadMetrics(logFile) {
+        detailMetrics.innerHTML = '<div class="loading">Loading metrics...</div>';
+        try {
+            const resp = await fetch(`/api/sessions/metrics?file=${encodeURIComponent(logFile)}`);
+            if (!resp.ok) throw new Error(await resp.text());
+            const m = await resp.json();
+            renderMetrics(m);
+        } catch (err) {
+            detailMetrics.innerHTML = `<div class="empty-state">Failed to load metrics</div>`;
+        }
+    }
+
+    function renderMetrics(m) {
+        const duration = m.last_timestamp && m.first_timestamp
+            ? formatDuration((new Date(m.last_timestamp) - new Date(m.first_timestamp)) * 1000000)
+            : '-';
+        const totalTokens = m.total_input_tokens + m.total_output_tokens + m.total_cache_creation_tokens + m.total_cache_read_tokens;
+        const maxToken = Math.max(m.total_input_tokens, m.total_output_tokens, m.total_cache_creation_tokens, m.total_cache_read_tokens, 1);
+
+        let html = `<div class="metrics-grid">
+            <div class="metric-card"><div class="metric-label">Turns</div><div class="metric-value blue">${m.turn_count}</div></div>
+            <div class="metric-card"><div class="metric-label">User Prompts</div><div class="metric-value green">${m.user_prompt_count}</div></div>
+            <div class="metric-card"><div class="metric-label">Tool Results</div><div class="metric-value">${m.tool_result_count}</div></div>
+            <div class="metric-card"><div class="metric-label">Assistant Messages</div><div class="metric-value purple">${m.assistant_message_count}</div></div>
+            <div class="metric-card"><div class="metric-label">Duration</div><div class="metric-value">${duration}</div></div>
+            <div class="metric-card"><div class="metric-label">Total Tokens</div><div class="metric-value yellow">${fmtNum(totalTokens)}</div></div>
+            <div class="metric-card"><div class="metric-label">Context Usage</div><div class="metric-value ${m.context_percent > 90 ? 'yellow' : 'green'}">${Math.round(m.context_percent)}%</div></div>
+            ${m.compact_count > 0 ? `<div class="metric-card"><div class="metric-label">Compactions</div><div class="metric-value">${m.compact_count}</div></div>` : ''}
+        </div>`;
+
+        html += `<div class="token-breakdown"><h3>Token Breakdown</h3>`;
+        const bars = [
+            { label: 'Input', value: m.total_input_tokens, color: 'var(--blue)' },
+            { label: 'Output', value: m.total_output_tokens, color: 'var(--green)' },
+            { label: 'Cache Create', value: m.total_cache_creation_tokens, color: 'var(--yellow)' },
+            { label: 'Cache Read', value: m.total_cache_read_tokens, color: 'var(--purple)' },
+        ];
+        const logMax = Math.log(maxToken + 1);
+        bars.forEach(b => {
+            const pct = b.value > 0 ? (Math.log(b.value + 1) / logMax) * 100 : 0;
+            html += `<div class="token-bar-row">
+                <span class="token-bar-label">${b.label}</span>
+                <div class="token-bar-track"><div class="token-bar-fill" style="width:${pct}%;background:${b.color}"></div></div>
+                <span class="token-bar-value">${fmtNum(b.value)}</span>
+            </div>`;
+        });
+        html += '</div>';
+
+        // Tool usage
+        const tools = Object.entries(m.tool_usage_counts || {}).sort((a, b) => b[1] - a[1]);
+        if (tools.length > 0) {
+            html += `<div class="tool-usage"><h3>Tool Usage</h3><div class="tool-list">`;
+            tools.forEach(([name, count]) => {
+                html += `<span class="tool-chip"><span class="tool-name">${esc(name)}</span><span class="tool-count">${count}</span></span>`;
+            });
+            html += '</div></div>';
+        }
+
+        detailMetrics.innerHTML = html;
+    }
+
+    async function loadTimeline(logFile, reset) {
+        if (reset) {
+            timelineOffset = 0;
+            timelineEntries = [];
+            detailTimeline.innerHTML = '<div class="loading">Loading timeline...</div>';
+        }
+
+        try {
+            const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=50`);
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            timelineTotal = data.total;
+            timelineEntries = timelineEntries.concat(data.entries || []);
+            timelineOffset += (data.entries || []).length;
+            renderTimeline();
+        } catch (err) {
+            detailTimeline.innerHTML = `<div class="empty-state">Failed to load timeline</div>`;
+        }
+    }
+
+    function renderTimeline() {
+        if (timelineEntries.length === 0) {
+            detailTimeline.innerHTML = '<div class="empty-state">No entries</div>';
+            return;
+        }
+
+        const filters = ['all', 'assistant', 'user'];
+        let html = '<div class="timeline-filters">';
+        filters.forEach(f => {
+            const active = f === timelineFilter ? ' active' : '';
+            html += `<button class="filter-btn${active}" data-filter="${f}">${f.charAt(0).toUpperCase() + f.slice(1)}</button>`;
+        });
+        html += '</div>';
+
+        const filtered = timelineFilter === 'all'
+            ? timelineEntries
+            : timelineEntries.filter(e => e.type === timelineFilter);
+
+        if (filtered.length === 0) {
+            html += '<div class="empty-state">No matching entries</div>';
+        }
+
+        html += '<div class="timeline">';
+        filtered.forEach(e => {
+            const cls = e.type;
+            const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+
+            html += `<div class="timeline-entry ${esc(cls)}">`;
+            html += `<div class="timeline-header">`;
+            html += `<span class="timeline-role">${esc(e.type)}${e.subtype ? '/' + esc(e.subtype) : ''}</span>`;
+            if (time) html += `<span class="timeline-time">${time}</span>`;
+            if (e.model) html += `<span class="timeline-model">${esc(e.model)}</span>`;
+            html += '</div>';
+
+            if (e.summary) {
+                html += `<div class="timeline-text">${esc(e.summary)}</div>`;
+            }
+
+            if (e.content) {
+                e.content.forEach(c => {
+                    if (c.type === 'text' && c.text) {
+                        html += `<div class="timeline-text">${esc(c.text)}</div>`;
+                    } else if (c.type === 'tool_use') {
+                        html += `<details class="timeline-tool"><summary>${esc(c.tool || 'tool')}</summary>`;
+                        if (c.input) {
+                            let formatted = c.input;
+                            try { formatted = JSON.stringify(JSON.parse(c.input), null, 2); } catch (e) { /* keep raw */ }
+                            html += `<div class="timeline-tool-input">${esc(formatted)}</div>`;
+                        }
+                        html += '</details>';
+                    } else if (c.type === 'tool_result' && c.text) {
+                        html += `<details class="timeline-tool"><summary>tool result</summary>`;
+                        html += `<div class="timeline-tool-input">${esc(c.text)}</div>`;
+                        html += '</details>';
+                    }
+                });
+            }
+
+            if (e.usage) {
+                const u = e.usage;
+                const total = u.input_tokens + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+                html += `<div class="timeline-usage">in: ${fmtNum(total)} | out: ${fmtNum(u.output_tokens)}</div>`;
+            }
+
+            html += '</div>';
+        });
+        html += '</div>';
+
+        if (timelineOffset < timelineTotal) {
+            html += `<button class="load-more" id="load-more-btn">Load more (${timelineOffset}/${timelineTotal})</button>`;
+        }
+
+        detailTimeline.innerHTML = html;
+
+        detailTimeline.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                timelineFilter = btn.dataset.filter;
+                renderTimeline();
+            });
+        });
+
+        const loadMoreBtn = document.getElementById('load-more-btn');
+        if (loadMoreBtn) {
+            loadMoreBtn.addEventListener('click', () => loadTimeline(currentLogFile, false));
+        }
+    }
+
+    // --- Helpers ---
+    function statusClass(status) {
+        switch (status) {
+            case 'Working': return 'working';
+            case 'Needs Input': return 'needs-input';
+            case 'Waiting': return 'waiting';
+            case 'Idle': return 'idle';
+            case 'Inactive': return 'inactive';
+            default: return 'inactive';
+        }
+    }
+
+    function statusSymbol(status) {
+        switch (status) {
+            case 'Working': return '\u25CF';     // ●
+            case 'Needs Input': return '\u25B2';  // ▲
+            case 'Waiting': return '\u25C9';      // ◉
+            case 'Idle': return '\u25CB';          // ○
+            case 'Inactive': return '\u25CC';      // ◌
+            default: return '\u25CC';
+        }
+    }
+
+    function formatAge(ts) {
+        if (!ts) return '-';
+        const ms = Date.now() - new Date(ts).getTime();
+        const sec = Math.floor(ms / 1000);
+        if (sec < 60) return sec + 's ago';
+        const min = Math.floor(sec / 60);
+        if (min < 60) return min + 'm ago';
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return hr + 'h ago';
+        return Math.floor(hr / 24) + 'd ago';
+    }
+
+    function formatDuration(nanos) {
+        if (!nanos || nanos <= 0) return '-';
+        const sec = Math.floor(nanos / 1e9);
+        if (sec < 60) return sec + 's';
+        const min = Math.floor(sec / 60);
+        if (min < 60) return min + 'm';
+        const hr = Math.floor(min / 60);
+        const remMin = min % 60;
+        return hr + 'h ' + remMin + 'm';
+    }
+
+    function dateGroup(ts) {
+        const d = new Date(ts);
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const sessionDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const diff = Math.floor((today - sessionDate) / 86400000);
+        if (diff === 0) return 'Today';
+        if (diff === 1) return 'Yesterday';
+        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    function fmtNum(n) {
+        if (n == null) return '0';
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+        return String(n);
+    }
+
+    function esc(s) {
+        if (!s) return '';
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+})();
