@@ -104,10 +104,20 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Try parsing as []json.RawMessage to inspect each element
+	// Content can be either a plain string (user prompts) or an array
+	// of ContentItem objects (possibly mixed with bare strings).
+	if len(m.RawContent) > 0 && m.RawContent[0] == '"' {
+		var s string
+		if json.Unmarshal(m.RawContent, &s) == nil && s != "" {
+			m.Content = []ContentItem{{Type: "text", Text: s}}
+		}
+		return nil
+	}
+
+	// Parse as array, handling both object and string elements
 	var rawItems []json.RawMessage
 	if err := json.Unmarshal(m.RawContent, &rawItems); err != nil {
-		return nil // Not an array, skip
+		return nil
 	}
 
 	var items []ContentItem
