@@ -241,9 +241,10 @@ func getRunningClaudeDirs() map[string]int {
 // encodeProjectPath converts a filesystem path to the encoded directory name format
 func encodeProjectPath(path string) string {
 	// /Users/username/Projects/org/project -> -Users-username-Projects-org-project
-	// Also replace dots with dashes (Claude's encoding scheme)
+	// Replace /, ., and _ with dashes to match Claude Code's encoding scheme
 	encoded := strings.ReplaceAll(path, "/", "-")
 	encoded = strings.ReplaceAll(encoded, ".", "-")
+	encoded = strings.ReplaceAll(encoded, "_", "-")
 	return encoded
 }
 
