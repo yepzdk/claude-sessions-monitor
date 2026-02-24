@@ -231,13 +231,13 @@ func TestEncodeProjectPath(t *testing.T) {
 		},
 		{
 			name: "path with underscores",
-			path: "/Users/username/Projects/org/aapodwalk_api",
-			want: "-Users-username-Projects-org-aapodwalk-api",
+			path: "/Users/username/Projects/org/my_app_api",
+			want: "-Users-username-Projects-org-my-app-api",
 		},
 		{
 			name: "path with multiple underscores",
-			path: "/Users/username/Projects/org/heyloyalty_newsletter_templates",
-			want: "-Users-username-Projects-org-heyloyalty-newsletter-templates",
+			path: "/Users/username/Projects/org/my_newsletter_templates",
+			want: "-Users-username-Projects-org-my-newsletter-templates",
 		},
 		{
 			name: "path with dots",
