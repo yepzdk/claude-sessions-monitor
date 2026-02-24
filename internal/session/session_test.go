@@ -218,6 +218,49 @@ func TestExtractContextUsage(t *testing.T) {
 	}
 }
 
+func TestEncodeProjectPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "simple path",
+			path: "/Users/username/Projects/org/project",
+			want: "-Users-username-Projects-org-project",
+		},
+		{
+			name: "path with underscores",
+			path: "/Users/username/Projects/org/my_app_api",
+			want: "-Users-username-Projects-org-my-app-api",
+		},
+		{
+			name: "path with multiple underscores",
+			path: "/Users/username/Projects/org/my_newsletter_templates",
+			want: "-Users-username-Projects-org-my-newsletter-templates",
+		},
+		{
+			name: "path with dots",
+			path: "/Users/username/Projects/org/my.project",
+			want: "-Users-username-Projects-org-my-project",
+		},
+		{
+			name: "path with dots and underscores",
+			path: "/Users/username/Projects/org/my_project.v2",
+			want: "-Users-username-Projects-org-my-project-v2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := encodeProjectPath(tt.path)
+			if got != tt.want {
+				t.Errorf("encodeProjectPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUsageJSONParsing(t *testing.T) {
 	// Test that real JSONL usage data parses correctly
 	raw := `{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":1000,"cache_read_input_tokens":19000,"output_tokens":500,"service_tier":"standard"}}}`
