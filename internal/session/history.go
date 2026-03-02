@@ -42,7 +42,9 @@ type IndexEntry struct {
 	IsSidechain  bool   `json:"isSidechain"`
 }
 
-// DiscoverHistory finds all sessions from the past N days
+// DiscoverHistory finds all sessions from the past N days.
+// It merges sessions from sessions-index.json files with a direct scan
+// of .jsonl files so that projects without an index are also included.
 func DiscoverHistory(days int) ([]HistorySession, error) {
 	projectsDir, err := ClaudeProjectsDir()
 	if err != nil {
@@ -50,9 +52,11 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 	}
 	cutoff := time.Now().AddDate(0, 0, -days)
 
+	// Track seen log files to avoid duplicates
+	seen := make(map[string]bool)
 	var sessions []HistorySession
 
-	// Find all sessions-index.json files
+	// Phase 1: Collect sessions from sessions-index.json files (richest metadata)
 	pattern := filepath.Join(projectsDir, "*", "sessions-index.json")
 	indexFiles, err := filepath.Glob(pattern)
 	if err != nil {
@@ -103,6 +107,77 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				FirstPrompt:  entry.FirstPrompt,
 				LogFile:      entry.FullPath,
 			})
+			seen[entry.FullPath] = true
+		}
+	}
+
+	// Phase 2: Scan all project directories for .jsonl files not in any index
+	projectDirs, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, dir := range projectDirs {
+		if !dir.IsDir() || strings.HasPrefix(dir.Name(), ".") {
+			continue
+		}
+
+		projectDir := filepath.Join(projectsDir, dir.Name())
+		projectName := decodeProjectName(dir.Name())
+
+		files, err := os.ReadDir(projectDir)
+		if err != nil {
+			continue
+		}
+
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			// Skip agent/sidechain files
+			if strings.HasPrefix(f.Name(), "agent-") {
+				continue
+			}
+
+			logFile := filepath.Join(projectDir, f.Name())
+			if seen[logFile] {
+				continue
+			}
+
+			info, err := f.Info()
+			if err != nil || info.Size() == 0 {
+				continue
+			}
+
+			// Use file modification time for quick cutoff check before parsing
+			if info.ModTime().Before(cutoff) {
+				continue
+			}
+
+			msgCount, startTime, endTime, branch, prompt := QuickSessionStats(logFile)
+			if startTime.IsZero() {
+				startTime = info.ModTime()
+			}
+			if endTime.IsZero() {
+				endTime = info.ModTime()
+			}
+
+			// Re-check cutoff against actual start time
+			if startTime.Before(cutoff) {
+				continue
+			}
+
+			sessions = append(sessions, HistorySession{
+				Project:      projectName,
+				GitBranch:    branch,
+				FirstPrompt:  prompt,
+				StartTime:    startTime,
+				EndTime:      endTime,
+				Duration:     endTime.Sub(startTime),
+				MessageCount: msgCount,
+				LogFile:      logFile,
+			})
+			seen[logFile] = true
 		}
 	}
 
@@ -146,11 +221,12 @@ func extractProjectName(fullPath string) string {
 }
 
 // QuickSessionStats does a fast scan of a JSONL log file to get the message
-// count and time range without full JSON parsing of every line.
-func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time) {
+// count, time range, git branch, and first user prompt without full JSON
+// parsing of every line.
+func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time, gitBranch, firstPrompt string) {
 	file, err := os.Open(logFile)
 	if err != nil {
-		return 0, time.Time{}, time.Time{}
+		return 0, time.Time{}, time.Time{}, "", ""
 	}
 	defer file.Close()
 
@@ -165,8 +241,18 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 		}
 
 		// Count user prompts only (exclude tool results and assistant messages)
-		if strings.Contains(line, `"type":"user"`) && !strings.Contains(line, `"type":"tool_result"`) {
+		isUserMsg := strings.Contains(line, `"type":"user"`) && !strings.Contains(line, `"type":"tool_result"`)
+		if isUserMsg {
 			messageCount++
+			// Capture first user prompt text
+			if firstPrompt == "" {
+				firstPrompt = extractPromptFromLine(line)
+			}
+		}
+
+		// Extract git branch (keep last non-empty value, branch can change mid-session)
+		if b := extractStringField(line, `"gitBranch":"`); b != "" {
+			gitBranch = b
 		}
 
 		// Extract timestamp via string matching (avoids full JSON parse)
@@ -178,7 +264,80 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 		}
 	}
 
-	return messageCount, startTime, endTime
+	return messageCount, startTime, endTime, gitBranch, firstPrompt
+}
+
+// extractStringField extracts a JSON string value using fast string matching.
+// prefix should include the opening quote, e.g. `"fieldName":"`.
+func extractStringField(line, prefix string) string {
+	idx := strings.Index(line, prefix)
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(prefix)
+	end := strings.IndexByte(line[start:], '"')
+	if end <= 0 {
+		return ""
+	}
+	return line[start : start+end]
+}
+
+// extractPromptFromLine extracts user prompt text from a JSONL line using
+// fast string matching. Handles both plain string content and object arrays.
+func extractPromptFromLine(line string) string {
+	// Try plain string content: "content":"..."
+	const contentStr = `"content":"`
+	if idx := strings.Index(line, contentStr); idx >= 0 {
+		start := idx + len(contentStr)
+		if text := extractQuotedValue(line, start); text != "" {
+			return truncateString(text, 120)
+		}
+	}
+
+	// Try object array content with text field: "content":[{"type":"text","text":"..."}]
+	const contentArr = `"content":[`
+	if cidx := strings.Index(line, contentArr); cidx >= 0 {
+		const textField = `"text":"`
+		if tidx := strings.Index(line[cidx:], textField); tidx >= 0 {
+			start := cidx + tidx + len(textField)
+			if text := extractQuotedValue(line, start); text != "" {
+				return truncateString(text, 120)
+			}
+		}
+	}
+
+	return ""
+}
+
+// extractQuotedValue extracts text starting at position until the next
+// unescaped double quote.
+func extractQuotedValue(line string, start int) string {
+	if start >= len(line) {
+		return ""
+	}
+	i := start
+	for i < len(line) {
+		if line[i] == '\\' {
+			i += 2 // skip escaped character
+			continue
+		}
+		if line[i] == '"' {
+			break
+		}
+		i++
+	}
+	if i <= start || i > len(line) {
+		return ""
+	}
+	return line[start:i]
+}
+
+// truncateString truncates s to maxLen, appending "..." if truncated.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // extractTimestampFromLine extracts a timestamp from a JSONL line using fast

@@ -210,6 +210,43 @@ main {
     white-space: nowrap;
 }
 
+/* Stopped session cards */
+.session-card.stopped {
+    opacity: 0.55;
+    border-color: var(--border);
+}
+
+.session-card.stopped:hover {
+    opacity: 0.75;
+    border-color: var(--text-dim);
+}
+
+.stopped-badge {
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.0625rem 0.375rem;
+    flex-shrink: 0;
+}
+
+.session-history-link {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-decoration: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0.125rem 0.25rem;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.session-history-link:hover {
+    color: var(--blue);
+    background: var(--bg-hover);
+}
+
 /* History */
 .history-controls {
     display: flex;
@@ -248,25 +285,102 @@ main {
     gap: 0.25rem;
 }
 
-.date-group-header {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    padding: 0.75rem 0 0.375rem;
-    border-bottom: 1px solid var(--border);
+/* Project grouping in history */
+.project-group {
     margin-bottom: 0.25rem;
 }
 
-.date-group-header:first-child { padding-top: 0; }
+.project-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    user-select: none;
+}
+
+.project-group-header:hover {
+    background: var(--bg-hover);
+}
+
+.project-group-toggle {
+    font-size: 0.625rem;
+    color: var(--text-dim);
+    transition: transform 0.15s;
+    display: inline-block;
+}
+
+.project-group:not(.collapsed) .project-group-toggle {
+    transform: rotate(90deg);
+}
+
+.project-group-name {
+    font-weight: 600;
+    font-size: 0.8125rem;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.project-group-count {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    width: 6.5rem;
+    text-align: left;
+}
+
+.project-group-age {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    width: 5.5rem;
+    text-align: right;
+}
+
+.project-group-body {
+    padding-left: 1.25rem;
+}
+
+.project-group.collapsed .project-group-body {
+    display: none;
+}
+
+.history-date {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    min-width: 8rem;
+    flex-shrink: 0;
+}
 
 .history-row {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0;
     padding: 0.5rem 0.75rem;
     border-radius: 4px;
     cursor: pointer;
     font-size: 0.8125rem;
     transition: background 0.15s;
+}
+
+.history-row-main {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.history-prompt {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    margin-top: 0.125rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .history-row:not(.history-header):hover { background: var(--bg-hover); }
@@ -297,8 +411,8 @@ main {
 .history-branch {
     color: var(--purple);
     font-size: 0.75rem;
-    width: 8rem;
-    flex-shrink: 0;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
