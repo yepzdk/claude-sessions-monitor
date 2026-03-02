@@ -10,6 +10,7 @@
 
     // --- DOM refs ---
     const statusBar = document.getElementById('status-bar');
+    const quotaWidget = document.getElementById('quota-widget');
     const sessionsList = document.getElementById('sessions-list');
     const historyList = document.getElementById('history-list');
     const historySearch = document.getElementById('history-search');
@@ -50,6 +51,13 @@
             try {
                 currentSessions = JSON.parse(e.data);
                 if (currentView === 'live') renderSessions();
+            } catch (err) { /* ignore parse errors */ }
+        });
+
+        sseSource.addEventListener('quota', e => {
+            try {
+                const q = JSON.parse(e.data);
+                renderQuota(q);
             } catch (err) { /* ignore parse errors */ }
         });
 
@@ -445,6 +453,35 @@
         if (loadMoreBtn) {
             loadMoreBtn.addEventListener('click', () => loadTimeline(currentLogFile, false));
         }
+    }
+
+    // --- Quota ---
+    function renderQuota(q) {
+        if (!q || !q.enabled) {
+            quotaWidget.style.display = 'none';
+            return;
+        }
+        quotaWidget.style.display = '';
+        const pct = Math.min(q.percent, 100);
+        const cls = q.percent >= 90 ? 'high' : q.percent >= 75 ? 'medium' : 'low';
+        let renewHtml = '';
+        if (q.total_tokens > 0 && q.renews_in > 0) {
+            renewHtml = `<span class="quota-renew">Renews in ${formatDurationHuman(q.renews_in)}</span>`;
+        }
+        quotaWidget.innerHTML = `
+            <span class="quota-label">Quota</span>
+            <span class="quota-bar"><span class="quota-fill ${cls}" style="width:${pct}%"></span></span>
+            <span class="quota-text">${Math.round(q.percent)}% (${fmtNum(q.total_tokens)} / ${fmtNum(q.token_limit)})</span>
+            ${renewHtml}`;
+    }
+
+    function formatDurationHuman(nanos) {
+        if (!nanos || nanos <= 0) return 'now';
+        const totalMin = Math.floor(nanos / 6e10);
+        const h = Math.floor(totalMin / 60);
+        const m = totalMin % 60;
+        if (h > 0) return h + 'h ' + m + 'm';
+        return m + 'm';
     }
 
     // --- Helpers ---

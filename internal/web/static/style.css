@@ -100,6 +100,53 @@ nav {
 .status-dot.idle { background: var(--gray); }
 .status-dot.inactive { background: var(--text-dim); }
 
+/* Quota widget */
+.quota-widget {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1.5rem;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+}
+
+.quota-label {
+    color: var(--text-dim);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.quota-bar {
+    width: 160px;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.quota-fill {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+
+.quota-fill.low { background: var(--green); }
+.quota-fill.medium { background: var(--yellow); }
+.quota-fill.high { background: var(--red); }
+
+.quota-text {
+    color: var(--text);
+}
+
+.quota-renew {
+    color: var(--text-dim);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
 /* Main content */
 main {
     padding: 1rem 1.5rem;

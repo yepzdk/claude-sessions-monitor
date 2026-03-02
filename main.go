@@ -29,6 +29,9 @@ func main() {
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
+	quotaLimit := flag.Int("quota-limit", 0, "Token limit for your plan (0 = disabled)")
+	quotaWindow := flag.Duration("quota-window", 5*time.Hour, "Rolling window duration")
+	quotaTokens := flag.String("quota-tokens", "all", "Which tokens to count: \"all\" or \"output\"")
 	flag.Parse()
 
 	// Handle version
@@ -54,6 +57,13 @@ func main() {
 		return
 	}
 
+	// Build quota config
+	quotaConfig := session.QuotaConfig{
+		TokenLimit:  *quotaLimit,
+		Window:      *quotaWindow,
+		CountOutput: *quotaTokens == "output",
+	}
+
 	// Handle list mode
 	if *listOnce {
 		sessions, err := session.Discover()
@@ -68,13 +78,17 @@ func main() {
 				os.Exit(1)
 			}
 		} else {
-			ui.RenderList(sessions)
+			var qs *session.QuotaStatus
+			if quotaConfig.TokenLimit > 0 {
+				qs = session.ComputeQuota(quotaConfig)
+			}
+			ui.RenderList(sessions, qs)
 		}
 		return
 	}
 
 	// Live view mode
-	runLiveView(*interval, *webMode, *webPort)
+	runLiveView(*interval, *webMode, *webPort, quotaConfig)
 }
 
 // ViewMode represents the current display mode
@@ -85,7 +99,7 @@ const (
 	ViewModeHistory
 )
 
-func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
+func runLiveView(interval time.Duration, webEnabled bool, webPort int, quotaConfig session.QuotaConfig) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
@@ -94,7 +108,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	// Start web server in background if requested
 	var webURL string
 	if webEnabled {
-		srv := web.NewServer(webPort)
+		srv := web.NewServer(webPort, quotaConfig)
 		webErrCh, err := srv.Start(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
@@ -142,7 +156,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			ui.RenderHistory(sessions, historyDays, true)
 		} else {
 			sessions, _ := session.Discover()
-			ui.RenderLive(sessions, webURL)
+			var qs *session.QuotaStatus
+			if quotaConfig.TokenLimit > 0 {
+				qs = session.ComputeQuota(quotaConfig)
+			}
+			ui.RenderLive(sessions, webURL, qs)
 		}
 	}
 

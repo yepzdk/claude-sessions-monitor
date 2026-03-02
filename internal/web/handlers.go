@@ -171,6 +171,15 @@ func handleTimeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleQuota returns the current quota status as JSON.
+// Returns {"enabled": false} when the token limit is 0.
+func handleQuota(config session.QuotaConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		qs := session.ComputeQuota(config)
+		writeJSON(w, qs)
+	}
+}
+
 // handleMetrics returns aggregated metrics for a log file
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")
