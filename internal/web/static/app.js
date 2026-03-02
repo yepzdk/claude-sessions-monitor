@@ -157,7 +157,8 @@
         const query = (historySearch.value || '').toLowerCase();
         const filtered = historyData.filter(s =>
             !query || s.project.toLowerCase().includes(query) ||
-            (s.git_branch && s.git_branch.toLowerCase().includes(query))
+            (s.git_branch && s.git_branch.toLowerCase().includes(query)) ||
+            (s.first_prompt && s.first_prompt.toLowerCase().includes(query))
         );
 
         if (filtered.length === 0) {
@@ -191,19 +192,25 @@
             </div>`;
             html += `<div class="project-group-body">`;
             html += `<div class="history-row history-header">
-                <span class="history-branch">Branch</span>
-                <span class="history-date">Date</span>
-                <span class="history-messages">Prompts</span>
-                <span class="history-duration">Duration</span>
+                <div class="history-row-main">
+                    <span class="history-branch">Branch</span>
+                    <span class="history-date">Date</span>
+                    <span class="history-messages">Prompts</span>
+                    <span class="history-duration">Duration</span>
+                </div>
             </div>`;
             sessions.forEach(s => {
                 const dur = formatDuration(s.duration);
                 const date = s.start_time ? dateGroup(s.start_time) + ' ' + new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
+                const promptLine = s.first_prompt ? `<div class="history-prompt">${esc(s.first_prompt)}</div>` : '';
                 html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
-                    <span class="history-branch">${s.git_branch ? esc(s.git_branch) : '-'}</span>
-                    <span class="history-date">${date}</span>
-                    <span class="history-messages">${s.message_count || 0}</span>
-                    <span class="history-duration">${dur}</span>
+                    <div class="history-row-main">
+                        <span class="history-branch">${s.git_branch ? esc(s.git_branch) : '-'}</span>
+                        <span class="history-date">${date}</span>
+                        <span class="history-messages">${s.message_count || 0}</span>
+                        <span class="history-duration">${dur}</span>
+                    </div>
+                    ${promptLine}
                 </div>`;
             });
             html += `</div></div>`;

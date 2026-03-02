@@ -349,13 +349,28 @@ main {
 
 .history-row {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0;
     padding: 0.5rem 0.75rem;
     border-radius: 4px;
     cursor: pointer;
     font-size: 0.8125rem;
     transition: background 0.15s;
+}
+
+.history-row-main {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.history-prompt {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    margin-top: 0.125rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .history-row:not(.history-header):hover { background: var(--bg-hover); }
