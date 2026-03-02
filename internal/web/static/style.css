@@ -330,6 +330,16 @@ main {
     font-size: 0.75rem;
     color: var(--text-dim);
     flex-shrink: 0;
+    width: 6.5rem;
+    text-align: left;
+}
+
+.project-group-age {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    width: 5.5rem;
+    text-align: right;
 }
 
 .project-group-body {

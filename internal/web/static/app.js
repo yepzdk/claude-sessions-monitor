@@ -185,10 +185,12 @@
         sortedProjects.forEach(([project, sessions]) => {
             const isCollapsed = query ? '' : ' collapsed';
             html += `<div class="project-group${isCollapsed}">`;
+            const lastStarted = sessions[0] && sessions[0].start_time ? formatAge(sessions[0].start_time) : '';
             html += `<div class="project-group-header">
                 <span class="project-group-toggle">&#x25B6;</span>
                 <span class="project-group-name">${esc(project)}</span>
                 <span class="project-group-count">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
+                <span class="project-group-age">${lastStarted || ''}</span>
             </div>`;
             html += `<div class="project-group-body">`;
             html += `<div class="history-row history-header">
@@ -474,10 +476,14 @@
         const sec = Math.floor(ms / 1000);
         if (sec < 60) return sec + 's ago';
         const min = Math.floor(sec / 60);
-        if (min < 60) return min + 'm ago';
+        if (min < 60) return min + 'min ago';
         const hr = Math.floor(min / 60);
         if (hr < 24) return hr + 'h ago';
-        return Math.floor(hr / 24) + 'd ago';
+        const days = Math.floor(hr / 24);
+        if (days < 7) return days + 'd ago';
+        if (days < 30) return Math.floor(days / 7) + 'w ago';
+        if (days < 365) return Math.floor(days / 30) + 'mo ago';
+        return Math.floor(days / 365) + 'y ago';
     }
 
     function formatDuration(nanos) {
