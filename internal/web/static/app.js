@@ -82,29 +82,37 @@
 
         // Status summary
         const counts = {};
-        currentSessions.forEach(s => { counts[s.status] = (counts[s.status] || 0) + 1; });
+        currentSessions.forEach(s => {
+            const label = s.status === 'Inactive' ? 'Stopped' : s.status;
+            counts[label] = (counts[label] || 0) + 1;
+        });
         statusBar.innerHTML = Object.entries(counts).map(([status, count]) => {
             const cls = statusClass(status);
             return `<span class="status-badge"><span class="status-dot ${cls}"></span>${count} ${status}</span>`;
         }).join('');
 
         sessionsList.innerHTML = currentSessions.map(s => {
+            const isInactive = s.status === 'Inactive';
             const cls = statusClass(s.status);
             const symbol = statusSymbol(s.status);
             const age = s.status === 'Working' ? 'Now' : formatAge(s.last_activity);
             const pct = s.context_percent || 0;
             const ctxCls = pct > 90 ? 'high' : pct > 75 ? 'medium' : 'low';
+            const cardCls = isInactive ? 'session-card stopped' : 'session-card';
+            const stoppedBadge = isInactive ? `<span class="stopped-badge">Stopped</span>` : '';
 
-            return `<div class="session-card" data-logfile="${esc(s.log_file || '')}">
+            return `<div class="${cardCls}" data-logfile="${esc(s.log_file || '')}" data-project="${esc(s.project)}">
                 <div class="session-top">
                     <span class="session-status ${cls}" title="${esc(s.status)}">${symbol}</span>
                     <span class="session-project">${esc(s.project)}</span>
+                    ${stoppedBadge}
                     ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
                     <span class="session-context">
                         <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
                         <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>
                     </span>
                     <span class="session-activity">${age}</span>
+                    <a class="session-history-link" title="View project history">&#x29D6;</a>
                 </div>
                 ${s.last_message ? `<div class="session-bottom">${esc(s.last_message)}</div>` : ''}
             </div>`;
@@ -112,12 +120,25 @@
 
         // Attach click handlers
         sessionsList.querySelectorAll('.session-card').forEach(card => {
-            card.addEventListener('click', () => {
+            card.addEventListener('click', (e) => {
+                // If the history link was clicked, navigate to history instead
+                if (e.target.classList.contains('session-history-link')) {
+                    e.preventDefault();
+                    const project = card.dataset.project;
+                    showProjectHistory(project);
+                    return;
+                }
                 const logFile = card.dataset.logfile;
                 const project = card.querySelector('.session-project').textContent;
                 if (logFile) openDetail(logFile, project);
             });
         });
+    }
+
+    // Navigate to history tab filtered by project
+    function showProjectHistory(project) {
+        historySearch.value = project;
+        switchView('history');
     }
 
     // --- History ---
@@ -144,39 +165,63 @@
             return;
         }
 
-        // Group by date
-        const groups = {};
+        // Group by project, then by date within each project
+        const projectGroups = {};
         filtered.forEach(s => {
-            const group = dateGroup(s.start_time);
-            if (!groups[group]) groups[group] = [];
-            groups[group].push(s);
+            const proj = s.project || 'Unknown';
+            if (!projectGroups[proj]) projectGroups[proj] = [];
+            projectGroups[proj].push(s);
         });
 
-        let html = `<div class="history-row history-header">
-            <span class="history-project">Project</span>
-            <span class="history-branch">Branch</span>
-            <span class="history-messages">Prompts</span>
-            <span class="history-duration">Duration</span>
-        </div>`;
-        for (const [group, sessions] of Object.entries(groups)) {
-            html += `<div class="date-group-header">${esc(group)} (${sessions.length})</div>`;
+        // Sort projects by most recent session first
+        const sortedProjects = Object.entries(projectGroups).sort((a, b) => {
+            const aTime = a[1][0] ? new Date(a[1][0].start_time) : 0;
+            const bTime = b[1][0] ? new Date(b[1][0].start_time) : 0;
+            return bTime - aTime;
+        });
+
+        let html = '';
+        sortedProjects.forEach(([project, sessions]) => {
+            const isCollapsed = query ? '' : ' collapsed';
+            html += `<div class="project-group${isCollapsed}">`;
+            html += `<div class="project-group-header">
+                <span class="project-group-toggle">&#x25B6;</span>
+                <span class="project-group-name">${esc(project)}</span>
+                <span class="project-group-count">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
+            </div>`;
+            html += `<div class="project-group-body">`;
+            html += `<div class="history-row history-header">
+                <span class="history-branch">Branch</span>
+                <span class="history-date">Date</span>
+                <span class="history-messages">Prompts</span>
+                <span class="history-duration">Duration</span>
+            </div>`;
             sessions.forEach(s => {
                 const dur = formatDuration(s.duration);
+                const date = s.start_time ? dateGroup(s.start_time) + ' ' + new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
                 html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
-                    <span class="history-project">${esc(s.project)}</span>
-                    <span class="history-branch">${s.git_branch ? esc(s.git_branch) : ''}</span>
+                    <span class="history-branch">${s.git_branch ? esc(s.git_branch) : '-'}</span>
+                    <span class="history-date">${date}</span>
                     <span class="history-messages">${s.message_count || 0}</span>
                     <span class="history-duration">${dur}</span>
                 </div>`;
             });
-        }
+            html += `</div></div>`;
+        });
 
         historyList.innerHTML = html;
 
-        historyList.querySelectorAll('.history-row').forEach(row => {
+        // Attach collapse/expand handlers
+        historyList.querySelectorAll('.project-group-header').forEach(header => {
+            header.addEventListener('click', () => {
+                header.parentElement.classList.toggle('collapsed');
+            });
+        });
+
+        historyList.querySelectorAll('.history-row:not(.history-header)').forEach(row => {
             row.addEventListener('click', () => {
                 const logFile = row.dataset.logfile;
-                const project = row.querySelector('.history-project').textContent;
+                const project = row.closest('.project-group').querySelector('.project-group-name').textContent;
                 if (logFile) openDetail(logFile, project);
             });
         });

@@ -23,20 +23,32 @@ func writeError(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// handleSessions returns active (non-inactive) sessions as JSON
+// liveRetention is how long a stopped session remains visible in the live view.
+const liveRetention = time.Hour
+
+// filterLiveSessions returns active sessions plus recently-stopped sessions
+// whose LastActivity is within the liveRetention window.
+func filterLiveSessions(all []session.Session) []session.Session {
+	cutoff := time.Now().Add(-liveRetention)
+	result := make([]session.Session, 0, len(all))
+	for _, s := range all {
+		if s.Status != session.StatusInactive {
+			result = append(result, s)
+		} else if s.LastActivity.After(cutoff) {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// handleSessions returns active and recently-stopped sessions as JSON
 func handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := session.Discover()
 	if err != nil {
 		writeError(w, "failed to discover sessions", http.StatusInternalServerError)
 		return
 	}
-	active := make([]session.Session, 0, len(sessions))
-	for _, s := range sessions {
-		if s.Status != session.StatusInactive {
-			active = append(active, s)
-		}
-	}
-	writeJSON(w, active)
+	writeJSON(w, filterLiveSessions(sessions))
 }
 
 // handleHistory returns past sessions as JSON, merging index-based history

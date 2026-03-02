@@ -42,7 +42,9 @@ type IndexEntry struct {
 	IsSidechain  bool   `json:"isSidechain"`
 }
 
-// DiscoverHistory finds all sessions from the past N days
+// DiscoverHistory finds all sessions from the past N days.
+// It merges sessions from sessions-index.json files with a direct scan
+// of .jsonl files so that projects without an index are also included.
 func DiscoverHistory(days int) ([]HistorySession, error) {
 	projectsDir, err := ClaudeProjectsDir()
 	if err != nil {
@@ -50,9 +52,11 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 	}
 	cutoff := time.Now().AddDate(0, 0, -days)
 
+	// Track seen log files to avoid duplicates
+	seen := make(map[string]bool)
 	var sessions []HistorySession
 
-	// Find all sessions-index.json files
+	// Phase 1: Collect sessions from sessions-index.json files (richest metadata)
 	pattern := filepath.Join(projectsDir, "*", "sessions-index.json")
 	indexFiles, err := filepath.Glob(pattern)
 	if err != nil {
@@ -103,6 +107,75 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				FirstPrompt:  entry.FirstPrompt,
 				LogFile:      entry.FullPath,
 			})
+			seen[entry.FullPath] = true
+		}
+	}
+
+	// Phase 2: Scan all project directories for .jsonl files not in any index
+	projectDirs, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, dir := range projectDirs {
+		if !dir.IsDir() || strings.HasPrefix(dir.Name(), ".") {
+			continue
+		}
+
+		projectDir := filepath.Join(projectsDir, dir.Name())
+		projectName := decodeProjectName(dir.Name())
+
+		files, err := os.ReadDir(projectDir)
+		if err != nil {
+			continue
+		}
+
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			// Skip agent/sidechain files
+			if strings.HasPrefix(f.Name(), "agent-") {
+				continue
+			}
+
+			logFile := filepath.Join(projectDir, f.Name())
+			if seen[logFile] {
+				continue
+			}
+
+			info, err := f.Info()
+			if err != nil || info.Size() == 0 {
+				continue
+			}
+
+			// Use file modification time for quick cutoff check before parsing
+			if info.ModTime().Before(cutoff) {
+				continue
+			}
+
+			msgCount, startTime, endTime := QuickSessionStats(logFile)
+			if startTime.IsZero() {
+				startTime = info.ModTime()
+			}
+			if endTime.IsZero() {
+				endTime = info.ModTime()
+			}
+
+			// Re-check cutoff against actual start time
+			if startTime.Before(cutoff) {
+				continue
+			}
+
+			sessions = append(sessions, HistorySession{
+				Project:      projectName,
+				StartTime:    startTime,
+				EndTime:      endTime,
+				Duration:     endTime.Sub(startTime),
+				MessageCount: msgCount,
+				LogFile:      logFile,
+			})
+			seen[logFile] = true
 		}
 	}
 

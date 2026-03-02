@@ -64,13 +64,8 @@ func (h *SSEHub) Run(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			active := make([]session.Session, 0, len(allSessions))
-			for _, s := range allSessions {
-				if s.Status != session.StatusInactive {
-					active = append(active, s)
-				}
-			}
-			data, err := json.Marshal(active)
+			live := filterLiveSessions(allSessions)
+			data, err := json.Marshal(live)
 			if err != nil {
 				continue
 			}
@@ -128,16 +123,11 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	client := make(chan []byte, 16)
 	h.register <- client
 
-	// Send initial data immediately (active sessions only)
+	// Send initial data immediately (active + recently stopped sessions)
 	allSessions, err := session.Discover()
 	if err == nil {
-		active := make([]session.Session, 0, len(allSessions))
-		for _, s := range allSessions {
-			if s.Status != session.StatusInactive {
-				active = append(active, s)
-			}
-		}
-		data, err := json.Marshal(active)
+		live := filterLiveSessions(allSessions)
+		data, err := json.Marshal(live)
 		if err == nil {
 			w.Write(formatSSE("sessions", data))
 			flusher.Flush()
