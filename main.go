@@ -138,8 +138,9 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		fmt.Println("Goodbye!")
 	}()
 
-	// Throttle usage view refreshes (API quota only changes every 30s)
+	// Throttle usage and history view refreshes (data changes infrequently)
 	var lastUsageRender time.Time
+	var lastHistoryRender time.Time
 
 	// Render function that respects current mode
 	render := func() {
@@ -179,6 +180,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 				if viewMode != ViewModeHistory {
 					viewMode = ViewModeHistory
 					render()
+					lastHistoryRender = time.Now()
 				}
 			case 'l', 'L':
 				if viewMode != ViewModeLive {
@@ -203,9 +205,15 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			if viewMode == ViewModeUsage && time.Since(lastUsageRender) < 30*time.Second {
 				continue
 			}
+			if viewMode == ViewModeHistory && time.Since(lastHistoryRender) < 30*time.Second {
+				continue
+			}
 			render()
 			if viewMode == ViewModeUsage {
 				lastUsageRender = time.Now()
+			}
+			if viewMode == ViewModeHistory {
+				lastHistoryRender = time.Now()
 			}
 		}
 	}

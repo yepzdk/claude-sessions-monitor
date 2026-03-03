@@ -60,12 +60,14 @@ func TestCalcSessionLayout_MinWidth(t *testing.T) {
 func TestCalcHistoryLayout_WideTerminal(t *testing.T) {
 	l := calcHistoryLayout(120)
 
-	if !l.showContext {
-		t.Error("expected context column visible at 120 cols")
+	// Project should be capped at preferred width
+	if l.project != prefHistProjectWidth {
+		t.Errorf("expected project=%d, got %d", prefHistProjectWidth, l.project)
 	}
-	total := l.project + l.branch + l.duration + l.msgs + l.context
-	if total != 120 {
-		t.Errorf("expected columns to sum to 120, got %d", total)
+	// totalWidth = project + branch + startTime + duration + msgs + 4 gaps
+	expected := l.project + l.branch + l.startTime + l.duration + l.msgs + 4
+	if l.totalWidth != expected {
+		t.Errorf("expected totalWidth=%d, got %d", expected, l.totalWidth)
 	}
 }
 
@@ -86,11 +88,12 @@ func TestTruncate_ZeroMax(t *testing.T) {
 func TestCalcHistoryLayout_NarrowTerminal(t *testing.T) {
 	l := calcHistoryLayout(60)
 
-	total := l.project + l.branch + l.duration + l.msgs
-	if l.showContext {
-		total += l.context
+	// At narrow widths, project gets whatever remains (may be clamped to min)
+	if l.project < minHistProjectWidth {
+		t.Errorf("expected project >= %d, got %d", minHistProjectWidth, l.project)
 	}
-	if total != 60 {
-		t.Errorf("expected columns to sum to 60, got %d", total)
+	expected := l.project + l.branch + l.startTime + l.duration + l.msgs + 4
+	if l.totalWidth != expected {
+		t.Errorf("expected totalWidth=%d, got %d", expected, l.totalWidth)
 	}
 }
