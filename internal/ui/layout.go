@@ -45,68 +45,45 @@ func calcSessionLayout(width int) sessionLayout {
 // Column width constraints for history table
 const (
 	minHistProjectWidth  = 15
-	prefHistProjectWidth = 27
+	prefHistProjectWidth = 30
 	fixedBranchWidth     = 12
+	fixedHistTimeWidth   = 7 // "HH:MM" + padding
 	fixedDurationWidth   = 10
-	fixedMsgsWidth       = 6
-	minHistContextWidth  = 15
-	prefHistContextWidth = 35
+	fixedMsgsWidth       = 5
 )
 
 // historyLayout holds the computed column widths for the history table.
 type historyLayout struct {
-	project     int
-	branch      int
-	duration    int
-	msgs        int
-	context     int
-	showContext bool
-	totalWidth  int
+	project    int
+	branch     int
+	startTime  int
+	duration   int
+	msgs       int
+	totalWidth int
 }
 
 // calcHistoryLayout computes column widths for the history table.
 func calcHistoryLayout(width int) historyLayout {
 	l := historyLayout{
-		branch:   fixedBranchWidth,
-		duration: fixedDurationWidth,
-		msgs:     fixedMsgsWidth,
+		branch:    fixedBranchWidth,
+		startTime: fixedHistTimeWidth,
+		duration:  fixedDurationWidth,
+		msgs:      fixedMsgsWidth,
 	}
 
-	fixed := l.branch + l.duration + l.msgs
+	// 4 gaps between 5 columns
+	const columnGaps = 4
+	fixed := l.branch + l.startTime + l.duration + l.msgs + columnGaps
 	remaining := width - fixed
-
-	// Try to fit both project and context columns
-	minBoth := minHistProjectWidth + minHistContextWidth
-	if remaining >= minBoth {
-		l.showContext = true
-
+	if remaining < minHistProjectWidth {
+		remaining = minHistProjectWidth
+	}
+	l.project = remaining
+	if l.project > prefHistProjectWidth {
 		l.project = prefHistProjectWidth
-		if l.project > remaining-minHistContextWidth {
-			l.project = remaining - minHistContextWidth
-		}
-		if l.project < minHistProjectWidth {
-			l.project = minHistProjectWidth
-		}
-		l.context = remaining - l.project
-
-		if l.context > prefHistContextWidth {
-			extra := l.context - prefHistContextWidth
-			l.context = prefHistContextWidth
-			l.project += extra
-		}
-	} else {
-		l.showContext = false
-		l.context = 0
-		l.project = remaining
-		if l.project < 1 {
-			l.project = 1
-		}
 	}
 
-	l.totalWidth = l.project + l.branch + l.duration + l.msgs
-	if l.showContext {
-		l.totalWidth += l.context
-	}
+	l.totalWidth = l.project + l.branch + l.startTime + l.duration + l.msgs + columnGaps
 
 	return l
 }
