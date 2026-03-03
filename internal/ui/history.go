@@ -24,6 +24,18 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 
 	l := calcHistoryLayout(getTerminalWidth())
 
+	// Calculate row budget when in interactive mode
+	maxRows := 0 // 0 = unlimited (non-interactive)
+	if showFooter {
+		height := getTerminalHeight()
+		// Reserve: header (2) + footer totals (3: blank+separator+total) + help (2: blank+help)
+		reserved := 7
+		maxRows = height - reserved
+		if maxRows < 3 {
+			maxRows = 3
+		}
+	}
+
 	// Header
 	fmt.Printf("%sSession History%s (past %d days)%s%s", Bold, Reset, days, nl, nl)
 
@@ -31,14 +43,32 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 	var currentGroup string
 	var totalDuration time.Duration
 	totalSessions := 0
+	rowsUsed := 0
+	truncated := 0
 
 	for _, s := range sessions {
 		group := session.GetDateGroup(s.StartTime)
+
+		// Calculate how many rows this entry needs
+		rowsNeeded := 1 // the session row itself
+		if group != currentGroup {
+			rowsNeeded += 2 // group separator + column header
+			if currentGroup != "" {
+				rowsNeeded++ // blank line between groups
+			}
+		}
+
+		// Check if we'd exceed the budget
+		if maxRows > 0 && rowsUsed+rowsNeeded > maxRows {
+			truncated = len(sessions) - totalSessions
+			break
+		}
 
 		// Print date header when group changes
 		if group != currentGroup {
 			if currentGroup != "" {
 				fmt.Print(nl) // Empty line between groups
+				rowsUsed++
 			}
 			separatorLen := l.totalWidth - 5 - len(group) // "━━━ " (4) + " " after group (1)
 			if separatorLen < 1 {
@@ -56,6 +86,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 			}
 			fmt.Print(colHeader + nl)
 			currentGroup = group
+			rowsUsed += 2
 		}
 
 		// Format duration
@@ -76,9 +107,15 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 			row += " " + truncate(context, l.context-1)
 		}
 		fmt.Print(row + nl)
+		rowsUsed++
 
 		totalDuration += s.Duration
 		totalSessions++
+	}
+
+	// Truncation indicator
+	if truncated > 0 {
+		fmt.Printf("%s  ... and %d more sessions%s%s", Dim, truncated, Reset, nl)
 	}
 
 	// Footer with totals
