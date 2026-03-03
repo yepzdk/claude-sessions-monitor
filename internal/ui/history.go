@@ -24,61 +24,85 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 
 	l := calcHistoryLayout(getTerminalWidth())
 
+	// Calculate row budget when in interactive mode
+	maxRows := 0 // 0 = unlimited (non-interactive)
+	if showFooter {
+		height := getTerminalHeight()
+		// Reserve: header (2) + column header (1) + footer totals (3: blank+separator+total) + help (2: blank+help)
+		reserved := 8
+		maxRows = height - reserved
+		if maxRows < 3 {
+			maxRows = 3
+		}
+	}
+
 	// Header
 	fmt.Printf("%sSession History%s (past %d days)%s%s", Bold, Reset, days, nl, nl)
+
+	// Column headers (once at the top)
+	colHeader := fmt.Sprintf("%-*s %-*s %-*s %-*s %*s",
+		l.project, "PROJECT",
+		l.branch, "BRANCH",
+		l.startTime, "TIME",
+		l.duration, "DURATION",
+		l.msgs, "MSGS")
+	fmt.Print(colHeader + nl)
 
 	// Group sessions by date
 	var currentGroup string
 	var totalDuration time.Duration
 	totalSessions := 0
+	rowsUsed := 0
+	truncated := 0
 
 	for _, s := range sessions {
 		group := session.GetDateGroup(s.StartTime)
 
-		// Print date header when group changes
+		// Calculate how many rows this entry needs
+		rowsNeeded := 1 // the session row itself
 		if group != currentGroup {
-			if currentGroup != "" {
-				fmt.Print(nl) // Empty line between groups
-			}
+			rowsNeeded++ // group separator line
+		}
+
+		// Check if we'd exceed the budget
+		if maxRows > 0 && rowsUsed+rowsNeeded > maxRows {
+			truncated = len(sessions) - totalSessions
+			break
+		}
+
+		// Print date separator when group changes
+		if group != currentGroup {
 			separatorLen := l.totalWidth - 5 - len(group) // "━━━ " (4) + " " after group (1)
 			if separatorLen < 1 {
 				separatorLen = 1
 			}
 			fmt.Printf("%s━━━ %s %s%s%s", Dim, group, strings.Repeat("━", separatorLen), Reset, nl)
-
-			colHeader := fmt.Sprintf("%-*s %-*s %-*s %-*s",
-				l.project, "PROJECT",
-				l.branch, "BRANCH",
-				l.duration, "DURATION",
-				l.msgs, "MSGS")
-			if l.showContext {
-				colHeader += fmt.Sprintf(" %s", "CONTEXT")
-			}
-			fmt.Print(colHeader + nl)
 			currentGroup = group
+			rowsUsed++
 		}
+
+		// Format start time
+		startTime := s.StartTime.Format("15:04")
 
 		// Format duration
 		duration := formatDuration(s.Duration)
 
-		// Format context (first prompt, truncated)
-		context := s.FirstPrompt
-		if context == "" {
-			context = "-"
-		}
-
-		row := fmt.Sprintf("%-*s %s%-*s%s %-*s %-*d",
+		row := fmt.Sprintf("%-*s %s%-*s%s %-*s %-*s %*d",
 			l.project, truncate(s.Project, l.project),
 			Gray, l.branch, truncate(s.GitBranch, l.branch), Reset,
+			l.startTime, startTime,
 			l.duration, duration,
 			l.msgs, s.MessageCount)
-		if l.showContext {
-			row += " " + truncate(context, l.context-1)
-		}
 		fmt.Print(row + nl)
+		rowsUsed++
 
 		totalDuration += s.Duration
 		totalSessions++
+	}
+
+	// Truncation indicator
+	if truncated > 0 {
+		fmt.Printf("%s  ... and %d more sessions%s%s", Dim, truncated, Reset, nl)
 	}
 
 	// Footer with totals
