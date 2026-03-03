@@ -33,16 +33,10 @@ const (
 )
 
 // RenderList renders sessions as a simple list (for -l flag)
-func RenderList(sessions []session.Session, quotaStatus *session.QuotaStatus) {
+func RenderList(sessions []session.Session) {
 	if len(sessions) == 0 {
 		fmt.Println("No active Claude sessions found.")
 		return
-	}
-
-	// Show quota bar if enabled
-	if quotaStatus != nil && quotaStatus.Enabled {
-		renderQuotaBar(quotaStatus, "\n")
-		fmt.Println()
 	}
 
 	l := calcSessionLayout(getTerminalWidth())
@@ -71,8 +65,7 @@ func RenderJSON(sessions []session.Session) error {
 // RenderLive renders the live dashboard view
 // Uses \r\n for newlines to work correctly in raw terminal mode
 // If webURL is non-empty, the web dashboard shortcut is shown in the footer.
-// If quotaStatus is non-nil and enabled, a quota usage bar is shown.
-func RenderLive(sessions []session.Session, webURL string, quotaStatus *session.QuotaStatus) {
+func RenderLive(sessions []session.Session, webURL string) {
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
 
@@ -99,11 +92,6 @@ func RenderLive(sessions []session.Session, webURL string, quotaStatus *session.
 	fmt.Printf("%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
 	fmt.Print("\r\n")
 
-	// Quota bar (between status summary and session table)
-	if quotaStatus != nil && quotaStatus.Enabled {
-		renderQuotaBar(quotaStatus, "\r\n")
-	}
-
 	fmt.Print("\r\n")
 
 	if len(active) == 0 {
@@ -127,9 +115,9 @@ func RenderLive(sessions []session.Session, webURL string, quotaStatus *session.
 
 	// Show help footer
 	if webURL != "" {
-		fmt.Printf("\r\n%sh: history | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
+		fmt.Printf("\r\n%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
 	} else {
-		fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
+		fmt.Printf("\r\n%sh: history | u: usage | Ctrl+C: quit%s\r\n", Dim, Reset)
 	}
 }
 
@@ -357,76 +345,6 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 
 	// Blank line after each session block for visual grouping
 	fmt.Print(nl)
-}
-
-// quotaBarWidth is the number of block characters in the quota progress bar
-const quotaBarWidth = 20
-
-// renderQuotaBar renders a quota usage bar line.
-// nl should be "\n" for normal mode or "\r\n" for raw terminal mode.
-func renderQuotaBar(qs *session.QuotaStatus, nl string) {
-	pct := qs.Percent
-	if pct > 100 {
-		pct = 100
-	}
-
-	filled := int(pct / 100 * float64(quotaBarWidth))
-	if filled > quotaBarWidth {
-		filled = quotaBarWidth
-	}
-	empty := quotaBarWidth - filled
-
-	var color string
-	switch {
-	case qs.Percent >= 90:
-		color = Red
-	case qs.Percent >= 75:
-		color = Yellow
-	default:
-		color = Green
-	}
-
-	bar := color + strings.Repeat("█", filled) + Reset +
-		Dim + strings.Repeat("░", empty) + Reset
-
-	renewStr := ""
-	if qs.TotalTokens > 0 && qs.RenewsIn > 0 {
-		renewStr = fmt.Sprintf(" | Renews in %s", formatDurationCompact(qs.RenewsIn))
-	}
-
-	fmt.Printf("%sQuota:%s %s %.0f%% (%s / %s)%s%s",
-		Bold, Reset,
-		bar,
-		qs.Percent,
-		formatTokenCount(qs.TotalTokens),
-		formatTokenCount(qs.TokenLimit),
-		renewStr,
-		nl,
-	)
-}
-
-// formatTokenCount formats a token count as a human-readable string (e.g. "2.1M", "150K")
-func formatTokenCount(n int) string {
-	if n >= 1000000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1000000)
-	}
-	if n >= 1000 {
-		return fmt.Sprintf("%.0fK", float64(n)/1000)
-	}
-	return fmt.Sprintf("%d", n)
-}
-
-// formatDurationCompact formats a duration as a compact human-readable string
-func formatDurationCompact(d time.Duration) string {
-	if d <= 0 {
-		return "now"
-	}
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	if h > 0 {
-		return fmt.Sprintf("%dh %dm", h, m)
-	}
-	return fmt.Sprintf("%dm", m)
 }
 
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars

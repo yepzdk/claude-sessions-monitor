@@ -29,9 +29,6 @@ func main() {
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
-	quotaLimit := flag.Int("quota-limit", 0, "Token limit for your plan (0 = disabled)")
-	quotaWindow := flag.Duration("quota-window", 5*time.Hour, "Rolling window duration")
-	quotaTokens := flag.String("quota-tokens", "all", "Which tokens to count: \"all\" or \"output\"")
 	flag.Parse()
 
 	// Handle version
@@ -57,13 +54,6 @@ func main() {
 		return
 	}
 
-	// Build quota config
-	quotaConfig := session.QuotaConfig{
-		TokenLimit:  *quotaLimit,
-		Window:      *quotaWindow,
-		CountOutput: *quotaTokens == "output",
-	}
-
 	// Handle list mode
 	if *listOnce {
 		sessions, err := session.Discover()
@@ -78,17 +68,13 @@ func main() {
 				os.Exit(1)
 			}
 		} else {
-			var qs *session.QuotaStatus
-			if quotaConfig.TokenLimit > 0 {
-				qs = session.ComputeQuota(quotaConfig)
-			}
-			ui.RenderList(sessions, qs)
+			ui.RenderList(sessions)
 		}
 		return
 	}
 
 	// Live view mode
-	runLiveView(*interval, *webMode, *webPort, quotaConfig)
+	runLiveView(*interval, *webMode, *webPort)
 }
 
 // ViewMode represents the current display mode
@@ -97,20 +83,23 @@ type ViewMode int
 const (
 	ViewModeLive ViewMode = iota
 	ViewModeHistory
+	ViewModeUsage
 )
 
-func runLiveView(interval time.Duration, webEnabled bool, webPort int, quotaConfig session.QuotaConfig) {
+func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start web server in background if requested
 	var webURL string
 	if webEnabled {
-		srv := web.NewServer(webPort, quotaConfig)
+		srv := web.NewServer(webPort)
 		webErrCh, err := srv.Start(ctx)
 		if err != nil {
+			cancel()
 			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
 			os.Exit(1)
 		}
@@ -124,6 +113,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, quotaConf
 
 	// Set up keyboard input
 	if err := ui.SetupRawInput(); err != nil {
+		cancel()
 		fmt.Fprintf(os.Stderr, "Error setting up keyboard input: %v\n", err)
 		os.Exit(1)
 	}
@@ -148,19 +138,24 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, quotaConf
 		fmt.Println("Goodbye!")
 	}()
 
+	// Throttle usage view refreshes (API quota only changes every 30s)
+	var lastUsageRender time.Time
+
 	// Render function that respects current mode
 	render := func() {
-		if viewMode == ViewModeHistory {
+		switch viewMode {
+		case ViewModeHistory:
 			ui.ClearScreen()
 			sessions, _ := session.DiscoverHistory(historyDays)
 			ui.RenderHistory(sessions, historyDays, true)
-		} else {
+		case ViewModeUsage:
+			ui.ClearScreen()
+			usage := session.ComputeUsage()
+			apiQuota := session.FetchAPIQuota()
+			ui.RenderUsage(usage, apiQuota, true)
+		default:
 			sessions, _ := session.Discover()
-			var qs *session.QuotaStatus
-			if quotaConfig.TokenLimit > 0 {
-				qs = session.ComputeQuota(quotaConfig)
-			}
-			ui.RenderLive(sessions, webURL, qs)
+			ui.RenderLive(sessions, webURL)
 		}
 	}
 
@@ -190,6 +185,12 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, quotaConf
 					viewMode = ViewModeLive
 					render()
 				}
+			case 'u', 'U':
+				if viewMode != ViewModeUsage {
+					viewMode = ViewModeUsage
+					render()
+					lastUsageRender = time.Now()
+				}
 			case 'w', 'W':
 				if webURL != "" {
 					openBrowser(webURL)
@@ -199,7 +200,13 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, quotaConf
 				return
 			}
 		case <-ticker.C:
+			if viewMode == ViewModeUsage && time.Since(lastUsageRender) < 30*time.Second {
+				continue
+			}
 			render()
+			if viewMode == ViewModeUsage {
+				lastUsageRender = time.Now()
+			}
 		}
 	}
 }

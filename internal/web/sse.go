@@ -11,26 +11,23 @@ import (
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
 
-// quotaBroadcastInterval controls how often quota data is sent to SSE clients.
-// Quota computation is more expensive than session discovery, so we throttle it.
-const quotaBroadcastInterval = 10 * time.Second
+// usageBroadcastInterval controls how often usage data is sent to SSE clients.
+const usageBroadcastInterval = 10 * time.Second
 
 // SSEHub manages Server-Sent Events connections
 type SSEHub struct {
-	clients     map[chan []byte]struct{}
-	register    chan chan []byte
-	unregister  chan chan []byte
-	mu          sync.Mutex
-	quotaConfig session.QuotaConfig
+	clients    map[chan []byte]struct{}
+	register   chan chan []byte
+	unregister chan chan []byte
+	mu         sync.Mutex
 }
 
 // NewSSEHub creates a new SSE hub
-func NewSSEHub(quotaConfig session.QuotaConfig) *SSEHub {
+func NewSSEHub() *SSEHub {
 	return &SSEHub{
-		clients:     make(map[chan []byte]struct{}),
-		register:    make(chan chan []byte),
-		unregister:  make(chan chan []byte),
-		quotaConfig: quotaConfig,
+		clients:    make(map[chan []byte]struct{}),
+		register:   make(chan chan []byte),
+		unregister: make(chan chan []byte),
 	}
 }
 
@@ -38,17 +35,10 @@ func NewSSEHub(quotaConfig session.QuotaConfig) *SSEHub {
 func (h *SSEHub) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	heartbeat := time.NewTicker(30 * time.Second)
+	usageTicker := time.NewTicker(usageBroadcastInterval)
 	defer ticker.Stop()
 	defer heartbeat.Stop()
-
-	// Quota ticker (slower cadence since it's more expensive)
-	var quotaTicker *time.Ticker
-	var quotaCh <-chan time.Time
-	if h.quotaConfig.TokenLimit > 0 {
-		quotaTicker = time.NewTicker(quotaBroadcastInterval)
-		quotaCh = quotaTicker.C
-		defer quotaTicker.Stop()
-	}
+	defer usageTicker.Stop()
 
 	for {
 		select {
@@ -86,13 +76,15 @@ func (h *SSEHub) Run(ctx context.Context) {
 			}
 			h.broadcast(formatSSE("sessions", data))
 
-		case <-quotaCh:
-			qs := session.ComputeQuota(h.quotaConfig)
-			data, err := json.Marshal(qs)
+		case <-usageTicker.C:
+			usage := session.ComputeUsage()
+			apiQuota := session.FetchAPIQuota()
+			payload := map[string]any{"local": usage, "api_quota": apiQuota}
+			data, err := json.Marshal(payload)
 			if err != nil {
 				continue
 			}
-			h.broadcast(formatSSE("quota", data))
+			h.broadcast(formatSSE("usage", data))
 
 		case <-heartbeat.C:
 			h.broadcast(formatSSE("heartbeat", []byte("{}")))
@@ -146,7 +138,7 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	client := make(chan []byte, 16)
 	h.register <- client
 
-	// Send initial data immediately (active + recently stopped sessions)
+	// Send initial session data immediately (active + recently stopped sessions)
 	allSessions, err := session.Discover()
 	if err == nil {
 		live := filterLiveSessions(allSessions)
@@ -157,14 +149,14 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Send initial quota data if enabled
-	if h.quotaConfig.TokenLimit > 0 {
-		qs := session.ComputeQuota(h.quotaConfig)
-		data, err := json.Marshal(qs)
-		if err == nil {
-			w.Write(formatSSE("quota", data))
-			flusher.Flush()
-		}
+	// Send initial usage data
+	usage := session.ComputeUsage()
+	apiQuota := session.FetchAPIQuota()
+	payload := map[string]any{"local": usage, "api_quota": apiQuota}
+	data, err := json.Marshal(payload)
+	if err == nil {
+		w.Write(formatSSE("usage", data))
+		flusher.Flush()
 	}
 
 	defer func() {

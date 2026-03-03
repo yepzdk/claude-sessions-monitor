@@ -110,3 +110,46 @@ func calcHistoryLayout(width int) historyLayout {
 
 	return l
 }
+
+// Column width constraints for usage table
+const (
+	fixedUsageInputWidth  = 10
+	fixedUsageOutputWidth = 10
+	fixedUsageCacheWidth  = 10
+	fixedUsageTotalWidth  = 10
+	minUsageProjectWidth  = 15
+)
+
+// usageLayout holds the computed column widths for the usage per-session table.
+type usageLayout struct {
+	project    int
+	input      int
+	output     int
+	cache      int
+	total      int
+	totalWidth int
+}
+
+// calcUsageLayout computes column widths for the usage table.
+func calcUsageLayout(width int) usageLayout {
+	l := usageLayout{
+		input:  fixedUsageInputWidth,
+		output: fixedUsageOutputWidth,
+		cache:  fixedUsageCacheWidth,
+		total:  fixedUsageTotalWidth,
+	}
+
+	// 4 gaps between 5 columns, plus 2-char indent
+	const columnGaps = 4
+	const indent = 2
+	fixed := l.input + l.output + l.cache + l.total + columnGaps + indent
+	remaining := width - fixed
+	if remaining < minUsageProjectWidth {
+		remaining = minUsageProjectWidth
+	}
+	l.project = remaining
+
+	l.totalWidth = l.project + l.input + l.output + l.cache + l.total + columnGaps
+
+	return l
+}

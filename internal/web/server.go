@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
 
 //go:embed static
@@ -16,18 +14,16 @@ var staticFiles embed.FS
 
 // Server is the web dashboard HTTP server
 type Server struct {
-	port        int
-	hub         *SSEHub
-	server      *http.Server
-	quotaConfig session.QuotaConfig
+	port   int
+	hub    *SSEHub
+	server *http.Server
 }
 
 // NewServer creates a new web dashboard server
-func NewServer(port int, quotaConfig session.QuotaConfig) *Server {
+func NewServer(port int) *Server {
 	return &Server{
-		port:        port,
-		hub:         NewSSEHub(quotaConfig),
-		quotaConfig: quotaConfig,
+		port: port,
+		hub:  NewSSEHub(),
 	}
 }
 
@@ -42,7 +38,7 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	mux.HandleFunc("/api/history", handleHistory)
 	mux.HandleFunc("/api/sessions/timeline", handleTimeline)
 	mux.HandleFunc("/api/sessions/metrics", handleMetrics)
-	mux.HandleFunc("/api/quota", handleQuota(s.quotaConfig))
+	mux.HandleFunc("/api/usage", handleUsage)
 	mux.HandleFunc("/api/events", s.hub.HandleSSE)
 
 	// Static files
