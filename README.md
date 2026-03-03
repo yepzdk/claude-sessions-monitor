@@ -12,6 +12,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Last message display** shows recent Claude responses
 - **Git branch display** shows current branch for each session
 - **Status indicators**: Working, Needs Input, Waiting
+- **Token quota tracking** with color-coded progress bar (opt-in via `-quota-limit`)
 - **Session badges**: Desktop [D], Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
@@ -64,6 +65,15 @@ csm -history -days 30
 # Find and kill ghost (orphaned) processes
 csm -kill-ghosts
 
+# Token quota tracking (5h rolling window, 5M token limit)
+csm -quota-limit 5000000
+
+# Count only output tokens toward quota
+csm -quota-limit 5000000 -quota-tokens output
+
+# Custom rolling window (e.g. 1 hour)
+csm -quota-limit 5000000 -quota-window 1h
+
 # Custom refresh interval
 csm -interval 5s
 
@@ -80,15 +90,29 @@ csm -v
 | `w` | Open web dashboard in browser (when `--web` is active) |
 | `Ctrl+C` | Quit |
 
+### Token quota tracking
+
+Track token usage against your plan's limits with `-quota-limit`. The quota bar appears in both the terminal live view and the web dashboard.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-quota-limit N` | `0` (disabled) | Token limit for your plan |
+| `-quota-window D` | `5h` | Rolling window duration |
+| `-quota-tokens T` | `all` | Which tokens to count: `all` or `output` |
+
+The progress bar is color-coded: green (<75%), yellow (75-90%), red (>90%). A renewal countdown shows when the oldest tokens in the window will expire.
+
 ### Web dashboard
 
 Start with `csm --web` to run the web dashboard alongside the terminal UI. The dashboard is available at `http://localhost:9847` by default.
 
 Features:
 - **Live sessions** with status indicators, context bars, and auto-refresh via SSE
+- **Token quota widget** with progress bar (when `-quota-limit` is set)
 - **History view** with search/filter and date grouping
 - **Session detail panels** with metrics (token usage, tool breakdown, turn count) and full message timeline
 - **Timeline filters** to show All, Assistant, or User messages
+- REST API: `/api/sessions`, `/api/history`, `/api/quota`, `/api/sessions/timeline`, `/api/sessions/metrics`
 - Embedded in the binary via `go:embed` — no external files or build step needed
 
 ## Status Types
