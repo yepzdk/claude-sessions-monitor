@@ -11,6 +11,9 @@ import (
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
 
+// usageBroadcastInterval controls how often usage data is sent to SSE clients.
+const usageBroadcastInterval = 10 * time.Second
+
 // SSEHub manages Server-Sent Events connections
 type SSEHub struct {
 	clients    map[chan []byte]struct{}
@@ -32,8 +35,10 @@ func NewSSEHub() *SSEHub {
 func (h *SSEHub) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	heartbeat := time.NewTicker(30 * time.Second)
+	usageTicker := time.NewTicker(usageBroadcastInterval)
 	defer ticker.Stop()
 	defer heartbeat.Stop()
+	defer usageTicker.Stop()
 
 	for {
 		select {
@@ -70,6 +75,16 @@ func (h *SSEHub) Run(ctx context.Context) {
 				continue
 			}
 			h.broadcast(formatSSE("sessions", data))
+
+		case <-usageTicker.C:
+			usage := session.ComputeUsage()
+			apiQuota := session.FetchAPIQuota()
+			payload := map[string]any{"local": usage, "api_quota": apiQuota}
+			data, err := json.Marshal(payload)
+			if err != nil {
+				continue
+			}
+			h.broadcast(formatSSE("usage", data))
 
 		case <-heartbeat.C:
 			h.broadcast(formatSSE("heartbeat", []byte("{}")))
@@ -123,7 +138,7 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	client := make(chan []byte, 16)
 	h.register <- client
 
-	// Send initial data immediately (active + recently stopped sessions)
+	// Send initial session data immediately (active + recently stopped sessions)
 	allSessions, err := session.Discover()
 	if err == nil {
 		live := filterLiveSessions(allSessions)
@@ -132,6 +147,16 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 			w.Write(formatSSE("sessions", data))
 			flusher.Flush()
 		}
+	}
+
+	// Send initial usage data
+	usage := session.ComputeUsage()
+	apiQuota := session.FetchAPIQuota()
+	payload := map[string]any{"local": usage, "api_quota": apiQuota}
+	data, err := json.Marshal(payload)
+	if err == nil {
+		w.Write(formatSSE("usage", data))
+		flusher.Flush()
 	}
 
 	defer func() {

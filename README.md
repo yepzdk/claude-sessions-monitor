@@ -12,6 +12,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Last message display** shows recent Claude responses
 - **Git branch display** shows current branch for each session
 - **Status indicators**: Working, Needs Input, Waiting
+- **Usage view** with API quota bars and per-session token breakdown (press `u`)
 - **Session badges**: Desktop [D], Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
@@ -77,8 +78,16 @@ csm -v
 |-----|--------|
 | `h` | Switch to history view |
 | `l` | Switch to live view |
+| `u` | Switch to usage view (API quota + token breakdown) |
 | `w` | Open web dashboard in browser (when `--web` is active) |
 | `Ctrl+C` | Quit |
+
+### Usage view
+
+Press `u` in the live dashboard to see token usage. The view has two sections:
+
+- **API Quota** — Shows your Anthropic plan's utilization (5-hour and 7-day windows, plus per-model breakdowns when available). Uses color-coded progress bars: green (<75%), yellow (75-90%), red (>90%). Reads the OAuth token from the macOS Keychain or `~/.claude/.credentials.json` on Linux.
+- **Local Usage** — Aggregates token counts (input, output, cache) from session log files within a 5-hour rolling window, broken down per session.
 
 ### Web dashboard
 
@@ -86,9 +95,11 @@ Start with `csm --web` to run the web dashboard alongside the terminal UI. The d
 
 Features:
 - **Live sessions** with status indicators, context bars, and auto-refresh via SSE
+- **Usage tab** with API quota bars and per-session token breakdown
 - **History view** with search/filter and date grouping
 - **Session detail panels** with metrics (token usage, tool breakdown, turn count) and full message timeline
 - **Timeline filters** to show All, Assistant, or User messages
+- REST API: `/api/sessions`, `/api/history`, `/api/usage`, `/api/sessions/timeline`, `/api/sessions/metrics`
 - Embedded in the binary via `go:embed` — no external files or build step needed
 
 ## Status Types
@@ -112,7 +123,7 @@ STATUS          PROJECT                             LAST ACTIVITY   LAST MESSAGE
 ● Working       myorg/api-server @main              5s ago          Implementing auth middleware
 ▲ Needs Input   work/claude-sessions-monitor @feat  12s ago         Let me check the git status
 
-h: history | Ctrl+C: quit
+h: history | u: usage | Ctrl+C: quit
 ```
 
 ## Building

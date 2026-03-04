@@ -110,7 +110,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 	fmt.Printf("%sTotal: %d sessions, %s%s%s", Dim, totalSessions, formatDuration(totalDuration), Reset, nl)
 
 	if showFooter {
-		fmt.Printf("%s%sl: live view | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		fmt.Printf("%s%sl: live view | u: usage | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
 }
 

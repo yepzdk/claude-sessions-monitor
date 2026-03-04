@@ -90,7 +90,9 @@ func RenderLive(sessions []session.Session, webURL string) {
 	fmt.Printf("%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
 	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
 	fmt.Printf("%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
-	fmt.Print("\r\n\r\n")
+	fmt.Print("\r\n")
+
+	fmt.Print("\r\n")
 
 	if len(active) == 0 {
 		fmt.Printf("%sNo active Claude sessions.%s\r\n", Dim, Reset)
@@ -113,9 +115,9 @@ func RenderLive(sessions []session.Session, webURL string) {
 
 	// Show help footer
 	if webURL != "" {
-		fmt.Printf("\r\n%sh: history | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
+		fmt.Printf("\r\n%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
 	} else {
-		fmt.Printf("\r\n%sh: history | Ctrl+C: quit%s\r\n", Dim, Reset)
+		fmt.Printf("\r\n%sh: history | u: usage | Ctrl+C: quit%s\r\n", Dim, Reset)
 	}
 }
 

@@ -171,6 +171,13 @@ func handleTimeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUsage returns local token usage stats and API quota as JSON.
+func handleUsage(w http.ResponseWriter, r *http.Request) {
+	usage := session.ComputeUsage()
+	apiQuota := session.FetchAPIQuota()
+	writeJSON(w, map[string]any{"local": usage, "api_quota": apiQuota})
+}
+
 // handleMetrics returns aggregated metrics for a log file
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")

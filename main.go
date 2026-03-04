@@ -83,11 +83,13 @@ type ViewMode int
 const (
 	ViewModeLive ViewMode = iota
 	ViewModeHistory
+	ViewModeUsage
 )
 
 func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -97,6 +99,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		srv := web.NewServer(webPort)
 		webErrCh, err := srv.Start(ctx)
 		if err != nil {
+			cancel()
 			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
 			os.Exit(1)
 		}
@@ -110,6 +113,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 
 	// Set up keyboard input
 	if err := ui.SetupRawInput(); err != nil {
+		cancel()
 		fmt.Fprintf(os.Stderr, "Error setting up keyboard input: %v\n", err)
 		os.Exit(1)
 	}
@@ -134,16 +138,23 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		fmt.Println("Goodbye!")
 	}()
 
-	// Throttle history view refreshes (data changes infrequently)
+	// Throttle usage and history view refreshes (data changes infrequently)
+	var lastUsageRender time.Time
 	var lastHistoryRender time.Time
 
 	// Render function that respects current mode
 	render := func() {
-		if viewMode == ViewModeHistory {
+		switch viewMode {
+		case ViewModeHistory:
 			ui.ClearScreen()
 			sessions, _ := session.DiscoverHistory(historyDays)
 			ui.RenderHistory(sessions, historyDays, true)
-		} else {
+		case ViewModeUsage:
+			ui.ClearScreen()
+			usage := session.ComputeUsage()
+			apiQuota := session.FetchAPIQuota()
+			ui.RenderUsage(usage, apiQuota, true)
+		default:
 			sessions, _ := session.Discover()
 			ui.RenderLive(sessions, webURL)
 		}
@@ -176,6 +187,12 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 					viewMode = ViewModeLive
 					render()
 				}
+			case 'u', 'U':
+				if viewMode != ViewModeUsage {
+					viewMode = ViewModeUsage
+					render()
+					lastUsageRender = time.Now()
+				}
 			case 'w', 'W':
 				if webURL != "" {
 					openBrowser(webURL)
@@ -185,10 +202,16 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 				return
 			}
 		case <-ticker.C:
+			if viewMode == ViewModeUsage && time.Since(lastUsageRender) < 30*time.Second {
+				continue
+			}
 			if viewMode == ViewModeHistory && time.Since(lastHistoryRender) < 30*time.Second {
 				continue
 			}
 			render()
+			if viewMode == ViewModeUsage {
+				lastUsageRender = time.Now()
+			}
 			if viewMode == ViewModeHistory {
 				lastHistoryRender = time.Now()
 			}

@@ -5,6 +5,7 @@
     let currentSessions = [];
     let currentView = 'live';
     let historyData = [];
+    let usageData = null;
     let sseSource = null;
     let reconnectTimer = null;
 
@@ -14,6 +15,7 @@
     const historyList = document.getElementById('history-list');
     const historySearch = document.getElementById('history-search');
     const historyDays = document.getElementById('history-days');
+    const usageContent = document.getElementById('usage-content');
     const detailOverlay = document.getElementById('detail-overlay');
     const detailTitle = document.getElementById('detail-title');
     const detailClose = document.getElementById('detail-close');
@@ -35,11 +37,13 @@
         document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view + '-view'));
         statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
+        if (view === 'usage' && usageData) renderUsageView(usageData);
         window.location.hash = view;
     }
 
     // Init from hash
-    if (window.location.hash === '#history') switchView('history');
+    const initHash = window.location.hash.replace('#', '');
+    if (['history', 'usage'].includes(initHash)) switchView(initHash);
 
     // --- SSE ---
     function connectSSE() {
@@ -50,6 +54,13 @@
             try {
                 currentSessions = JSON.parse(e.data);
                 if (currentView === 'live') renderSessions();
+            } catch (err) { /* ignore parse errors */ }
+        });
+
+        sseSource.addEventListener('usage', e => {
+            try {
+                usageData = JSON.parse(e.data);
+                if (currentView === 'usage') renderUsageView(usageData);
             } catch (err) { /* ignore parse errors */ }
         });
 
@@ -238,6 +249,104 @@
 
     historySearch.addEventListener('input', renderHistory);
     historyDays.addEventListener('change', loadHistory);
+
+    // --- Usage view ---
+    function renderUsageView(data) {
+        if (!data) {
+            usageContent.innerHTML = '<div class="empty-state">No usage data available</div>';
+            return;
+        }
+
+        const apiQuota = data.api_quota;
+        const local = data.local;
+        let html = '';
+
+        // API Quota section
+        html += '<div class="usage-section">';
+        html += '<h2 class="usage-section-title">API Quota</h2>';
+
+        if (apiQuota && apiQuota.available) {
+            html += '<div class="usage-bars">';
+            if (apiQuota.five_hour) {
+                html += renderUsageBar('5-hour', apiQuota.five_hour);
+            }
+            if (apiQuota.seven_day) {
+                html += renderUsageBar('7-day', apiQuota.seven_day);
+            }
+            if (apiQuota.seven_day_sonnet) {
+                html += renderUsageBar('Sonnet', apiQuota.seven_day_sonnet);
+            }
+            if (apiQuota.seven_day_opus) {
+                html += renderUsageBar('Opus', apiQuota.seven_day_opus);
+            }
+            html += '</div>';
+            if (apiQuota.extra_usage && apiQuota.extra_usage.is_enabled) {
+                html += '<div class="usage-note">Extra usage: enabled</div>';
+            }
+        } else {
+            const errMsg = apiQuota && apiQuota.error ? apiQuota.error : 'OAuth token not found';
+            html += `<div class="usage-unavailable">Not available (${esc(errMsg)})</div>`;
+        }
+        html += '</div>';
+
+        // Local usage section
+        html += '<div class="usage-section">';
+        html += '<h2 class="usage-section-title">Local Usage (5h window)</h2>';
+
+        if (local && local.total_tokens > 0) {
+            html += '<div class="usage-summary">';
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Total</div><div class="usage-summary-value">${fmtNum(local.total_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Input</div><div class="usage-summary-value blue">${fmtNum(local.input_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Output</div><div class="usage-summary-value green">${fmtNum(local.output_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Cache</div><div class="usage-summary-value yellow">${fmtNum(local.cache_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Sessions</div><div class="usage-summary-value">${local.sessions ? local.sessions.length : 0}</div></div>`;
+            html += '</div>';
+
+            if (local.sessions && local.sessions.length > 0) {
+                html += '<div class="usage-table">';
+                html += '<div class="usage-table-header">';
+                html += '<span class="usage-col-project">Project</span>';
+                html += '<span class="usage-col-tokens">Input</span>';
+                html += '<span class="usage-col-tokens">Output</span>';
+                html += '<span class="usage-col-tokens">Cache</span>';
+                html += '<span class="usage-col-tokens">Total</span>';
+                html += '</div>';
+                local.sessions.forEach(s => {
+                    html += '<div class="usage-table-row">';
+                    html += `<span class="usage-col-project">${esc(s.project)}</span>`;
+                    html += `<span class="usage-col-tokens">${fmtNum(s.input_tokens)}</span>`;
+                    html += `<span class="usage-col-tokens">${fmtNum(s.output_tokens)}</span>`;
+                    html += `<span class="usage-col-tokens">${fmtNum(s.cache_tokens)}</span>`;
+                    html += `<span class="usage-col-tokens">${fmtNum(s.total_tokens)}</span>`;
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+        } else {
+            html += '<div class="usage-unavailable">No token usage in the past 5 hours.</div>';
+        }
+        html += '</div>';
+
+        usageContent.innerHTML = html;
+    }
+
+    function renderUsageBar(label, bucket) {
+        const pct = Math.min(bucket.utilization || 0, 100);
+        const cls = pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
+        let resetHtml = '';
+        if (bucket.resets_at) {
+            const remaining = new Date(bucket.resets_at) - Date.now();
+            if (remaining > 0) {
+                resetHtml = `<span class="usage-bar-reset">resets in ${formatDurationHuman(remaining * 1e6)}</span>`;
+            }
+        }
+        return `<div class="usage-bar-row">
+            <span class="usage-bar-label">${esc(label)}</span>
+            <span class="usage-bar"><span class="usage-bar-fill ${cls}" style="width:${pct}%"></span></span>
+            <span class="usage-bar-pct">${Math.round(pct)}%</span>
+            ${resetHtml}
+        </div>`;
+    }
 
     // --- Detail panel ---
     let timelineOffset = 0;
@@ -495,6 +604,18 @@
         const hr = Math.floor(min / 60);
         const remMin = min % 60;
         return hr + 'h ' + remMin + 'm';
+    }
+
+    function formatDurationHuman(nanos) {
+        if (!nanos || nanos <= 0) return 'now';
+        const totalMin = Math.floor(nanos / 6e10);
+        const h = Math.floor(totalMin / 60);
+        const m = totalMin % 60;
+        const d = Math.floor(h / 24);
+        const remH = h % 24;
+        if (d > 0) return d + 'd ' + remH + 'h';
+        if (h > 0) return h + 'h ' + m + 'm';
+        return m + 'm';
     }
 
     function dateGroup(ts) {
