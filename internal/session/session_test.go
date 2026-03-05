@@ -55,8 +55,8 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    10.005, // (10 + 1000 + 19000) / 200000 * 100
-			wantTokens:     20010,
+			wantPercent:    10.255, // (10 + 1000 + 19000 + 500) / 200000 * 100
+			wantTokens:     20510,
 			wantHasContext: true,
 		},
 		{
@@ -90,8 +90,8 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    20.005, // (10 + 1000 + 39000) / 200000 * 100
-			wantTokens:     40010,
+			wantPercent:    20.105, // (10 + 1000 + 39000 + 200) / 200000 * 100
+			wantTokens:     40210,
 			wantHasContext: true,
 		},
 		{
@@ -111,8 +111,8 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    90.05, // (100 + 10000 + 170000) / 200000 * 100
-			wantTokens:     180100,
+			wantPercent:    90.55, // (100 + 10000 + 170000 + 1000) / 200000 * 100
+			wantTokens:     181100,
 			wantHasContext: true,
 		},
 		{
@@ -190,8 +190,8 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    10.005, // (10 + 1000 + 19000) / 200000 * 100
-			wantTokens:     20010,
+			wantPercent:    10.255, // (10 + 1000 + 19000 + 500) / 200000 * 100
+			wantTokens:     20510,
 			wantHasContext: true,
 		},
 	}
