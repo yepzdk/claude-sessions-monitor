@@ -138,8 +138,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		fmt.Println("Goodbye!")
 	}()
 
-	// Throttle usage and history view refreshes (data changes infrequently)
-	var lastUsageRender time.Time
+	// Throttle history view refreshes (data changes infrequently)
 	var lastHistoryRender time.Time
 
 	// Render function that respects current mode
@@ -191,7 +190,10 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 				if viewMode != ViewModeUsage {
 					viewMode = ViewModeUsage
 					render()
-					lastUsageRender = time.Now()
+				}
+			case 'r', 'R':
+				if viewMode == ViewModeUsage {
+					render()
 				}
 			case 'w', 'W':
 				if webURL != "" {
@@ -202,16 +204,13 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 				return
 			}
 		case <-ticker.C:
-			if viewMode == ViewModeUsage && time.Since(lastUsageRender) < 30*time.Second {
+			if viewMode == ViewModeUsage {
 				continue
 			}
 			if viewMode == ViewModeHistory && time.Since(lastHistoryRender) < 30*time.Second {
 				continue
 			}
 			render()
-			if viewMode == ViewModeUsage {
-				lastUsageRender = time.Now()
-			}
 			if viewMode == ViewModeHistory {
 				lastHistoryRender = time.Now()
 			}

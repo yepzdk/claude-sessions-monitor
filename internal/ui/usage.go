@@ -97,7 +97,7 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 
 	// Footer
 	if showFooter {
-		fmt.Printf("%s%sl: live | h: history | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		fmt.Printf("%s%sr: refresh | l: live | h: history | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
 }
 

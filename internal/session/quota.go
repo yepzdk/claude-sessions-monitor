@@ -123,10 +123,10 @@ var apiQuotaCache struct {
 	fetchedAt time.Time
 }
 
-const apiQuotaCacheTTL = 30 * time.Second
+const apiQuotaCacheTTL = 60 * time.Second
 
 // FetchAPIQuota queries the Anthropic usage API for real quota utilization.
-// Results are cached for 30 seconds to avoid excessive API calls.
+// Results are cached for 60 seconds to avoid excessive API calls.
 func FetchAPIQuota() *APIQuota {
 	apiQuotaCache.Lock()
 	defer apiQuotaCache.Unlock()
