@@ -578,7 +578,7 @@ func extractContextUsage(entries []LogEntry) (float64, int) {
 		}
 
 		usage := entry.Message.Usage
-		totalTokens := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+		totalTokens := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens + usage.OutputTokens
 		if totalTokens == 0 {
 			continue
 		}

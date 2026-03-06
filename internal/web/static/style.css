@@ -263,6 +263,36 @@ nav {
     color: var(--text-dim);
 }
 
+.usage-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.usage-last-updated {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+}
+
+.usage-refresh-btn {
+    padding: 0.375rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.usage-refresh-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--blue);
+}
+
 /* Main content */
 main {
     padding: 1rem 1.5rem;

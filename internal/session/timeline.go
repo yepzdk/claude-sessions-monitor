@@ -238,7 +238,7 @@ func parseMetricsInternal(logFile string) (*SessionMetrics, error) {
 
 	// Calculate context usage from the last usage entry
 	if lastUsage != nil {
-		totalTokens := lastUsage.InputTokens + lastUsage.CacheCreationInputTokens + lastUsage.CacheReadInputTokens
+		totalTokens := lastUsage.InputTokens + lastUsage.CacheCreationInputTokens + lastUsage.CacheReadInputTokens + lastUsage.OutputTokens
 		m.ContextTokens = totalTokens
 		m.ContextPercent = float64(totalTokens) / float64(DefaultContextWindow) * 100
 	}

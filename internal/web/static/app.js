@@ -37,7 +37,7 @@
         document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view + '-view'));
         statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
-        if (view === 'usage' && usageData) renderUsageView(usageData);
+        if (view === 'usage') loadUsage();
         window.location.hash = view;
     }
 
@@ -54,13 +54,6 @@
             try {
                 currentSessions = JSON.parse(e.data);
                 if (currentView === 'live') renderSessions();
-            } catch (err) { /* ignore parse errors */ }
-        });
-
-        sseSource.addEventListener('usage', e => {
-            try {
-                usageData = JSON.parse(e.data);
-                if (currentView === 'usage') renderUsageView(usageData);
             } catch (err) { /* ignore parse errors */ }
         });
 
@@ -251,6 +244,24 @@
     historyDays.addEventListener('change', loadHistory);
 
     // --- Usage view ---
+    let usageLoading = false;
+    let usageLastUpdated = null;
+
+    async function loadUsage() {
+        if (usageLoading) return;
+        usageLoading = true;
+        try {
+            const resp = await fetch('/api/usage');
+            usageData = await resp.json();
+            usageLastUpdated = new Date();
+            renderUsageView(usageData);
+        } catch (err) {
+            usageContent.innerHTML = '<div class="empty-state">Failed to load usage data</div>';
+        } finally {
+            usageLoading = false;
+        }
+    }
+
     function renderUsageView(data) {
         if (!data) {
             usageContent.innerHTML = '<div class="empty-state">No usage data available</div>';
@@ -260,6 +271,14 @@
         const apiQuota = data.api_quota;
         const local = data.local;
         let html = '';
+
+        // Refresh header
+        html += '<div class="usage-header">';
+        if (usageLastUpdated) {
+            html += '<span class="usage-last-updated">Updated ' + formatAge(usageLastUpdated.toISOString()) + '</span>';
+        }
+        html += '<button class="usage-refresh-btn" id="usage-refresh-btn">\u21BB Refresh</button>';
+        html += '</div>';
 
         // API Quota section
         html += '<div class="usage-section">';
@@ -328,6 +347,9 @@
         html += '</div>';
 
         usageContent.innerHTML = html;
+
+        const refreshBtn = document.getElementById('usage-refresh-btn');
+        if (refreshBtn) refreshBtn.addEventListener('click', loadUsage);
     }
 
     function renderUsageBar(label, bucket) {
