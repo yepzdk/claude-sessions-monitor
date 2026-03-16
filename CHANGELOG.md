@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Menu bar app amd64 build failing due to unsigned cross-compiled `csm` binary inside `.app` bundle
 - Menu bar app shows error message when `csm` binary is not found instead of generic "No sessions found"
 - Removed empty `AppDelegate` class and duplicate `.gitignore` entry
 - README now correctly references `--web-only` flag for menu bar app
