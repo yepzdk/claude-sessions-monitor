@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- CSMMenuBar `.app` bundles attached to GitHub Releases (arm64 + amd64)
+- Homebrew cask: `brew install --cask yepzdk/tools/csm-menubar`
 - macOS menu bar app can be packaged as a `.app` bundle (`make menubar-app`) for Spotlight/Launchpad/Applications
 - macOS menu bar app (SwiftUI, macOS 13+) for persistent session visibility without a terminal or browser
   - Dynamic status icon with color reflecting aggregate session state

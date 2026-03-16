@@ -2,7 +2,8 @@
 
 GO_ROOT := ../..
 VERSION := $(shell cd $(GO_ROOT) && git describe --tags --always --dirty 2>/dev/null || echo "dev")
-GOARCH := $(shell uname -m | sed 's/x86_64/amd64/')
+GOARCH ?= $(shell uname -m | sed 's/x86_64/amd64/')
+SWIFT_ARCH := $(if $(filter amd64,$(GOARCH)),x86_64,$(GOARCH))
 
 APP_NAME := CSMMenuBar.app
 APP_DIR := .build/$(APP_NAME)
@@ -14,7 +15,7 @@ build:
 
 build-release:
 	cd $(GO_ROOT) && GOOS=darwin GOARCH=$(GOARCH) go build -ldflags "-s -w -X main.version=$(VERSION)" -o macos/CSMMenuBar/.build/csm .
-	swift build -c release
+	swift build -c release --arch $(SWIFT_ARCH)
 	cp .build/csm .build/release/csm
 
 app: build-release

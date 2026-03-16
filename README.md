@@ -27,6 +27,12 @@ brew tap yepzdk/tools
 brew install csm
 ```
 
+### Homebrew Cask (macOS menu bar app)
+
+```bash
+brew install --cask yepzdk/tools/csm-menubar
+```
+
 ### From releases
 
 Download the latest binary from [Releases](https://github.com/yepzdk/claude-sessions-monitor/releases) and add to your PATH.
