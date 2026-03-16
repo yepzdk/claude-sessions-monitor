@@ -28,8 +28,15 @@ func main() {
 	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
 	webMode := flag.Bool("web", false, "Start web dashboard server")
+	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
 	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
 	flag.Parse()
+
+	// Check for conflicting flags
+	if *webMode && *webOnly {
+		fmt.Fprintf(os.Stderr, "Error: --web and --web-only are mutually exclusive\n")
+		os.Exit(1)
+	}
 
 	// Handle version
 	if *showVersion {
@@ -70,6 +77,12 @@ func main() {
 		} else {
 			ui.RenderList(sessions)
 		}
+		return
+	}
+
+	// Headless web-only mode (no terminal UI)
+	if *webOnly {
+		runWebOnly(*webPort)
 		return
 	}
 
@@ -214,6 +227,34 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			if viewMode == ViewModeHistory {
 				lastHistoryRender = time.Now()
 			}
+		}
+	}
+}
+
+// runWebOnly starts the web dashboard server without the terminal UI.
+// This is used by the macOS menu bar app and other headless integrations.
+func runWebOnly(webPort int) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	srv := web.NewServer(webPort)
+	webErrCh, err := srv.Start(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Web dashboard running at http://%s\n", srv.Addr())
+
+	select {
+	case <-sigCh:
+		cancel()
+	case err := <-webErrCh:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
+			os.Exit(1)
 		}
 	}
 }
