@@ -25,6 +25,7 @@ app: build-release
 	cp .build/release/CSMMenuBar $(APP_DIR)/Contents/MacOS/
 	cp .build/release/csm $(APP_DIR)/Contents/MacOS/
 	sed 's/1.0.0/$(VERSION)/' Sources/Info.plist > $(APP_DIR)/Contents/Info.plist
+	codesign --force --sign - $(APP_DIR)/Contents/MacOS/csm
 	codesign --force --sign - $(APP_DIR)
 
 clean:
