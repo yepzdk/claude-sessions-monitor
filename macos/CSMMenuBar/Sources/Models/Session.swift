@@ -47,7 +47,9 @@ struct Session: Codable, Identifiable {
 extension Session {
     var relativeActivity: String {
         let interval = Date().timeIntervalSince(lastActivity)
-        if interval < 60 {
+        if interval < 1 {
+            return "just now"
+        } else if interval < 60 {
             return "\(Int(interval))s ago"
         } else if interval < 3600 {
             return "\(Int(interval / 60))m ago"

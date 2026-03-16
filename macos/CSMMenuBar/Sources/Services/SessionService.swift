@@ -23,7 +23,7 @@ final class SessionService: ObservableObject {
     private var csmProcess: Process?
     private var ownedProcess = false
 
-    private let port: Int
+    let port: Int
     private let pollInterval: TimeInterval
     private var terminationObserver: NSObjectProtocol?
 
@@ -37,7 +37,7 @@ final class SessionService: ObservableObject {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in
+                MainActor.assumeIsolated {
                     self?.stop()
                 }
             }
@@ -71,8 +71,11 @@ final class SessionService: ObservableObject {
             return
         }
         startCSMProcess()
-        // Give the server a moment to start
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        // Wait for the server to become ready
+        for _ in 0..<3 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if await isServerRunning() { return }
+        }
     }
 
     private func isServerRunning() async -> Bool {
@@ -161,34 +164,35 @@ final class SessionService: ObservableObject {
     }
 
     private func fetchSessions() {
-        let url = URL(string: "http://localhost:\(port)/api/sessions")!
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            guard let data = data, error == nil else { return }
+        Task {
+            let url = URL(string: "http://localhost:\(port)/api/sessions")!
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
 
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .custom { decoder in
-                let container = try decoder.singleValueContainer()
-                let dateString = try container.decode(String.self)
-                if let date = isoDateFormatter.date(from: dateString) {
-                    return date
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .custom { decoder in
+                    let container = try decoder.singleValueContainer()
+                    let dateString = try container.decode(String.self)
+                    if let date = isoDateFormatter.date(from: dateString) {
+                        return date
+                    }
+                    if let date = isoDateFormatterFallback.date(from: dateString) {
+                        return date
+                    }
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "Cannot decode date: \(dateString)"
+                    )
                 }
-                if let date = isoDateFormatterFallback.date(from: dateString) {
-                    return date
-                }
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Cannot decode date: \(dateString)"
-                )
-            }
 
-            if let sessions = try? decoder.decode([Session].self, from: data) {
-                Task { @MainActor in
-                    self?.sessions = sessions
-                    self?.aggregateStatus = Self.computeAggregateStatus(sessions)
+                if let sessions = try? decoder.decode([Session].self, from: data) {
+                    self.sessions = sessions
+                    self.aggregateStatus = Self.computeAggregateStatus(sessions)
                 }
+            } catch {
+                // Server not reachable; will retry on next poll
             }
         }
-        task.resume()
     }
 
     // MARK: - Aggregate Status

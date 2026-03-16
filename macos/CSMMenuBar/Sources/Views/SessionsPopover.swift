@@ -103,7 +103,7 @@ struct SessionsPopover: View {
     }
 
     private func openWebDashboard() {
-        if let url = URL(string: "http://localhost:9847") {
+        if let url = URL(string: "http://localhost:\(sessionService.port)") {
             NSWorkspace.shared.open(url)
         }
     }

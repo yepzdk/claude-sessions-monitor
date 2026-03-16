@@ -32,6 +32,12 @@ func main() {
 	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
 	flag.Parse()
 
+	// Check for conflicting flags
+	if *webMode && *webOnly {
+		fmt.Fprintf(os.Stderr, "Error: --web and --web-only are mutually exclusive\n")
+		os.Exit(1)
+	}
+
 	// Handle version
 	if *showVersion {
 		fmt.Printf("csm version %s\n", version)

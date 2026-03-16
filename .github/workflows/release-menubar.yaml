@@ -1,0 +1,60 @@
+name: Release Menu Bar App
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release-menubar:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      - name: Build arm64 .app and zip
+        run: |
+          GOARCH=arm64 make -C macos/CSMMenuBar app
+          cd macos/CSMMenuBar/.build && zip -r CSMMenuBar-darwin-arm64.zip CSMMenuBar.app
+          mv CSMMenuBar-darwin-arm64.zip ../../../
+
+      - name: Clean and build amd64 .app and zip
+        run: |
+          make -C macos/CSMMenuBar clean
+          GOARCH=amd64 make -C macos/CSMMenuBar app
+          cd macos/CSMMenuBar/.build && zip -r CSMMenuBar-darwin-amd64.zip CSMMenuBar.app
+          mv CSMMenuBar-darwin-amd64.zip ../../../
+
+      - name: Upload .app zips to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ inputs.tag }}" CSMMenuBar-darwin-arm64.zip CSMMenuBar-darwin-amd64.zip
+
+      - name: Update Homebrew cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: token $HOMEBREW_TAP_TOKEN" \
+            https://api.github.com/repos/yepzdk/homebrew-tools/dispatches \
+            -d "{\"event_type\":\"update-csm-menubar\",\"client_payload\":{\"version\":\"$VERSION\"}}"
