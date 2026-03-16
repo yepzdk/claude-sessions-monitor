@@ -108,20 +108,27 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 
 	// Start web server in background if requested
 	var webURL string
+	var webBrowseURL string
 	if webEnabled {
-		srv := web.NewServer(webPort)
-		webErrCh, err := srv.Start(ctx)
-		if err != nil {
-			cancel()
-			fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
-			os.Exit(1)
-		}
-		go func() {
-			if err := <-webErrCh; err != nil {
-				fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
+		if web.ProbeCSMServer(webPort) {
+			webBrowseURL = fmt.Sprintf("http://localhost:%d", webPort)
+			webURL = webBrowseURL + " (existing server)"
+		} else {
+			srv := web.NewServer(webPort)
+			webErrCh, err := srv.Start(ctx)
+			if err != nil {
+				cancel()
+				fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
+				os.Exit(1)
 			}
-		}()
-		webURL = "http://" + srv.Addr()
+			go func() {
+				if err := <-webErrCh; err != nil {
+					fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
+				}
+			}()
+			webBrowseURL = "http://" + srv.Addr()
+			webURL = webBrowseURL
+		}
 	}
 
 	// Set up keyboard input
@@ -209,8 +216,8 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 					render()
 				}
 			case 'w', 'W':
-				if webURL != "" {
-					openBrowser(webURL)
+				if webBrowseURL != "" {
+					openBrowser(webBrowseURL)
 				}
 			case 3: // Ctrl+C
 				cancel()
@@ -234,6 +241,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 // runWebOnly starts the web dashboard server without the terminal UI.
 // This is used by the macOS menu bar app and other headless integrations.
 func runWebOnly(webPort int) {
+	if web.ProbeCSMServer(webPort) {
+		fmt.Printf("csm web dashboard is already running at http://localhost:%d\n", webPort)
+		os.Exit(0)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sigCh := make(chan os.Signal, 1)

@@ -148,6 +148,16 @@ cp -r macos/CSMMenuBar/.build/CSMMenuBar.app /Applications/
 
 The bundle is ad-hoc code-signed for local use (no Apple Developer account needed).
 
+You can also use `make menubar-install` to build, install to `/Applications/`, and remove the quarantine attribute in one step.
+
+#### macOS Gatekeeper warning
+
+Since the `.app` bundle is ad-hoc signed (not notarized with an Apple Developer ID), macOS may show a "cannot verify that this app is free from malware" warning. There are three ways to resolve this:
+
+- **Option A: System Settings** — Go to System Settings > Privacy & Security, scroll down, and click "Open Anyway" next to the CSMMenuBar message.
+- **Option B: Remove quarantine attribute** — Run `xattr -d com.apple.quarantine /Applications/CSMMenuBar.app` in Terminal.
+- **Option C: Install via Homebrew cask** — `brew install --cask yepzdk/tools/csm-menubar` handles quarantine removal automatically.
+
 ## Status Types
 
 | Symbol | Status | Description |
