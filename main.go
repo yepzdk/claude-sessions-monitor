@@ -108,9 +108,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 
 	// Start web server in background if requested
 	var webURL string
+	var webBrowseURL string
 	if webEnabled {
 		if web.ProbeCSMServer(webPort) {
-			webURL = fmt.Sprintf("http://localhost:%d", webPort)
+			webBrowseURL = fmt.Sprintf("http://localhost:%d", webPort)
+			webURL = webBrowseURL + " (existing server)"
 		} else {
 			srv := web.NewServer(webPort)
 			webErrCh, err := srv.Start(ctx)
@@ -124,7 +126,8 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 					fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
 				}
 			}()
-			webURL = "http://" + srv.Addr()
+			webBrowseURL = "http://" + srv.Addr()
+			webURL = webBrowseURL
 		}
 	}
 
@@ -213,8 +216,8 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 					render()
 				}
 			case 'w', 'W':
-				if webURL != "" {
-					openBrowser(webURL)
+				if webBrowseURL != "" {
+					openBrowser(webBrowseURL)
 				}
 			case 3: // Ctrl+C
 				cancel()

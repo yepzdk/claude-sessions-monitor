@@ -61,7 +61,7 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	// Bind listener synchronously so caller knows if port is available
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("port %d is already in use. Use --port <number> to specify a different port, or check what's using it: lsof -i :%d", s.port, s.port)
+		return nil, fmt.Errorf("failed to listen on port %d: %w\nUse --port <number> to specify a different port, or check what's using it: lsof -i :%d", s.port, err, s.port)
 	}
 
 	errCh := make(chan error, 1)
