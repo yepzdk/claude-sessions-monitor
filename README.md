@@ -16,6 +16,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Session badges**: Desktop [D], Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
+- **macOS menu bar app** - native SwiftUI app for persistent session visibility
 
 ## Installation
 
@@ -49,6 +50,9 @@ csm --web
 
 # Web dashboard on custom port
 csm --web --port 3000
+
+# Web dashboard only (headless, no terminal UI)
+csm --web-only
 
 # List sessions once
 csm -l
@@ -101,6 +105,42 @@ Features:
 - **Timeline filters** to show All, Assistant, or User messages
 - REST API: `/api/sessions`, `/api/history`, `/api/usage`, `/api/sessions/timeline`, `/api/sessions/metrics`
 - Embedded in the binary via `go:embed` — no external files or build step needed
+
+### macOS menu bar app
+
+A native SwiftUI menu bar app that shows session status at a glance. Requires macOS 13+ (Ventura).
+
+Features:
+- **Status icon** in the menu bar with color reflecting aggregate session state (green = working, yellow = needs input, blue = waiting, gray = idle)
+- **Session popover** with active session list showing project, status, branch, context usage, and last activity
+- **Smart process management** - auto-starts `csm --web` if not already running, connects to existing server if available
+- **Web dashboard link** - opens the full web dashboard in your browser
+
+Build and run:
+
+```bash
+# From the project root (builds Go binary + Swift app together)
+make menubar
+
+# Run the app
+macos/CSMMenuBar/.build/debug/CSMMenuBar
+```
+
+The build bundles the `csm` Go binary alongside the Swift executable, so no separate `csm` installation is required. The app automatically manages the `csm --web` server process. If you already have `csm --web` running, the app connects to it without starting a duplicate. When you quit the app, it only terminates the server if it started one.
+
+#### Packaging as a .app bundle
+
+To package the menu bar app as a proper macOS `.app` bundle (launchable from Spotlight/Applications):
+
+```bash
+# Build the .app bundle
+make menubar-app
+
+# Install to Applications
+cp -r macos/CSMMenuBar/.build/CSMMenuBar.app /Applications/
+```
+
+The bundle is ad-hoc code-signed for local use (no Apple Developer account needed).
 
 ## Status Types
 
