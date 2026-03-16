@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Terminal: usage data fetched only on view entry (`u`) or manual refresh (`r`)
 - Web: usage data fetched via REST on tab switch or refresh button click, no longer broadcast via SSE
 - Increase API quota cache TTL from 30s to 60s to reduce Anthropic API request frequency
+- Extract reusable CI workflow for menu bar release (`.github/workflows/release-menubar.yaml`)
+- Menu bar app `fetchSessions()` uses async/await instead of callback-based `dataTask`
 
 ### Fixed
 
@@ -35,8 +37,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `--web` and `--web-only` flags now report an error when used together instead of silently ignoring `--web`
 - Menu bar app displays "just now" instead of "0s ago" for very recent activity
 - Menu bar app server startup uses retry loop (3 × 500ms) instead of a single 1s sleep
-
-### Changed
-
-- Extract reusable CI workflow for menu bar release (`.github/workflows/release-menubar.yaml`)
-- Menu bar app `fetchSessions()` uses async/await instead of callback-based `dataTask`

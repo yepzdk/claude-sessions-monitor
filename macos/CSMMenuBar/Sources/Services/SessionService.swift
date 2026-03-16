@@ -60,6 +60,10 @@ final class SessionService: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        if let observer = terminationObserver {
+            NotificationCenter.default.removeObserver(observer)
+            terminationObserver = nil
+        }
         terminateOwnedProcess()
     }
 
@@ -147,6 +151,7 @@ final class SessionService: ObservableObject {
             return
         }
         process.terminate()
+        process.waitUntilExit()
         csmProcess = nil
         ownedProcess = false
     }
@@ -185,9 +190,12 @@ final class SessionService: ObservableObject {
                     )
                 }
 
-                if let sessions = try? decoder.decode([Session].self, from: data) {
+                do {
+                    let sessions = try decoder.decode([Session].self, from: data)
                     self.sessions = sessions
                     self.aggregateStatus = Self.computeAggregateStatus(sessions)
+                } catch {
+                    NSLog("SessionService: failed to decode sessions: %@", String(describing: error))
                 }
             } catch {
                 // Server not reachable; will retry on next poll
@@ -201,6 +209,7 @@ final class SessionService: ObservableObject {
         var hasWorking = false
         var hasNeedsInput = false
         var hasWaiting = false
+        var hasIdle = false
 
         for session in sessions {
             switch session.status {
@@ -210,7 +219,9 @@ final class SessionService: ObservableObject {
                 hasNeedsInput = true
             case .waiting:
                 hasWaiting = true
-            case .idle, .inactive:
+            case .idle:
+                hasIdle = true
+            case .inactive:
                 break
             }
         }
@@ -218,6 +229,7 @@ final class SessionService: ObservableObject {
         if hasWorking { return .working }
         if hasNeedsInput { return .needsInput }
         if hasWaiting { return .waiting }
+        if hasIdle { return .idle }
         return .inactive
     }
 }

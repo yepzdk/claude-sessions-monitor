@@ -21,6 +21,7 @@ build-release:
 app: build-release
 	rm -rf $(APP_DIR)
 	mkdir -p $(APP_DIR)/Contents/MacOS
+	mkdir -p $(APP_DIR)/Contents/Resources
 	cp .build/release/CSMMenuBar $(APP_DIR)/Contents/MacOS/
 	cp .build/release/csm $(APP_DIR)/Contents/MacOS/
 	sed 's/1.0.0/$(VERSION)/' Sources/Info.plist > $(APP_DIR)/Contents/Info.plist
