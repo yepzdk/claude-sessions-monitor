@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"time"
 )
 
 //go:embed static
@@ -60,7 +61,7 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	// Bind listener synchronously so caller knows if port is available
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
+		return nil, fmt.Errorf("port %d is already in use. Use --port <number> to specify a different port, or check what's using it: lsof -i :%d", s.port, s.port)
 	}
 
 	errCh := make(chan error, 1)
@@ -95,4 +96,16 @@ func securityHeaders(next http.Handler) http.Handler {
 // Addr returns the address the server is configured to listen on.
 func (s *Server) Addr() string {
 	return fmt.Sprintf("localhost:%d", s.port)
+}
+
+// ProbeCSMServer checks if a csm web server is already running on the given port
+// by making a quick HTTP GET to the sessions API endpoint.
+func ProbeCSMServer(port int) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/api/sessions", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }

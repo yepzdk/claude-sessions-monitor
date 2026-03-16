@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `make menubar-install` target for one-step .app installation with quarantine removal
+- README troubleshooting section for macOS Gatekeeper warning
 - CSMMenuBar `.app` bundles attached to GitHub Releases (arm64 + amd64)
 - Homebrew cask: `brew install --cask yepzdk/tools/csm-menubar`
 - macOS menu bar app can be packaged as a `.app` bundle (`make menubar-app`) for Spotlight/Launchpad/Applications
@@ -34,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Unhelpful error when starting csm while another instance is already running on the same port
 - Menu bar app amd64 build failing due to unsigned cross-compiled `csm` binary inside `.app` bundle
 - Menu bar app shows error message when `csm` binary is not found instead of generic "No sessions found"
 - Removed empty `AppDelegate` class and duplicate `.gitignore` entry

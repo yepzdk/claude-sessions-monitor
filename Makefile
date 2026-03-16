@@ -1,4 +1,4 @@
-.PHONY: build build-all install menubar menubar-release menubar-app clean
+.PHONY: build build-all install menubar menubar-release menubar-app menubar-install clean
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -31,6 +31,13 @@ menubar-release:
 # Build macOS menu bar .app bundle
 menubar-app:
 	$(MAKE) -C macos/CSMMenuBar app
+
+# Build and install macOS menu bar .app bundle to /Applications
+menubar-install: menubar-app
+	rm -rf /Applications/CSMMenuBar.app
+	cp -r macos/CSMMenuBar/.build/CSMMenuBar.app /Applications/
+	xattr -d com.apple.quarantine /Applications/CSMMenuBar.app 2>/dev/null || true
+	@echo "Installed CSMMenuBar.app to /Applications/"
 
 # Clean build artifacts
 clean:
