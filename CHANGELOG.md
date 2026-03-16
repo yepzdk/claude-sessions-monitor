@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Menu bar app defers service startup to popover `.onAppear` instead of `init()`
+- Menu bar app reads port from `CSM_PORT` environment variable (default: 9847)
+- Menu bar app terminates `csm` child process off the main thread to prevent UI freeze
 - macOS menu bar app now bundles the `csm` binary — no separate installation required
 - Make usage/quota fetching fully on-demand instead of periodic polling
 - Terminal: usage data fetched only on view entry (`u`) or manual refresh (`r`)
@@ -31,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Menu bar app shows error message when `csm` binary is not found instead of generic "No sessions found"
+- Removed empty `AppDelegate` class and duplicate `.gitignore` entry
+- README now correctly references `--web-only` flag for menu bar app
 - Include output tokens in context window calculation to match Claude Code's reported usage
 - Menu bar app "Web Dashboard" link now uses configured port instead of hardcoded 9847
 - Menu bar app process cleanup race on quit — `csm` child process is now terminated synchronously

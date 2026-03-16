@@ -18,6 +18,7 @@ private let isoDateFormatterFallback: ISO8601DateFormatter = {
 final class SessionService: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var aggregateStatus: SessionStatus = .inactive
+    @Published var serverError: String?
 
     private var timer: Timer?
     private var csmProcess: Process?
@@ -27,34 +28,26 @@ final class SessionService: ObservableObject {
     private let pollInterval: TimeInterval
     private var terminationObserver: NSObjectProtocol?
 
-    init(port: Int = 9847, pollInterval: TimeInterval = 3.0) {
-        self.port = port
+    init(port: Int? = nil, pollInterval: TimeInterval = 3.0) {
+        self.port = port ?? Int(ProcessInfo.processInfo.environment["CSM_PORT"] ?? "") ?? 9847
         self.pollInterval = pollInterval
-        Task { @MainActor in
-            self.startService()
-            self.terminationObserver = NotificationCenter.default.addObserver(
-                forName: NSApplication.willTerminateNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.stop()
-                }
-            }
-        }
     }
 
-    private func startService() {
+    func start() {
+        guard timer == nil else { return }
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.stop()
+            }
+        }
         Task {
             await ensureServer()
             startPolling()
         }
-    }
-
-    func start() {
-        // Called externally if needed; no-op if already polling
-        guard timer == nil else { return }
-        startService()
     }
 
     func stop() {
@@ -78,8 +71,12 @@ final class SessionService: ObservableObject {
         // Wait for the server to become ready
         for _ in 0..<3 {
             try? await Task.sleep(nanoseconds: 500_000_000)
-            if await isServerRunning() { return }
+            if await isServerRunning() {
+                serverError = nil
+                return
+            }
         }
+        serverError = "csm binary not found. Install via: brew install yepzdk/tools/csm"
     }
 
     private func isServerRunning() async -> Bool {
@@ -150,10 +147,12 @@ final class SessionService: ObservableObject {
         guard ownedProcess, let process = csmProcess, process.isRunning else {
             return
         }
-        process.terminate()
-        process.waitUntilExit()
         csmProcess = nil
         ownedProcess = false
+        DispatchQueue.global().async {
+            process.terminate()
+            process.waitUntilExit()
+        }
     }
 
     // MARK: - Polling
@@ -194,6 +193,7 @@ final class SessionService: ObservableObject {
                     let sessions = try decoder.decode([Session].self, from: data)
                     self.sessions = sessions
                     self.aggregateStatus = Self.computeAggregateStatus(sessions)
+                    self.serverError = nil
                 } catch {
                     NSLog("SessionService: failed to decode sessions: %@", String(describing: error))
                 }

@@ -119,7 +119,7 @@ A native SwiftUI menu bar app that shows session status at a glance. Requires ma
 Features:
 - **Status icon** in the menu bar with color reflecting aggregate session state (green = working, yellow = needs input, blue = waiting, gray = idle)
 - **Session popover** with active session list showing project, status, branch, context usage, and last activity
-- **Smart process management** - auto-starts `csm --web` if not already running, connects to existing server if available
+- **Smart process management** - auto-starts `csm --web-only` if not already running, connects to existing server if available
 - **Web dashboard link** - opens the full web dashboard in your browser
 
 Build and run:
@@ -132,7 +132,7 @@ make menubar
 macos/CSMMenuBar/.build/debug/CSMMenuBar
 ```
 
-The build bundles the `csm` Go binary alongside the Swift executable, so no separate `csm` installation is required. The app automatically manages the `csm --web` server process. If you already have `csm --web` running, the app connects to it without starting a duplicate. When you quit the app, it only terminates the server if it started one.
+The build bundles the `csm` Go binary alongside the Swift executable, so no separate `csm` installation is required. The app automatically manages the `csm --web-only` server process. If you already have `csm --web-only` running, the app connects to it without starting a duplicate. When you quit the app, it only terminates the server if it started one.
 
 #### Packaging as a .app bundle
 

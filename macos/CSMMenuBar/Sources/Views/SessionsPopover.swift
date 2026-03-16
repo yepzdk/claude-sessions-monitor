@@ -21,12 +21,23 @@ struct SessionsPopover: View {
             if sessionService.sessions.isEmpty {
                 VStack(spacing: 8) {
                     Spacer()
-                    Image(systemName: "terminal")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.tertiary)
-                    Text("No sessions found")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if let error = sessionService.serverError {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.orange)
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.tertiary)
+                        Text("No sessions found")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
