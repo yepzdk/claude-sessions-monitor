@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Show Claude service status from status.claude.com in terminal live view and web dashboard
 - `make menubar-install` target for one-step .app installation with quarantine removal
 - README troubleshooting section for macOS Gatekeeper warning
 - CSMMenuBar `.app` bundles attached to GitHub Releases (arm64 + amd64)

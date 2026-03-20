@@ -175,7 +175,8 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			ui.RenderUsage(usage, apiQuota, true)
 		default:
 			sessions, _ := session.Discover()
-			ui.RenderLive(sessions, webURL)
+			claudeStatus := session.FetchClaudeStatus()
+			ui.RenderLive(sessions, webURL, claudeStatus)
 		}
 	}
 

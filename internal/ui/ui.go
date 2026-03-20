@@ -65,7 +65,7 @@ func RenderJSON(sessions []session.Session) error {
 // RenderLive renders the live dashboard view
 // Uses \r\n for newlines to work correctly in raw terminal mode
 // If webURL is non-empty, the web dashboard shortcut is shown in the footer.
-func RenderLive(sessions []session.Session, webURL string) {
+func RenderLive(sessions []session.Session, webURL string, claudeStatus *session.ClaudeStatus) {
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
 
@@ -113,11 +113,27 @@ func RenderLive(sessions []session.Session, webURL string) {
 		}
 	}
 
+	// Show Claude service status
+	statusLink := terminalLink("https://status.claude.com/", "status.claude.com")
+	fmt.Print("\r\n")
+	if claudeStatus != nil && claudeStatus.Available {
+		switch claudeStatus.Indicator {
+		case "minor":
+			fmt.Printf("%s%s Claude: %s - %s%s\r\n", Yellow, "\u26A0", claudeStatus.Description, statusLink, Reset)
+		case "major", "critical":
+			fmt.Printf("%s%s Claude: %s - %s%s\r\n", Red, "\u2716", claudeStatus.Description, statusLink, Reset)
+		default:
+			fmt.Printf("%sClaude: %s - %s%s\r\n", Dim, claudeStatus.Description, statusLink, Reset)
+		}
+	} else {
+		fmt.Printf("%sClaude: Status unavailable - %s%s\r\n", Dim, statusLink, Reset)
+	}
+
 	// Show help footer
 	if webURL != "" {
-		fmt.Printf("\r\n%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
+		fmt.Printf("%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
 	} else {
-		fmt.Printf("\r\n%sh: history | u: usage | Ctrl+C: quit%s\r\n", Dim, Reset)
+		fmt.Printf("%sh: history | u: usage | Ctrl+C: quit%s\r\n", Dim, Reset)
 	}
 }
 
@@ -151,6 +167,12 @@ func sanitizeForTerminal(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// terminalLink creates a clickable hyperlink using the OSC 8 escape sequence.
+// Supported by most modern terminal emulators (iTerm2, macOS Terminal, GNOME Terminal, etc).
+func terminalLink(url, text string) string {
+	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
 }
 
 // ResetTerminalTitle resets the terminal title to default
