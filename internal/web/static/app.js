@@ -48,15 +48,37 @@
     if (['history', 'usage'].includes(initHash)) switchView(initHash);
 
     // --- Claude service status ---
+    let claudeStatusInterval = null;
+    let claudeStatusFetchedAt = 0;
+
     async function loadClaudeStatus() {
         try {
             const resp = await fetch('/api/claude-status');
             claudeStatusData = await resp.json();
+            claudeStatusFetchedAt = Date.now();
         } catch (err) {
             claudeStatusData = { available: false, error: 'fetch failed' };
         }
         renderClaudeStatus();
     }
+
+    function startClaudeStatusPolling() {
+        stopClaudeStatusPolling();
+        claudeStatusInterval = setInterval(loadClaudeStatus, 60000);
+    }
+
+    function stopClaudeStatusPolling() {
+        if (claudeStatusInterval) { clearInterval(claudeStatusInterval); claudeStatusInterval = null; }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopClaudeStatusPolling();
+        } else {
+            if (Date.now() - claudeStatusFetchedAt > 60000) loadClaudeStatus();
+            startClaudeStatusPolling();
+        }
+    });
 
     function renderClaudeStatus() {
         if (!claudeStatusEl) return;
@@ -94,7 +116,7 @@
     }
 
     loadClaudeStatus();
-    setInterval(loadClaudeStatus, 60000);
+    startClaudeStatusPolling();
 
     // --- SSE ---
     function connectSSE() {

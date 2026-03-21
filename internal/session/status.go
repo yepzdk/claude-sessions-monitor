@@ -24,6 +24,14 @@ var claudeStatusCache struct {
 
 const claudeStatusCacheTTL = 60 * time.Second
 
+// GetCachedClaudeStatus returns the cached status result without triggering a fetch.
+// Returns nil if status has never been fetched.
+func GetCachedClaudeStatus() *ClaudeStatus {
+	claudeStatusCache.Lock()
+	defer claudeStatusCache.Unlock()
+	return claudeStatusCache.result
+}
+
 // FetchClaudeStatus queries the Claude status page API for service health.
 // Results are cached for 60 seconds to avoid excessive API calls.
 func FetchClaudeStatus() *ClaudeStatus {
