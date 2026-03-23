@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Detect multiple concurrent Claude sessions in the same project directory (each shown as a separate row/card)
 - Show Claude service status from status.claude.com in terminal live view and web dashboard
 - `make menubar-install` target for one-step .app installation with quarantine removal
 - README troubleshooting section for macOS Gatekeeper warning

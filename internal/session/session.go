@@ -184,8 +184,9 @@ func ClaudeProjectsDir() (string, error) {
 
 // getRunningClaudeDirs returns a map of encoded directory names to PIDs where Claude processes are running
 // The keys are in the same format as the project directory names (e.g., -Users-username-Projects-...)
-func getRunningClaudeDirs() map[string]int {
-	dirs := make(map[string]int)
+// Multiple Claude processes in the same directory are tracked as separate PIDs.
+func getRunningClaudeDirs() map[string][]int {
+	dirs := make(map[string][]int)
 
 	// Use ps directly without a shell pipeline to avoid shell injection risks
 	cmd := exec.Command("ps", "ax", "-o", "pid=,comm=")
@@ -229,7 +230,7 @@ func getRunningClaudeDirs() map[string]int {
 					path := string(lFields[len(lFields)-1])
 					// Convert to encoded format (same as project directory names)
 					encoded := encodeProjectPath(path)
-					dirs[encoded] = pid
+					dirs[encoded] = append(dirs[encoded], pid)
 				}
 			}
 		}
@@ -287,18 +288,27 @@ func Discover() ([]Session, error) {
 		}
 
 		projectDir := filepath.Join(projectsDir, entry.Name())
-		logFile, err := findMostRecentLog(projectDir)
-		if err != nil || logFile == "" {
+		pids := runningDirs[entry.Name()]
+
+		logFiles, err := findActiveLogs(projectDir, len(pids))
+		if err != nil || len(logFiles) == 0 {
 			continue
 		}
 
-		session, err := parseSession(entry.Name(), logFile, runningDirs)
-		if err != nil {
-			continue
-		}
+		for i, logFile := range logFiles {
+			// Pair each log file with a PID by index (most recent log gets first PID)
+			var sessionPids []int
+			if i < len(pids) {
+				sessionPids = []int{pids[i]}
+			}
 
-		// Skip ghost processes when they have no recent activity and are truly stale
-		sessions = append(sessions, session)
+			session, err := parseSession(entry.Name(), logFile, sessionPids)
+			if err != nil {
+				continue
+			}
+
+			sessions = append(sessions, session)
+		}
 	}
 
 	// Sort by status priority, then by last activity
@@ -387,8 +397,93 @@ func findMostRecentLog(dir string) (string, error) {
 	return mostRecent, nil
 }
 
+// findActiveLogs returns all active JSONL log files for a project directory.
+// If runningCount > 0, returns at least that many files (the most recently modified),
+// plus any additional files modified within the last 5 minutes.
+// If runningCount == 0, returns only the single most recent file.
+func findActiveLogs(dir string, runningCount int) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	type logEntry struct {
+		path    string
+		modTime time.Time
+		size    int64
+	}
+
+	var logs []logEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		// Skip agent files (subagents) - only track main sessions
+		if strings.HasPrefix(entry.Name(), "agent-") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		logs = append(logs, logEntry{
+			path:    filepath.Join(dir, entry.Name()),
+			modTime: info.ModTime(),
+			size:    info.Size(),
+		})
+	}
+
+	if len(logs) == 0 {
+		return nil, nil
+	}
+
+	// Sort by modification time, newest first
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].modTime.After(logs[j].modTime)
+	})
+
+	if runningCount == 0 {
+		// No running processes: return only the most recent file
+		// Prefer newest non-empty, but return empty if it's newer (fresh session)
+		for _, l := range logs {
+			if l.size > 0 {
+				// Check if there's an even newer empty file
+				if logs[0].size == 0 && logs[0].modTime.After(l.modTime) {
+					return []string{logs[0].path}, nil
+				}
+				return []string{l.path}, nil
+			}
+		}
+		// All empty, return newest
+		return []string{logs[0].path}, nil
+	}
+
+	// Running processes: collect active logs
+	recentThreshold := time.Now().Add(-5 * time.Minute)
+	seen := make(map[string]bool)
+	var result []string
+
+	// Include the top runningCount files (paired with running processes)
+	for i := 0; i < len(logs) && i < runningCount; i++ {
+		result = append(result, logs[i].path)
+		seen[logs[i].path] = true
+	}
+
+	// Also include any additional recently modified files
+	for _, l := range logs {
+		if !seen[l.path] && l.modTime.After(recentThreshold) {
+			result = append(result, l.path)
+		}
+	}
+
+	return result, nil
+}
+
 // parseSession parses a session from its log file
-func parseSession(projectName, logFile string, runningDirs map[string]int) (Session, error) {
+func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
 		LogFile:     logFile,
@@ -398,8 +493,11 @@ func parseSession(projectName, logFile string, runningDirs map[string]int) (Sess
 	}
 
 	// Check if Claude is running in this project directory
-	// runningDirs keys are in the same encoded format as projectName
-	pid, isRunning := runningDirs[projectName]
+	isRunning := len(pids) > 0
+	pid := 0
+	if isRunning {
+		pid = pids[0]
+	}
 
 	// Get file modification time as fallback for last activity
 	info, err := os.Stat(logFile)
@@ -841,11 +939,17 @@ func FindGhostProcesses() ([]GhostProcess, error) {
 	}
 
 	var ghosts []GhostProcess
+	seenPIDs := make(map[int]bool)
 	for _, s := range sessions {
 		// Only consider sessions with a running process
 		if s.GhostPID == 0 {
 			continue
 		}
+		// Deduplicate PIDs (multiple sessions in same project may reference same PID)
+		if seenPIDs[s.GhostPID] {
+			continue
+		}
+		seenPIDs[s.GhostPID] = true
 		// Check if log is stale (> 1 hour since last activity)
 		age := time.Since(s.LastActivity)
 		if age > time.Hour {
