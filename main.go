@@ -147,6 +147,12 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	viewMode := ViewModeLive
 	historyDays := 7
 
+	// Claude status: fetch on-demand (user interaction), use cached on ticker
+	var lastClaudeStatus *session.ClaudeStatus
+	refreshClaudeStatus := func() {
+		lastClaudeStatus = session.FetchClaudeStatus()
+	}
+
 	// Hide cursor and ensure cleanup on exit
 	ui.HideCursor()
 	defer func() {
@@ -175,11 +181,12 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			ui.RenderUsage(usage, apiQuota, true)
 		default:
 			sessions, _ := session.Discover()
-			ui.RenderLive(sessions, webURL)
+			ui.RenderLive(sessions, webURL, lastClaudeStatus)
 		}
 	}
 
 	// Initial render
+	refreshClaudeStatus()
 	render()
 
 	// Main loop with both watcher and keyboard input
@@ -204,6 +211,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			case 'l', 'L':
 				if viewMode != ViewModeLive {
 					viewMode = ViewModeLive
+					refreshClaudeStatus()
 					render()
 				}
 			case 'u', 'U':

@@ -61,11 +61,43 @@ nav {
 .tab:hover { color: var(--text); background: var(--bg-hover); }
 .tab.active { color: var(--text); background: var(--bg); }
 
+/* Claude service status */
+#claude-status {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.claude-status-link {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.claude-status-link:hover {
+    color: var(--text-muted);
+}
+
+.claude-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.claude-status-dot.operational { background: var(--green); }
+.claude-status-dot.warning { background: var(--yellow); }
+.claude-status-dot.outage { background: var(--red); }
+.claude-status-dot.unavailable { background: var(--text-dim); }
+
 #connection-status {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    margin-left: auto;
     flex-shrink: 0;
 }
 #connection-status.connected { background: var(--green); }

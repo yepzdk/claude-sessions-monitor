@@ -40,6 +40,7 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	mux.HandleFunc("/api/sessions/timeline", handleTimeline)
 	mux.HandleFunc("/api/sessions/metrics", handleMetrics)
 	mux.HandleFunc("/api/usage", handleUsage)
+	mux.HandleFunc("/api/claude-status", handleClaudeStatus)
 	mux.HandleFunc("/api/events", s.hub.HandleSSE)
 
 	// Static files

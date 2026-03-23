@@ -178,6 +178,12 @@ func handleUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"local": usage, "api_quota": apiQuota})
 }
 
+// handleClaudeStatus returns the current Claude service status as JSON.
+func handleClaudeStatus(w http.ResponseWriter, r *http.Request) {
+	status := session.FetchClaudeStatus()
+	writeJSON(w, status)
+}
+
 // handleMetrics returns aggregated metrics for a log file
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")

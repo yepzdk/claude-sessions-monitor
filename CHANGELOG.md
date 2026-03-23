@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Show Claude service status from status.claude.com in terminal live view and web dashboard
 - `make menubar-install` target for one-step .app installation with quarantine removal
 - README troubleshooting section for macOS Gatekeeper warning
 - CSMMenuBar `.app` bundles attached to GitHub Releases (arm64 + amd64)
@@ -23,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Terminal: Claude service status is fetched on-demand (startup + key press) instead of every ticker cycle
+- Web: Claude service status polling pauses when the browser tab is hidden and resumes on visibility
 - Menu bar app defers service startup to popover `.onAppear` instead of `init()`
 - Menu bar app reads port from `CSM_PORT` environment variable (default: 9847)
 - Menu bar app terminates `csm` child process off the main thread to prevent UI freeze

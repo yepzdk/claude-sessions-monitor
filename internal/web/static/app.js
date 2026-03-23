@@ -8,6 +8,7 @@
     let usageData = null;
     let sseSource = null;
     let reconnectTimer = null;
+    let claudeStatusData = null;
 
     // --- DOM refs ---
     const statusBar = document.getElementById('status-bar');
@@ -22,6 +23,7 @@
     const detailMetrics = document.getElementById('detail-metrics');
     const detailTimeline = document.getElementById('detail-timeline');
     const connStatus = document.getElementById('connection-status');
+    const claudeStatusEl = document.getElementById('claude-status');
 
     // --- Tab navigation ---
     document.querySelectorAll('.tab').forEach(tab => {
@@ -44,6 +46,77 @@
     // Init from hash
     const initHash = window.location.hash.replace('#', '');
     if (['history', 'usage'].includes(initHash)) switchView(initHash);
+
+    // --- Claude service status ---
+    let claudeStatusInterval = null;
+    let claudeStatusFetchedAt = 0;
+
+    async function loadClaudeStatus() {
+        try {
+            const resp = await fetch('/api/claude-status');
+            claudeStatusData = await resp.json();
+            claudeStatusFetchedAt = Date.now();
+        } catch (err) {
+            claudeStatusData = { available: false, error: 'fetch failed' };
+        }
+        renderClaudeStatus();
+    }
+
+    function startClaudeStatusPolling() {
+        stopClaudeStatusPolling();
+        claudeStatusInterval = setInterval(loadClaudeStatus, 60000);
+    }
+
+    function stopClaudeStatusPolling() {
+        if (claudeStatusInterval) { clearInterval(claudeStatusInterval); claudeStatusInterval = null; }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopClaudeStatusPolling();
+        } else {
+            if (Date.now() - claudeStatusFetchedAt > 60000) loadClaudeStatus();
+            startClaudeStatusPolling();
+        }
+    });
+
+    function renderClaudeStatus() {
+        if (!claudeStatusEl) return;
+        const s = claudeStatusData;
+        if (!s) {
+            claudeStatusEl.innerHTML = '';
+            return;
+        }
+
+        let dotCls = 'claude-status-dot';
+        let text = '';
+
+        if (s.available) {
+            switch (s.indicator) {
+                case 'minor':
+                    dotCls += ' warning';
+                    text = s.description || 'Degraded Performance';
+                    break;
+                case 'major':
+                case 'critical':
+                    dotCls += ' outage';
+                    text = s.description || 'Service Disruption';
+                    break;
+                default:
+                    dotCls += ' operational';
+                    text = s.description || 'All Systems Operational';
+                    break;
+            }
+        } else {
+            dotCls += ' unavailable';
+            text = 'Status unavailable';
+        }
+
+        claudeStatusEl.innerHTML = `<a href="https://status.claude.com/" target="_blank" rel="noopener" class="claude-status-link"><span class="${dotCls}"></span>${esc(text)}</a>`;
+    }
+
+    loadClaudeStatus();
+    startClaudeStatusPolling();
 
     // --- SSE ---
     function connectSSE() {
