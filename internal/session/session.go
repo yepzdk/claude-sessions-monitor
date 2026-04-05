@@ -681,7 +681,8 @@ func extractContextUsage(entries []LogEntry) (float64, int) {
 			continue
 		}
 
-		percent := float64(totalTokens) / float64(DefaultContextWindow) * 100
+		window := contextWindowForModel(entry.Message.Model)
+		percent := float64(totalTokens) / float64(window) * 100
 		return percent, totalTokens
 	}
 
@@ -763,8 +764,21 @@ func readLastEntries(filePath string, count int) ([]LogEntry, error) {
 	return entries, scanner.Err()
 }
 
-// DefaultContextWindow is the context window size for Claude models (200K tokens)
+// DefaultContextWindow is the fallback context window size for Claude models (200K tokens)
 const DefaultContextWindow = 200000
+
+// contextWindowForModel returns the context window size for a given model ID.
+// Opus 4.6 and Sonnet 4.6 have 1M context windows; all others default to 200K.
+func contextWindowForModel(model string) int {
+	switch {
+	case strings.Contains(model, "opus-4-6") || model == "opus":
+		return 1_000_000
+	case strings.Contains(model, "sonnet-4-6") || model == "sonnet":
+		return 1_000_000
+	default:
+		return DefaultContextWindow
+	}
+}
 
 // GhostThreshold is the duration after which a running process with no log activity
 // is considered a ghost (orphaned) process

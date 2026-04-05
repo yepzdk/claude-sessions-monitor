@@ -170,6 +170,7 @@ func parseMetricsInternal(logFile string) (*SessionMetrics, error) {
 	scanner.Buffer(buf, 10*1024*1024)
 
 	var lastUsage *Usage
+	var lastUsageModel string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -212,6 +213,7 @@ func parseMetricsInternal(logFile string) (*SessionMetrics, error) {
 					m.TotalCacheCreationTokens += u.CacheCreationInputTokens
 					m.TotalCacheReadTokens += u.CacheReadInputTokens
 					lastUsage = u
+					lastUsageModel = entry.Message.Model
 				}
 
 				// Count tool usage
@@ -240,7 +242,8 @@ func parseMetricsInternal(logFile string) (*SessionMetrics, error) {
 	if lastUsage != nil {
 		totalTokens := lastUsage.InputTokens + lastUsage.CacheCreationInputTokens + lastUsage.CacheReadInputTokens + lastUsage.OutputTokens
 		m.ContextTokens = totalTokens
-		m.ContextPercent = float64(totalTokens) / float64(DefaultContextWindow) * 100
+		window := contextWindowForModel(lastUsageModel)
+		m.ContextPercent = float64(totalTokens) / float64(window) * 100
 	}
 
 	return m, nil
