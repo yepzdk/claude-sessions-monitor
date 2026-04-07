@@ -771,9 +771,9 @@ const DefaultContextWindow = 200000
 // Opus 4.6 and Sonnet 4.6 have 1M context windows; all others default to 200K.
 func contextWindowForModel(model string) int {
 	switch {
-	case strings.Contains(model, "opus-4-6") || model == "opus":
+	case strings.Contains(model, "opus-4-6"):
 		return 1_000_000
-	case strings.Contains(model, "sonnet-4-6") || model == "sonnet":
+	case strings.Contains(model, "sonnet-4-6"):
 		return 1_000_000
 	default:
 		return DefaultContextWindow

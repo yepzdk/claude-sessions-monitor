@@ -230,6 +230,8 @@ func parseMetricsInternal(logFile string) (*SessionMetrics, error) {
 			}
 			if entry.Subtype == "compact_boundary" || entry.Subtype == "microcompact_boundary" {
 				m.CompactCount++
+				lastUsage = nil
+				lastUsageModel = ""
 			}
 		}
 	}
