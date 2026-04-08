@@ -55,7 +55,7 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    10.255, // (10 + 1000 + 19000 + 500) / 200000 * 100
+			wantPercent:    2.051, // (10 + 1000 + 19000 + 500) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     20510,
 			wantHasContext: true,
 		},
@@ -90,7 +90,7 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    20.105, // (10 + 1000 + 39000 + 200) / 200000 * 100
+			wantPercent:    4.021, // (10 + 1000 + 39000 + 200) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     40210,
 			wantHasContext: true,
 		},
@@ -111,7 +111,7 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    90.55, // (100 + 10000 + 170000 + 1000) / 200000 * 100
+			wantPercent:    18.11, // (100 + 10000 + 170000 + 1000) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     181100,
 			wantHasContext: true,
 		},
@@ -190,7 +190,28 @@ func TestExtractContextUsage(t *testing.T) {
 					},
 				},
 			},
-			wantPercent:    10.255, // (10 + 1000 + 19000 + 500) / 200000 * 100
+			wantPercent:    2.051, // (10 + 1000 + 19000 + 500) / 1000000 * 100 (opus-4-6 = 1M)
+			wantTokens:     20510,
+			wantHasContext: true,
+		},
+		{
+			name: "haiku uses 200K context window",
+			entries: []LogEntry{
+				{
+					Type: "assistant",
+					Message: &Message{
+						Role:  "assistant",
+						Model: "claude-haiku-4-5-20251001",
+						Usage: &Usage{
+							InputTokens:              10,
+							CacheCreationInputTokens: 1000,
+							CacheReadInputTokens:     19000,
+							OutputTokens:             500,
+						},
+					},
+				},
+			},
+			wantPercent:    10.255, // (10 + 1000 + 19000 + 500) / 200000 * 100 (haiku = 200K)
 			wantTokens:     20510,
 			wantHasContext: true,
 		},
@@ -213,6 +234,32 @@ func TestExtractContextUsage(t *testing.T) {
 			diff := percent - tt.wantPercent
 			if diff < -0.01 || diff > 0.01 {
 				t.Errorf("percent = %f, want %f", percent, tt.wantPercent)
+			}
+		})
+	}
+}
+
+func TestContextWindowForModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  int
+	}{
+		{"claude-opus-4-6", 1_000_000},
+		{"opus", 200_000},
+		{"claude-sonnet-4-6", 1_000_000},
+		{"sonnet", 200_000},
+		{"claude-haiku-4-5-20251001", 200_000},
+		{"haiku", 200_000},
+		{"claude-sonnet-4-5-20250929", 200_000},
+		{"", 200_000},
+		{"unknown-model", 200_000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			got := contextWindowForModel(tt.model)
+			if got != tt.want {
+				t.Errorf("contextWindowForModel(%q) = %d, want %d", tt.model, got, tt.want)
 			}
 		})
 	}

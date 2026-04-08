@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Context percentage now uses model-specific context window sizes (Opus 4.6 and Sonnet 4.6 use 1M, others use 200K)
+
 ### Added
 
 - Detect multiple concurrent Claude sessions in the same project directory (each shown as a separate row/card)
