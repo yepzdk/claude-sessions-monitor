@@ -346,26 +346,32 @@ func TestDetermineStatus(t *testing.T) {
 		return now.Add(-d)
 	}
 
+	// Zero time means "no file modtime" — won't trigger the file modtime check
+	zeroTime := time.Time{}
+
 	tests := []struct {
-		name       string
-		entries    []LogEntry
-		isRunning  bool
-		wantStatus Status
-		wantTask   string
+		name        string
+		entries     []LogEntry
+		isRunning   bool
+		fileModTime time.Time
+		wantStatus  Status
+		wantTask    string
 	}{
 		{
 			name:       "empty entries not running",
 			entries:    nil,
-			isRunning:  false,
-			wantStatus: StatusInactive,
-			wantTask:   "-",
+			isRunning:   false,
+			fileModTime: zeroTime,
+			wantStatus:  StatusInactive,
+			wantTask:    "-",
 		},
 		{
-			name:       "empty entries running",
-			entries:    nil,
-			isRunning:  true,
-			wantStatus: StatusWaiting,
-			wantTask:   "-",
+			name:        "empty entries running",
+			entries:     nil,
+			isRunning:   true,
+			fileModTime: zeroTime,
+			wantStatus:  StatusWaiting,
+			wantTask:    "-",
 		},
 		{
 			name: "not running with entries",
@@ -593,11 +599,38 @@ func TestDetermineStatus(t *testing.T) {
 			wantStatus: StatusWorking,
 			wantTask:   "Processing...",
 		},
+		{
+			name: "recent file modtime overrides stale entries",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(6 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Building project"}},
+				}},
+			},
+			isRunning:   true,
+			fileModTime: ago(10 * time.Second),
+			wantStatus:  StatusWorking,
+			wantTask:    "Building project",
+		},
+		{
+			name: "old file modtime does not override stale entries",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(6 * time.Minute)},
+			},
+			isRunning:   true,
+			fileModTime: ago(3 * time.Minute),
+			wantStatus:  StatusWaiting,
+			wantTask:    "-",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, task, _ := determineStatus(tt.entries, tt.isRunning)
+			modTime := tt.fileModTime
+			if modTime.IsZero() {
+				// Default to old modtime so the file modtime check doesn't fire
+				modTime = now.Add(-1 * time.Hour)
+			}
+			status, task, _ := determineStatus(tt.entries, tt.isRunning, modTime)
 			if status != tt.wantStatus {
 				t.Errorf("status = %q, want %q", status, tt.wantStatus)
 			}

@@ -533,7 +533,7 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	session.ContextPercent, session.ContextTokens = extractContextUsage(entries)
 
 	// Determine status from log entries
-	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning)
+	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning, info.ModTime())
 
 	// Store PID for all running sessions (used by --kill-ghosts)
 	if isRunning && pid > 0 {
@@ -785,9 +785,11 @@ func contextWindowForModel(model string) int {
 // is considered a ghost (orphaned) process
 const GhostThreshold = 10 * time.Minute
 
-// determineStatus analyzes log entries to determine session status
-// Returns: status, task description, and whether this is a ghost process
-func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) {
+// determineStatus analyzes log entries to determine session status.
+// fileModTime is the log file's modification time, used to detect recent writes
+// that may not yet appear as parsed entries (e.g., during streaming).
+// Returns: status, task description, and whether this is a ghost process.
+func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) (Status, string, bool) {
 	if len(entries) == 0 {
 		if isRunning {
 			// Process running but no log entries - new session starting up
@@ -896,6 +898,13 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 	// active work: tool execution, hook callbacks, or subagent activity.
 	// A recent heartbeat is a strong signal that the session is working.
 	if lastProgress != nil && time.Since(lastProgress.Timestamp) < 2*time.Minute {
+		task := extractTask(lastAssistant)
+		return StatusWorking, task, false
+	}
+
+	// If the log file was recently modified (within 30s), the session is actively
+	// writing — even if parsed entries are stale (e.g., streaming writes in progress).
+	if !fileModTime.IsZero() && time.Since(fileModTime) < 30*time.Second {
 		task := extractTask(lastAssistant)
 		return StatusWorking, task, false
 	}

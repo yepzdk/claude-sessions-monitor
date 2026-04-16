@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Sessions actively using tools, hooks, or subagents no longer flicker to "Waiting" — progress heartbeats from Claude Code logs are now tracked
 - Multi-tool_use detection: all tool calls in an assistant message are now checked, not just the first
 - Extended assistant "Working" window from 30 seconds to 2 minutes to reduce false "Waiting" during brief log gaps
+- Use log file modification time to detect active streaming writes, preventing "Waiting" during early response generation
 - Context percentage now uses model-specific context window sizes (Opus 4.6 and Sonnet 4.6 use 1M, others use 200K)
 
 ### Added
