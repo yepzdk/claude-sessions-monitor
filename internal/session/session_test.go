@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestExtractContextUsage(t *testing.T) {
@@ -334,5 +335,308 @@ func TestUsageJSONParsing(t *testing.T) {
 	}
 	if entry.Message.Usage.OutputTokens != 500 {
 		t.Errorf("OutputTokens = %d, want 500", entry.Message.Usage.OutputTokens)
+	}
+}
+
+func TestDetermineStatus(t *testing.T) {
+	now := time.Now()
+
+	// Helper to create a timestamp relative to now
+	ago := func(d time.Duration) time.Time {
+		return now.Add(-d)
+	}
+
+	// Zero time means "no file modtime" — won't trigger the file modtime check
+	zeroTime := time.Time{}
+
+	tests := []struct {
+		name        string
+		entries     []LogEntry
+		isRunning   bool
+		fileModTime time.Time
+		wantStatus  Status
+		wantTask    string
+	}{
+		{
+			name:       "empty entries not running",
+			entries:    nil,
+			isRunning:   false,
+			fileModTime: zeroTime,
+			wantStatus:  StatusInactive,
+			wantTask:    "-",
+		},
+		{
+			name:        "empty entries running",
+			entries:     nil,
+			isRunning:   true,
+			fileModTime: zeroTime,
+			wantStatus:  StatusWaiting,
+			wantTask:    "-",
+		},
+		{
+			name: "not running with entries",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(10 * time.Second)},
+			},
+			isRunning:  false,
+			wantStatus: StatusInactive,
+			wantTask:   "-",
+		},
+		{
+			name: "recent assistant text message within 2 minutes",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(45 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Working on it"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Working on it",
+		},
+		{
+			name: "assistant text message older than 2 minutes",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Working on it"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
+			name: "pending tool_use recent",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(30 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Bash"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Using: Bash",
+		},
+		{
+			name: "pending tool_use stale",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Bash"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusNeedsInput,
+			wantTask:   "Using: Bash",
+		},
+		{
+			name: "tool_use with tool_result and still processing",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(20 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Read"}},
+				}},
+				{Type: "user", Timestamp: ago(15 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_result"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Processing...",
+		},
+		{
+			name: "tool_use with tool_result and turn completed",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(30 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Read"}},
+				}},
+				{Type: "user", Timestamp: ago(25 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_result"}},
+				}},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(20 * time.Second)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
+			name: "multiple tool_use first resolved second pending",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(30 * time.Second), Message: &Message{
+					Content: []ContentItem{
+						{Type: "tool_use", Name: "Read"},
+						{Type: "tool_use", Name: "Grep"},
+					},
+				}},
+				{Type: "user", Timestamp: ago(25 * time.Second), Message: &Message{
+					Content: []ContentItem{
+						{Type: "tool_result"},
+					},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Using: Grep",
+		},
+		{
+			name: "multiple tool_use all resolved",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(20 * time.Second), Message: &Message{
+					Content: []ContentItem{
+						{Type: "tool_use", Name: "Read"},
+						{Type: "tool_use", Name: "Grep"},
+					},
+				}},
+				{Type: "user", Timestamp: ago(15 * time.Second), Message: &Message{
+					Content: []ContentItem{
+						{Type: "tool_result"},
+						{Type: "tool_result"},
+					},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Processing...",
+		},
+		{
+			name: "recent progress heartbeat overrides stale assistant",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(4 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Running tests"}},
+				}},
+				{Type: "progress", Timestamp: ago(30 * time.Second)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Running tests",
+		},
+		{
+			name: "hook_progress counts as heartbeat",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Editing files"}},
+				}},
+				{Type: "hook_progress", Timestamp: ago(20 * time.Second)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Editing files",
+		},
+		{
+			name: "agent_progress counts as heartbeat",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Exploring code"}},
+				}},
+				{Type: "agent_progress", Timestamp: ago(45 * time.Second)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Exploring code",
+		},
+		{
+			name: "stale progress does not help",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(4 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Done"}},
+				}},
+				{Type: "progress", Timestamp: ago(3 * time.Minute)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
+			name: "stale log over 5 minutes",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(6 * time.Minute)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
+			name: "turn completed waiting for user",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Done"}},
+				}},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(3 * time.Minute)},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
+			name: "turn completed then new user message",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Minute)},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(3 * time.Minute)},
+				{Type: "user", Timestamp: ago(10 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Do more"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Processing...",
+		},
+		{
+			name: "user message is most recent no assistant yet",
+			entries: []LogEntry{
+				{Type: "user", Timestamp: ago(5 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Hello"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Processing...",
+		},
+		{
+			name: "user message after old assistant",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(4 * time.Minute)},
+				{Type: "user", Timestamp: ago(3 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Next task"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Processing...",
+		},
+		{
+			name: "recent file modtime overrides stale entries",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(6 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Building project"}},
+				}},
+			},
+			isRunning:   true,
+			fileModTime: ago(10 * time.Second),
+			wantStatus:  StatusWorking,
+			wantTask:    "Building project",
+		},
+		{
+			name: "old file modtime does not override stale entries",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(6 * time.Minute)},
+			},
+			isRunning:   true,
+			fileModTime: ago(3 * time.Minute),
+			wantStatus:  StatusWaiting,
+			wantTask:    "-",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modTime := tt.fileModTime
+			if modTime.IsZero() {
+				// Default to old modtime so the file modtime check doesn't fire
+				modTime = now.Add(-1 * time.Hour)
+			}
+			status, task, _ := determineStatus(tt.entries, tt.isRunning, modTime)
+			if status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", status, tt.wantStatus)
+			}
+			if task != tt.wantTask {
+				t.Errorf("task = %q, want %q", task, tt.wantTask)
+			}
+		})
 	}
 }

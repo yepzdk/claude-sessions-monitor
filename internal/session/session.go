@@ -62,10 +62,11 @@ type LogEntry struct {
 
 // Message represents the message field in a log entry
 type Message struct {
-	Role    string        `json:"role,omitempty"`
-	Model   string        `json:"model,omitempty"`
-	Content []ContentItem `json:"-"`
-	Usage   *Usage        `json:"usage,omitempty"`
+	Role       string        `json:"role,omitempty"`
+	Model      string        `json:"model,omitempty"`
+	Content    []ContentItem `json:"-"`
+	Usage      *Usage        `json:"usage,omitempty"`
+	StopReason string        `json:"stop_reason,omitempty"`
 
 	// RawContent holds the unparsed content array for custom unmarshalling.
 	// Content arrays can contain either objects ({"type":"text",...}) or
@@ -532,7 +533,7 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	session.ContextPercent, session.ContextTokens = extractContextUsage(entries)
 
 	// Determine status from log entries
-	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning)
+	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning, info.ModTime())
 
 	// Store PID for all running sessions (used by --kill-ghosts)
 	if isRunning && pid > 0 {
@@ -784,9 +785,11 @@ func contextWindowForModel(model string) int {
 // is considered a ghost (orphaned) process
 const GhostThreshold = 10 * time.Minute
 
-// determineStatus analyzes log entries to determine session status
-// Returns: status, task description, and whether this is a ghost process
-func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) {
+// determineStatus analyzes log entries to determine session status.
+// fileModTime is the log file's modification time, used to detect recent writes
+// that may not yet appear as parsed entries (e.g., during streaming).
+// Returns: status, task description, and whether this is a ghost process.
+func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) (Status, string, bool) {
 	if len(entries) == 0 {
 		if isRunning {
 			// Process running but no log entries - new session starting up
@@ -798,6 +801,7 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 	var lastAssistant *LogEntry
 	var lastUser *LogEntry
 	var lastSystem *LogEntry
+	var lastProgress *LogEntry
 	var lastTimestamp time.Time
 
 	// Find the last relevant entries
@@ -821,10 +825,14 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 			if lastSystem == nil && entry.Subtype == "turn_duration" {
 				lastSystem = &entries[i]
 			}
+		case "progress", "hook_progress", "agent_progress":
+			if lastProgress == nil {
+				lastProgress = &entries[i]
+			}
 		}
 
 		// Stop once we have all we need
-		if lastAssistant != nil && lastUser != nil && lastSystem != nil {
+		if lastAssistant != nil && lastUser != nil && lastSystem != nil && lastProgress != nil {
 			break
 		}
 	}
@@ -839,27 +847,38 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 	hasPendingToolUse := false
 	pendingToolName := ""
 	if lastAssistant != nil && lastAssistant.Message != nil {
+		// Count all tool_use blocks in the assistant message
+		toolUseCount := 0
+		lastToolName := ""
 		for _, content := range lastAssistant.Message.Content {
 			if content.Type == "tool_use" {
-				// Check if there's a corresponding tool_result after
-				hasToolResult := false
-				if lastUser != nil && lastUser.Timestamp.After(lastAssistant.Timestamp) {
-					for _, uc := range lastUser.Message.Content {
-						if uc.Type == "tool_result" {
-							hasToolResult = true
-							// Tool was approved, check if still working
-							if lastSystem != nil && lastSystem.Timestamp.After(lastUser.Timestamp) {
-								return StatusWaiting, "-", false
-							}
-							return StatusWorking, "Processing...", false
-						}
+				toolUseCount++
+				lastToolName = content.Name
+			}
+		}
+
+		if toolUseCount > 0 {
+			// Count tool_result blocks in the subsequent user message
+			toolResultCount := 0
+			if lastUser != nil && lastUser.Timestamp.After(lastAssistant.Timestamp) && lastUser.Message != nil {
+				for _, uc := range lastUser.Message.Content {
+					if uc.Type == "tool_result" {
+						toolResultCount++
 					}
 				}
-				if !hasToolResult {
-					hasPendingToolUse = true
-					pendingToolName = content.Name
+			}
+
+			if toolResultCount >= toolUseCount {
+				// All tools got results - check if turn completed or still working
+				if lastSystem != nil && lastSystem.Timestamp.After(lastUser.Timestamp) {
+					// Turn completed after tool results
+				} else {
+					return StatusWorking, "Processing...", false
 				}
-				break
+			} else {
+				// Some tool_use blocks have no result yet
+				hasPendingToolUse = true
+				pendingToolName = lastToolName
 			}
 		}
 	}
@@ -873,6 +892,21 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 			return StatusWorking, "Using: " + pendingToolName, false
 		}
 		return StatusNeedsInput, "Using: " + pendingToolName, false
+	}
+
+	// Progress heartbeats (progress, hook_progress, agent_progress) indicate
+	// active work: tool execution, hook callbacks, or subagent activity.
+	// A recent heartbeat is a strong signal that the session is working.
+	if lastProgress != nil && time.Since(lastProgress.Timestamp) < 2*time.Minute {
+		task := extractTask(lastAssistant)
+		return StatusWorking, task, false
+	}
+
+	// If the log file was recently modified (within 30s), the session is actively
+	// writing — even if parsed entries are stale (e.g., streaming writes in progress).
+	if !fileModTime.IsZero() && time.Since(fileModTime) < 30*time.Second {
+		task := extractTask(lastAssistant)
+		return StatusWorking, task, false
 	}
 
 	// If process is running but log is stale, it's Waiting (not ghost)
@@ -893,10 +927,11 @@ func determineStatus(entries []LogEntry, isRunning bool) (Status, string, bool) 
 		}
 	}
 
-	// If assistant is recent and no turn_duration, it's working
+	// If assistant is recent, it's working. Use 2-minute window to avoid
+	// flipping to "Waiting" during brief gaps between log writes.
 	if lastAssistant != nil {
 		task := extractTask(lastAssistant)
-		if time.Since(lastAssistant.Timestamp) < 30*time.Second {
+		if time.Since(lastAssistant.Timestamp) < 2*time.Minute {
 			return StatusWorking, task, false
 		}
 	}

@@ -9,10 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sessions actively using tools, hooks, or subagents no longer flicker to "Waiting" — progress heartbeats from Claude Code logs are now tracked
+- Multi-tool_use detection: all tool calls in an assistant message are now checked, not just the first
+- Extended assistant "Working" window from 30 seconds to 2 minutes to reduce false "Waiting" during brief log gaps
+- Use log file modification time to detect active streaming writes, preventing "Waiting" during early response generation
 - Context percentage now uses model-specific context window sizes (Opus 4.6 and Sonnet 4.6 use 1M, others use 200K)
 
 ### Added
 
+- Parse `stop_reason` field from Claude Code JSONL logs for more accurate status detection
+- Track `progress`, `hook_progress`, and `agent_progress` log entries as activity heartbeats
 - Detect multiple concurrent Claude sessions in the same project directory (each shown as a separate row/card)
 - Show Claude service status from status.claude.com in terminal live view and web dashboard
 - `make menubar-install` target for one-step .app installation with quarantine removal
