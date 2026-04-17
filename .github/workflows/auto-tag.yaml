@@ -82,13 +82,13 @@ jobs:
 
       - name: Update Homebrew formula
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
           TAG_NAME: ${{ steps.next_version.outputs.new_tag }}
         run: |
           VERSION="${TAG_NAME#v}"
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: token $HOMEBREW_TAP_TOKEN" \
+            -H "Authorization: token $HOMEBREW_TAP_PAT" \
             https://api.github.com/repos/yepzdk/homebrew-tools/dispatches \
             -d "{\"event_type\":\"update-csm\",\"client_payload\":{\"version\":\"$VERSION\"}}"
 
@@ -98,4 +98,4 @@ jobs:
     with:
       tag: ${{ needs.auto-release.outputs.new_tag }}
     secrets:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
