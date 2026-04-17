@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"runtime"
 	"time"
 )
 
@@ -62,7 +63,11 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	// Bind listener synchronously so caller knows if port is available
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen on port %d: %w\nUse --port <number> to specify a different port, or check what's using it: lsof -i :%d", s.port, err, s.port)
+		hint := fmt.Sprintf("lsof -i :%d", s.port)
+		if runtime.GOOS == "linux" {
+			hint = fmt.Sprintf("ss -tlnp | grep :%d", s.port)
+		}
+		return nil, fmt.Errorf("failed to listen on port %d: %w\nUse --port <number> to specify a different port, or check what's using it: %s", s.port, err, hint)
 	}
 
 	errCh := make(chan error, 1)

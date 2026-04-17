@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Linux process detection via `/proc/<pid>/cwd` — live session status now works correctly on Linux without requiring `lsof`
+- Project naming from `cwd` field in JSONL logs — accurate, lossless project names on all platforms (replaces heuristic decoding of encoded directory names)
+- Session title display — custom titles set by Claude Code are shown in both TUI and web dashboard
+- Parse `cwd` and `customTitle` fields from Claude Code JSONL log entries
+- Linux manual install instructions in README
+- Path markers for project naming: `/repos/`, `/src/`, `/code/`, `/workspace/` in addition to `/Projects/`
+
 ### Fixed
 
+- Session title and cwd now extracted via full-file scan (`QuickSessionStats`) for both active and history views, ensuring consistency and finding titles set early in long sessions
+- Project names on Linux `/home/<user>/` paths now skip the home prefix for cleaner display (e.g., `repos/myproject` instead of `home/user/repos/myproject`)
+- UTF-8 safe truncation in TUI — branch names, session titles, and project names with multi-byte characters are no longer split mid-character
+- Removed hardcoded `max-width: 200px` on session title in web dashboard; flexbox layout handles overflow responsively
+- Project names on Linux paths (`/home/user/...`) now display correctly instead of falling back to an ugly slash-separated dump
+- Port conflict error message now suggests `ss -tlnp` on Linux instead of macOS-only `lsof -i`
 - Sessions actively using tools, hooks, or subagents no longer flicker to "Waiting" — progress heartbeats from Claude Code logs are now tracked
 - Multi-tool_use detection: all tool calls in an assistant message are now checked, not just the first
 - Extended assistant "Working" window from 30 seconds to 2 minutes to reduce false "Waiting" during brief log gaps

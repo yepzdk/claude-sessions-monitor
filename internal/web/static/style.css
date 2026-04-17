@@ -390,6 +390,19 @@ main {
 
 .session-branch::before { content: '@'; }
 
+.session-title {
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-style: italic;
+    flex-shrink: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-title::before { content: '"'; }
+.session-title::after { content: '"'; }
+
 .session-context {
     flex-shrink: 0;
     display: flex;

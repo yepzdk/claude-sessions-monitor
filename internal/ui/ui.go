@@ -267,18 +267,20 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
-// truncate truncates a string to a maximum length
+// truncate truncates a string to a maximum visible length (in runes, not bytes).
+// This ensures multi-byte UTF-8 characters are not split mid-character.
 func truncate(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
 	if max <= 3 {
-		return s[:max]
+		return string(runes[:max])
 	}
-	return s[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }
 
 // contextBarWidth is the number of block characters in the progress bar
@@ -379,11 +381,25 @@ func formatProject(s session.Session, maxLen int) string {
 	// Add git branch if present (show first, most useful)
 	if s.GitBranch != "" {
 		branch := sanitizeForTerminal(s.GitBranch)
-		if len(branch) > 12 {
-			branch = branch[:12]
+		branchRunes := []rune(branch)
+		if len(branchRunes) > 12 {
+			branchRunes = branchRunes[:12]
+			branch = string(branchRunes)
 		}
 		suffixes = append(suffixes, Dim+"@"+branch+Reset)
-		suffixLens = append(suffixLens, 1+len(branch)) // @branch
+		suffixLens = append(suffixLens, 1+len(branchRunes)) // @branch (visible rune count)
+	}
+
+	// Add session title if present
+	if s.SessionTitle != "" {
+		title := sanitizeForTerminal(s.SessionTitle)
+		titleRunes := []rune(title)
+		if len(titleRunes) > 20 {
+			titleRunes = titleRunes[:20]
+			title = string(titleRunes)
+		}
+		suffixes = append(suffixes, Dim+"\""+title+"\""+Reset)
+		suffixLens = append(suffixLens, 2+len(titleRunes)) // "title" (visible rune count)
 	}
 
 	// Ghost indicator (highest priority warning)
