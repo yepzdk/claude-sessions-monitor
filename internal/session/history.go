@@ -154,7 +154,7 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				continue
 			}
 
-			msgCount, startTime, endTime, branch, prompt, sessionCwd := QuickSessionStats(logFile)
+			msgCount, startTime, endTime, branch, prompt, sessionCwd, _ := QuickSessionStats(logFile)
 			if startTime.IsZero() {
 				startTime = info.ModTime()
 			}
@@ -212,12 +212,27 @@ func parseSessionIndex(path string) ([]IndexEntry, error) {
 
 // extractProjectName extracts a readable project name from a full path
 func extractProjectName(fullPath string) string {
-	// /Users/username/Projects/org/project -> org/project
-	if idx := strings.Index(fullPath, "/Projects/"); idx != -1 {
-		return fullPath[idx+len("/Projects/"):]
+	// Try well-known directory markers (most specific first)
+	markers := []string{"/Projects/", "/repos/", "/src/", "/code/", "/workspace/"}
+	for _, marker := range markers {
+		if idx := strings.Index(fullPath, marker); idx != -1 {
+			return fullPath[idx+len(marker):]
+		}
 	}
 
-	// Fallback: just use the last two path components
+	// Detect /home/<user>/X pattern: skip the home directory prefix
+	if strings.HasPrefix(fullPath, "/home/") {
+		// /home/user/repos/myproject -> repos/myproject
+		rest := fullPath[len("/home/"):]
+		if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
+			afterUser := rest[slashIdx+1:]
+			if afterUser != "" {
+				return afterUser
+			}
+		}
+	}
+
+	// Fallback: last two path components
 	parts := strings.Split(fullPath, "/")
 	if len(parts) >= 2 {
 		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
@@ -227,12 +242,12 @@ func extractProjectName(fullPath string) string {
 }
 
 // QuickSessionStats does a fast scan of a JSONL log file to get the message
-// count, time range, git branch, cwd, and first user prompt without full JSON
-// parsing of every line.
-func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time, gitBranch, firstPrompt, cwd string) {
+// count, time range, git branch, cwd, first user prompt, and custom title
+// without full JSON parsing of every line.
+func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time, gitBranch, firstPrompt, cwd, customTitle string) {
 	file, err := os.Open(logFile)
 	if err != nil {
-		return 0, time.Time{}, time.Time{}, "", "", ""
+		return 0, time.Time{}, time.Time{}, "", "", "", ""
 	}
 	defer file.Close()
 
@@ -268,6 +283,11 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 			}
 		}
 
+		// Extract custom title (keep last non-empty value, title can change mid-session)
+		if t := extractStringField(line, `"customTitle":"`); t != "" {
+			customTitle = t
+		}
+
 		// Extract timestamp via string matching (avoids full JSON parse)
 		if ts := extractTimestampFromLine(line); !ts.IsZero() {
 			if startTime.IsZero() {
@@ -277,7 +297,7 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 		}
 	}
 
-	return messageCount, startTime, endTime, gitBranch, firstPrompt, cwd
+	return messageCount, startTime, endTime, gitBranch, firstPrompt, cwd, customTitle
 }
 
 // extractStringField extracts a JSON string value using fast string matching.

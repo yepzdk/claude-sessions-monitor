@@ -62,7 +62,6 @@ type LogEntry struct {
 	GitBranch   string    `json:"gitBranch,omitempty"`
 	CWD         string    `json:"cwd,omitempty"`         // Working directory of the Claude process
 	CustomTitle string    `json:"customTitle,omitempty"`  // User/Claude-set session title
-	Slug        string    `json:"slug,omitempty"`         // Session slug (e.g. "silly-questing-wirth")
 }
 
 // Message represents the message field in a log entry
@@ -234,6 +233,9 @@ func getRunningClaudeDirs() map[string][]int {
 
 // getProcessCwd returns the current working directory of a process by PID.
 // On Linux it reads /proc/<pid>/cwd; on Darwin it uses lsof.
+// Note: on Linux, reading /proc/<pid>/cwd requires the caller to be the same
+// user as the target process (or root). If csm runs as a different user,
+// os.Readlink will return a permission error and the process will be skipped.
 func getProcessCwd(pid int) (string, error) {
 	if runtime.GOOS == "linux" {
 		return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
@@ -536,19 +538,14 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 		return session, nil
 	}
 
-	// Use cwd from log entries for accurate project naming (works on all platforms)
-	for _, e := range entries {
-		if e.CWD != "" {
-			session.Project = extractProjectName(e.CWD)
-			break
-		}
+	// Use QuickSessionStats for metadata that needs a full-file scan (cwd and title
+	// may appear early in the file, outside the last-100-entries window)
+	_, _, _, _, _, sessionCwd, sessionTitle := QuickSessionStats(logFile)
+	if sessionCwd != "" {
+		session.Project = extractProjectName(sessionCwd)
 	}
-
-	// Extract custom session title if set
-	for _, e := range entries {
-		if e.Type == "custom-title" && e.CustomTitle != "" {
-			session.SessionTitle = e.CustomTitle
-		}
+	if sessionTitle != "" {
+		session.SessionTitle = sessionTitle
 	}
 
 	// Extract summary from the log file (scans entire file)

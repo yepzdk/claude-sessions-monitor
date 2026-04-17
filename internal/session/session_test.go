@@ -267,17 +267,14 @@ func TestContextWindowForModel(t *testing.T) {
 }
 
 func TestLogEntryNewFields(t *testing.T) {
-	// Test that cwd, customTitle, and slug fields parse from JSONL
-	raw := `{"type":"user","timestamp":"2025-01-01T00:00:00Z","cwd":"/home/user/projects/myapp","slug":"silly-questing-wirth"}`
+	// Test that cwd and customTitle fields parse from JSONL
+	raw := `{"type":"user","timestamp":"2025-01-01T00:00:00Z","cwd":"/home/user/projects/myapp"}`
 	var entry LogEntry
 	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
 		t.Fatalf("Failed to parse: %v", err)
 	}
 	if entry.CWD != "/home/user/projects/myapp" {
 		t.Errorf("CWD = %q, want %q", entry.CWD, "/home/user/projects/myapp")
-	}
-	if entry.Slug != "silly-questing-wirth" {
-		t.Errorf("Slug = %q, want %q", entry.Slug, "silly-questing-wirth")
 	}
 
 	// Test custom-title entry
@@ -344,9 +341,9 @@ func TestExtractProjectName(t *testing.T) {
 			want: "org/project",
 		},
 		{
-			name: "Linux home path",
+			name: "Linux home path with repos marker",
 			path: "/home/user/repos/myproject",
-			want: "repos/myproject",
+			want: "myproject",
 		},
 		{
 			name: "Linux with Projects",
@@ -354,9 +351,34 @@ func TestExtractProjectName(t *testing.T) {
 			want: "work/myapp",
 		},
 		{
-			name: "two components",
-			path: "/repos/myproject",
-			want: "repos/myproject",
+			name: "Linux home with nested path",
+			path: "/home/user/myproject",
+			want: "myproject",
+		},
+		{
+			name: "repos marker",
+			path: "/opt/repos/org/myapp",
+			want: "org/myapp",
+		},
+		{
+			name: "src marker",
+			path: "/var/src/backend-api",
+			want: "backend-api",
+		},
+		{
+			name: "code marker",
+			path: "/home/dev/code/org/tool",
+			want: "org/tool",
+		},
+		{
+			name: "workspace marker",
+			path: "/mnt/workspace/project-x",
+			want: "project-x",
+		},
+		{
+			name: "two components fallback",
+			path: "/opt/myproject",
+			want: "opt/myproject",
 		},
 	}
 
