@@ -37,6 +37,22 @@ brew install --cask yepzdk/tools/csm-menubar
 
 Download the latest binary from [Releases](https://github.com/yepzdk/claude-sessions-monitor/releases) and add to your PATH.
 
+**Linux (quick install):**
+
+```bash
+# amd64
+curl -L https://github.com/yepzdk/claude-sessions-monitor/releases/latest/download/csm-linux-amd64 -o csm
+chmod +x csm
+sudo mv csm /usr/local/bin/
+
+# arm64
+curl -L https://github.com/yepzdk/claude-sessions-monitor/releases/latest/download/csm-linux-arm64 -o csm
+chmod +x csm
+sudo mv csm /usr/local/bin/
+```
+
+**macOS:** Use Homebrew (above) or download `csm-darwin-amd64` / `csm-darwin-arm64` from releases.
+
 ### Build from source
 
 ```bash

@@ -154,7 +154,7 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				continue
 			}
 
-			msgCount, startTime, endTime, branch, prompt := QuickSessionStats(logFile)
+			msgCount, startTime, endTime, branch, prompt, sessionCwd := QuickSessionStats(logFile)
 			if startTime.IsZero() {
 				startTime = info.ModTime()
 			}
@@ -167,8 +167,14 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				continue
 			}
 
+			// Use cwd for accurate project naming when available
+			displayName := projectName
+			if sessionCwd != "" {
+				displayName = extractProjectName(sessionCwd)
+			}
+
 			sessions = append(sessions, HistorySession{
-				Project:      projectName,
+				Project:      displayName,
 				GitBranch:    branch,
 				FirstPrompt:  prompt,
 				StartTime:    startTime,
@@ -221,12 +227,12 @@ func extractProjectName(fullPath string) string {
 }
 
 // QuickSessionStats does a fast scan of a JSONL log file to get the message
-// count, time range, git branch, and first user prompt without full JSON
+// count, time range, git branch, cwd, and first user prompt without full JSON
 // parsing of every line.
-func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time, gitBranch, firstPrompt string) {
+func QuickSessionStats(logFile string) (messageCount int, startTime, endTime time.Time, gitBranch, firstPrompt, cwd string) {
 	file, err := os.Open(logFile)
 	if err != nil {
-		return 0, time.Time{}, time.Time{}, "", ""
+		return 0, time.Time{}, time.Time{}, "", "", ""
 	}
 	defer file.Close()
 
@@ -255,6 +261,13 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 			gitBranch = b
 		}
 
+		// Extract cwd (use first non-empty value, stays constant within a session)
+		if cwd == "" {
+			if c := extractStringField(line, `"cwd":"`); c != "" {
+				cwd = c
+			}
+		}
+
 		// Extract timestamp via string matching (avoids full JSON parse)
 		if ts := extractTimestampFromLine(line); !ts.IsZero() {
 			if startTime.IsZero() {
@@ -264,7 +277,7 @@ func QuickSessionStats(logFile string) (messageCount int, startTime, endTime tim
 		}
 	}
 
-	return messageCount, startTime, endTime, gitBranch, firstPrompt
+	return messageCount, startTime, endTime, gitBranch, firstPrompt, cwd
 }
 
 // extractStringField extracts a JSON string value using fast string matching.

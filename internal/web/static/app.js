@@ -184,6 +184,7 @@
                     <span class="session-project">${esc(s.project)}</span>
                     ${stoppedBadge}
                     ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
+                    ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
                     <span class="session-context">
                         <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
                         <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -42,6 +43,7 @@ type Session struct {
 	HasUnsandboxed bool      `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
 	ContextPercent float64   `json:"context_percent,omitempty"` // Percentage of context window used
 	ContextTokens  int       `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
+	SessionTitle   string    `json:"session_title,omitempty"`   // Custom title set by user/Claude
 }
 
 // RunningProcess represents a Claude process with its PID and working directory
@@ -52,12 +54,15 @@ type RunningProcess struct {
 
 // LogEntry represents a single line in the JSONL log
 type LogEntry struct {
-	Type      string    `json:"type"`
-	Subtype   string    `json:"subtype,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
-	Message   *Message  `json:"message,omitempty"`
-	Summary   string    `json:"summary,omitempty"` // For type: "summary" entries
-	GitBranch string    `json:"gitBranch,omitempty"`
+	Type        string    `json:"type"`
+	Subtype     string    `json:"subtype,omitempty"`
+	Timestamp   time.Time `json:"timestamp"`
+	Message     *Message  `json:"message,omitempty"`
+	Summary     string    `json:"summary,omitempty"` // For type: "summary" entries
+	GitBranch   string    `json:"gitBranch,omitempty"`
+	CWD         string    `json:"cwd,omitempty"`         // Working directory of the Claude process
+	CustomTitle string    `json:"customTitle,omitempty"`  // User/Claude-set session title
+	Slug        string    `json:"slug,omitempty"`         // Session slug (e.g. "silly-questing-wirth")
 }
 
 // Message represents the message field in a log entry
@@ -214,30 +219,44 @@ func getRunningClaudeDirs() map[string][]int {
 			continue
 		}
 
-		// Get cwd for each process using lsof
-		lsofCmd := exec.Command("lsof", "-p", pidStr)
-		lsofOutput, err := lsofCmd.Output()
-		if err != nil {
+		// Get cwd for each process
+		path, err := getProcessCwd(pid)
+		if err != nil || path == "" {
 			continue
 		}
-
-		// Parse lsof output to find cwd
-		lines := bytes.Split(lsofOutput, []byte("\n"))
-		for _, l := range lines {
-			if bytes.Contains(l, []byte(" cwd ")) {
-				lFields := bytes.Fields(l)
-				if len(lFields) >= 9 {
-					// Last field is the path
-					path := string(lFields[len(lFields)-1])
-					// Convert to encoded format (same as project directory names)
-					encoded := encodeProjectPath(path)
-					dirs[encoded] = append(dirs[encoded], pid)
-				}
-			}
-		}
+		// Convert to encoded format (same as project directory names)
+		encoded := encodeProjectPath(path)
+		dirs[encoded] = append(dirs[encoded], pid)
 	}
 
 	return dirs
+}
+
+// getProcessCwd returns the current working directory of a process by PID.
+// On Linux it reads /proc/<pid>/cwd; on Darwin it uses lsof.
+func getProcessCwd(pid int) (string, error) {
+	if runtime.GOOS == "linux" {
+		return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+	}
+
+	// Darwin: use lsof to find cwd
+	pidStr := fmt.Sprintf("%d", pid)
+	lsofCmd := exec.Command("lsof", "-p", pidStr)
+	lsofOutput, err := lsofCmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	lines := bytes.Split(lsofOutput, []byte("\n"))
+	for _, l := range lines {
+		if bytes.Contains(l, []byte(" cwd ")) {
+			lFields := bytes.Fields(l)
+			if len(lFields) >= 9 {
+				return string(lFields[len(lFields)-1]), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("cwd not found in lsof output for pid %d", pid)
 }
 
 // encodeProjectPath converts a filesystem path to the encoded directory name format
@@ -515,6 +534,21 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 
 	if len(entries) == 0 {
 		return session, nil
+	}
+
+	// Use cwd from log entries for accurate project naming (works on all platforms)
+	for _, e := range entries {
+		if e.CWD != "" {
+			session.Project = extractProjectName(e.CWD)
+			break
+		}
+	}
+
+	// Extract custom session title if set
+	for _, e := range entries {
+		if e.Type == "custom-title" && e.CustomTitle != "" {
+			session.SessionTitle = e.CustomTitle
+		}
 	}
 
 	// Extract summary from the log file (scans entire file)

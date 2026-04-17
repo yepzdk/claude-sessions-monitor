@@ -266,6 +266,110 @@ func TestContextWindowForModel(t *testing.T) {
 	}
 }
 
+func TestLogEntryNewFields(t *testing.T) {
+	// Test that cwd, customTitle, and slug fields parse from JSONL
+	raw := `{"type":"user","timestamp":"2025-01-01T00:00:00Z","cwd":"/home/user/projects/myapp","slug":"silly-questing-wirth"}`
+	var entry LogEntry
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	if entry.CWD != "/home/user/projects/myapp" {
+		t.Errorf("CWD = %q, want %q", entry.CWD, "/home/user/projects/myapp")
+	}
+	if entry.Slug != "silly-questing-wirth" {
+		t.Errorf("Slug = %q, want %q", entry.Slug, "silly-questing-wirth")
+	}
+
+	// Test custom-title entry
+	raw2 := `{"type":"custom-title","customTitle":"add-linux-support","sessionId":"abc-123"}`
+	var entry2 LogEntry
+	if err := json.Unmarshal([]byte(raw2), &entry2); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	if entry2.Type != "custom-title" {
+		t.Errorf("Type = %q, want %q", entry2.Type, "custom-title")
+	}
+	if entry2.CustomTitle != "add-linux-support" {
+		t.Errorf("CustomTitle = %q, want %q", entry2.CustomTitle, "add-linux-support")
+	}
+}
+
+func TestDecodeProjectName(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want string
+	}{
+		{
+			name:  "macOS with Projects marker",
+			input: "-Users-jesperpedersen-Projects-personal-claude-sessions-monitor",
+			want:  "personal/claude-sessions-monitor",
+		},
+		{
+			name:  "macOS without Projects marker",
+			input: "-Users-jesperpedersen-some-folder",
+			want:  "some/folder",
+		},
+		{
+			name:  "Linux home path",
+			input: "-home-user-repos-myproject",
+			want:  "home/user/repos/myproject",
+		},
+		{
+			name:  "Linux with Projects marker",
+			input: "-home-user-Projects-org-myapp",
+			want:  "org/myapp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeProjectName(tt.input)
+			if got != tt.want {
+				t.Errorf("decodeProjectName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractProjectName(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "macOS with Projects",
+			path: "/Users/username/Projects/org/project",
+			want: "org/project",
+		},
+		{
+			name: "Linux home path",
+			path: "/home/user/repos/myproject",
+			want: "repos/myproject",
+		},
+		{
+			name: "Linux with Projects",
+			path: "/home/user/Projects/work/myapp",
+			want: "work/myapp",
+		},
+		{
+			name: "two components",
+			path: "/repos/myproject",
+			want: "repos/myproject",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractProjectName(tt.path)
+			if got != tt.want {
+				t.Errorf("extractProjectName(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEncodeProjectPath(t *testing.T) {
 	tests := []struct {
 		name string

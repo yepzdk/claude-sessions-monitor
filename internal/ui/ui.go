@@ -386,6 +386,16 @@ func formatProject(s session.Session, maxLen int) string {
 		suffixLens = append(suffixLens, 1+len(branch)) // @branch
 	}
 
+	// Add session title if present
+	if s.SessionTitle != "" {
+		title := sanitizeForTerminal(s.SessionTitle)
+		if len(title) > 20 {
+			title = title[:20]
+		}
+		suffixes = append(suffixes, Dim+"\""+title+"\""+Reset)
+		suffixLens = append(suffixLens, 2+len(title)) // "title"
+	}
+
 	// Ghost indicator (highest priority warning)
 	if s.IsGhost {
 		suffixes = append(suffixes, Red+"[ghost]"+Reset)
