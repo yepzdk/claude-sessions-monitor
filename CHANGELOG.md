@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sessions no longer show false "Working" status after a turn completes — turn-completed detection (`turn_duration` and `stop_reason: "end_turn"`) now takes priority over file modification time and progress heartbeat checks
 - Session title and cwd now extracted via full-file scan (`QuickSessionStats`) for both active and history views, ensuring consistency and finding titles set early in long sessions
 - Project names on Linux `/home/<user>/` paths now skip the home prefix for cleaner display (e.g., `repos/myproject` instead of `home/user/repos/myproject`)
 - UTF-8 safe truncation in TUI — branch names, session titles, and project names with multi-byte characters are no longer split mid-character
