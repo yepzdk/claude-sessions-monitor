@@ -726,6 +726,51 @@ func TestDetermineStatus(t *testing.T) {
 			wantTask:   "Processing...",
 		},
 		{
+			name: "turn completed with recent file modtime shows Waiting not Working",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(5 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Bash"}},
+				}},
+				{Type: "user", Timestamp: ago(3 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "tool_result"}},
+				}},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(2 * time.Second)},
+			},
+			isRunning:   true,
+			fileModTime: ago(2 * time.Second),
+			wantStatus:  StatusWaiting,
+			wantTask:    "-",
+		},
+		{
+			name: "stop_reason end_turn shows Waiting",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(10 * time.Second), Message: &Message{
+					Content:    []ContentItem{{Type: "text", Text: "Done with that"}},
+					StopReason: "end_turn",
+				}},
+			},
+			isRunning:   true,
+			fileModTime: ago(5 * time.Second),
+			wantStatus:  StatusWaiting,
+			wantTask:    "-",
+		},
+		{
+			name: "stop_reason end_turn but new user message means Working",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(10 * time.Second), Message: &Message{
+					Content:    []ContentItem{{Type: "text", Text: "Done"}},
+					StopReason: "end_turn",
+				}},
+				{Type: "user", Timestamp: ago(5 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Do more"}},
+				}},
+			},
+			isRunning:   true,
+			fileModTime: ago(3 * time.Second),
+			wantStatus:  StatusWorking,
+			wantTask:    "Done",
+		},
+		{
 			name: "recent file modtime overrides stale entries",
 			entries: []LogEntry{
 				{Type: "assistant", Timestamp: ago(6 * time.Minute), Message: &Message{

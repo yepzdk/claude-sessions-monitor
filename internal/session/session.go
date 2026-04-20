@@ -925,6 +925,30 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 		return StatusNeedsInput, "Using: " + pendingToolName, false
 	}
 
+	// Check if turn completed (system message with turn_duration).
+	// This MUST come before file mod time and progress checks, because the
+	// turn_duration write itself updates the file mod time, which would
+	// otherwise cause a false "Working" status on a completed turn.
+	if lastSystem != nil {
+		if lastAssistant == nil || lastSystem.Timestamp.After(lastAssistant.Timestamp) {
+			// If a new user message arrived after the turn completed, Claude is working on it
+			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) {
+				return StatusWorking, "Processing...", false
+			}
+			return StatusWaiting, "-", false
+		}
+	}
+
+	// If the last assistant message has stop_reason "end_turn", the turn is
+	// complete even if no turn_duration system entry has been written yet.
+	if lastAssistant != nil && lastAssistant.Message != nil &&
+		lastAssistant.Message.StopReason == "end_turn" {
+		// Only if no newer user message (which would mean a new turn started)
+		if lastUser == nil || !lastUser.Timestamp.After(lastAssistant.Timestamp) {
+			return StatusWaiting, "-", false
+		}
+	}
+
 	// Progress heartbeats (progress, hook_progress, agent_progress) indicate
 	// active work: tool execution, hook callbacks, or subagent activity.
 	// A recent heartbeat is a strong signal that the session is working.
@@ -945,17 +969,6 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// Ghost detection is only for --kill-ghosts to find truly orphaned processes
 	if time.Since(lastTimestamp) > 5*time.Minute {
 		return StatusWaiting, "-", false
-	}
-
-	// Check if turn completed (system message with turn_duration)
-	if lastSystem != nil {
-		if lastAssistant == nil || lastSystem.Timestamp.After(lastAssistant.Timestamp) {
-			// If a new user message arrived after the turn completed, Claude is working on it
-			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) {
-				return StatusWorking, "Processing...", false
-			}
-			return StatusWaiting, "-", false
-		}
 	}
 
 	// If assistant is recent, it's working. Use 2-minute window to avoid
