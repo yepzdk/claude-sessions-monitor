@@ -35,11 +35,12 @@ type Session struct {
 	Summary        string    `json:"summary,omitempty"`
 	LastMessage    string    `json:"last_message,omitempty"`
 	LogFile        string    `json:"log_file"`
-	ProjectPath    string    `json:"-"`                        // Full path to the project directory
-	IsDesktop      bool      `json:"is_desktop,omitempty"`     // True if session appears to be from desktop app
-	IsGhost        bool      `json:"is_ghost,omitempty"`       // True if process running but log is stale
-	GhostPID       int       `json:"ghost_pid,omitempty"`      // PID of the ghost process (for killing)
-	GitBranch      string    `json:"git_branch,omitempty"`     // Current git branch
+	ProjectPath    string    `json:"-"`                         // Full path to the project directory
+	SessionID      string    `json:"session_id,omitempty"`      // Claude session UUID (log filename stem)
+	Origin         Origin    `json:"origin,omitempty"`          // Where the session was launched from
+	IsGhost        bool      `json:"is_ghost,omitempty"`        // True if process running but log is stale
+	GhostPID       int       `json:"ghost_pid,omitempty"`       // PID of the ghost process (for killing)
+	GitBranch      string    `json:"git_branch,omitempty"`      // Current git branch
 	HasUnsandboxed bool      `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
 	ContextPercent float64   `json:"context_percent,omitempty"` // Percentage of context window used
 	ContextTokens  int       `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
@@ -261,6 +262,13 @@ func getProcessCwd(pid int) (string, error) {
 	return "", fmt.Errorf("cwd not found in lsof output for pid %d", pid)
 }
 
+// sessionIDFromLogFile returns the session UUID from a log file path.
+// Claude Code names each session log "<uuid>.jsonl" so the stem is the session id.
+func sessionIDFromLogFile(logFile string) string {
+	base := filepath.Base(logFile)
+	return strings.TrimSuffix(base, ".jsonl")
+}
+
 // encodeProjectPath converts a filesystem path to the encoded directory name format
 func encodeProjectPath(path string) string {
 	// /Users/username/Projects/org/project -> -Users-username-Projects-org-project
@@ -269,17 +277,6 @@ func encodeProjectPath(path string) string {
 	encoded = strings.ReplaceAll(encoded, ".", "-")
 	encoded = strings.ReplaceAll(encoded, "_", "-")
 	return encoded
-}
-
-// isDesktopSession checks if the project path appears to be from the desktop app
-// Desktop app sessions typically have cwd at the home directory (e.g., -Users-username)
-func isDesktopSession(projectName string) bool {
-	// NOTE: Desktop detection is disabled because the previous heuristic
-	// (home directory = desktop) was unreliable - terminal sessions can also
-	// be started from the home directory.
-	// TODO: Find a more reliable detection method (e.g., check parent process)
-	_ = projectName
-	return false
 }
 
 // Discover finds all active Claude sessions
@@ -511,7 +508,7 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 		LogFile:     logFile,
 		Status:      StatusInactive, // Default to inactive
 		ProjectPath: projectName,    // Store the encoded name for matching
-		IsDesktop:   isDesktopSession(projectName),
+		SessionID:   sessionIDFromLogFile(logFile),
 	}
 
 	// Check if Claude is running in this project directory
@@ -519,6 +516,19 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	pid := 0
 	if isRunning {
 		pid = pids[0]
+	}
+
+	// Resolve the session's origin (terminal / IDE / Claude Desktop).
+	// Historical sessions can only be classified if we previously cached them
+	// while live, so we load from cache first and only detect when the process
+	// is still running and no cache entry exists.
+	if cached, ok := LoadOrigin(session.SessionID); ok {
+		session.Origin = cached
+	} else if isRunning && pid > 0 {
+		if detected := DetectOrigin(pid); !detected.IsZero() {
+			session.Origin = detected
+			_ = SaveOrigin(session.SessionID, detected)
+		}
 	}
 
 	// Get file modification time as fallback for last activity

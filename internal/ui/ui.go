@@ -42,17 +42,29 @@ func RenderList(sessions []session.Session) {
 	l := calcSessionLayout(getTerminalWidth())
 
 	// Header
-	header := fmt.Sprintf("%-*s %-*s %-*s %-*s",
-		l.status, "STATUS",
-		l.project, "PROJECT",
-		l.context, "CONTEXT",
-		l.activity, "LAST ACTIVITY")
-	fmt.Println(header)
+	fmt.Println(sessionHeader(l))
 	fmt.Println(strings.Repeat("─", l.totalWidth))
 
 	for _, s := range sessions {
 		renderSessionRow(s, l, "\n")
 	}
+}
+
+// sessionHeader returns the column header row matching the given layout.
+func sessionHeader(l sessionLayout) string {
+	if l.origin > 0 {
+		return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s",
+			l.status, "STATUS",
+			l.project, "PROJECT",
+			l.origin, "ORIGIN",
+			l.context, "CONTEXT",
+			l.activity, "LAST ACTIVITY")
+	}
+	return fmt.Sprintf("%-*s %-*s %-*s %-*s",
+		l.status, "STATUS",
+		l.project, "PROJECT",
+		l.context, "CONTEXT",
+		l.activity, "LAST ACTIVITY")
 }
 
 // RenderJSON renders sessions as JSON
@@ -100,12 +112,7 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 		l := calcSessionLayout(getTerminalWidth())
 
 		// Column headers
-		header := fmt.Sprintf("%-*s %-*s %-*s %-*s",
-			l.status, "STATUS",
-			l.project, "PROJECT",
-			l.context, "CONTEXT",
-			l.activity, "LAST ACTIVITY")
-		fmt.Printf("%s\r\n", header)
+		fmt.Printf("%s\r\n", sessionHeader(l))
 		fmt.Printf("%s\r\n", strings.Repeat("─", l.totalWidth))
 
 		for _, s := range active {
@@ -336,8 +343,36 @@ func formatContext(s session.Session, width int) string {
 	return bar
 }
 
+// formatOrigin renders the session origin cell, padded to exactly width visible chars.
+// Returns an empty string when the column is disabled (width == 0).
+func formatOrigin(o session.Origin, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	text := o.Display
+	if text == "" {
+		text = "-"
+	}
+	if len(text) > width {
+		text = text[:width]
+	}
+	padding := strings.Repeat(" ", width-len(text))
+	var color string
+	switch o.Category {
+	case session.OriginTerminal:
+		color = Gray
+	case session.OriginIDE:
+		color = Blue
+	case session.OriginDesktop:
+		color = Yellow
+	default:
+		color = Dim
+	}
+	return color + text + Reset + padding
+}
+
 // renderSessionRow renders a single session row using the given layout.
-// The main row shows status, project, context, and activity.
+// The main row shows status, project, origin (optional), context, and activity.
 // A second indented line shows the last message using the full width.
 func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 	activity := formatElapsed(time.Since(s.LastActivity))
@@ -345,11 +380,21 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 		activity = "Now"
 	}
 
-	row := fmt.Sprintf("%s %s %s %-*s",
-		formatStatus(s.Status, l.status),
-		formatProject(s, l.project),
-		formatContext(s, l.context),
-		l.activity, activity)
+	var row string
+	if l.origin > 0 {
+		row = fmt.Sprintf("%s %s %s %s %-*s",
+			formatStatus(s.Status, l.status),
+			formatProject(s, l.project),
+			formatOrigin(s.Origin, l.origin),
+			formatContext(s, l.context),
+			l.activity, activity)
+	} else {
+		row = fmt.Sprintf("%s %s %s %-*s",
+			formatStatus(s.Status, l.status),
+			formatProject(s, l.project),
+			formatContext(s, l.context),
+			l.activity, activity)
+	}
 	fmt.Print(row + nl)
 
 	// Second line: last message aligned with status text (after "● ")
@@ -412,12 +457,6 @@ func formatProject(s session.Session, maxLen int) string {
 	if s.HasUnsandboxed {
 		suffixes = append(suffixes, Yellow+"[!S]"+Reset)
 		suffixLens = append(suffixLens, 4) // [!S]
-	}
-
-	// Desktop indicator (lowest priority)
-	if s.IsDesktop {
-		suffixes = append(suffixes, Dim+"[D]"+Reset)
-		suffixLens = append(suffixLens, 3) // [D]
 	}
 
 	// Drop suffixes from the end until they fit, keeping at least 4 chars for the name

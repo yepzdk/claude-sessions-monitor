@@ -3,9 +3,11 @@ package ui
 // Column width constraints for session table
 const (
 	fixedStatusWidth   = 14 // "● Needs Input" = 13 chars + 1 padding
+	fixedOriginWidth   = 10 // "Claude Desktop" truncated; most origins fit in 9
 	fixedContextWidth  = 16 // progress bar (10) + " 100%" (5) + 1 padding
 	fixedActivityWidth = 15 // "LAST ACTIVITY" header + padding
 	minProjectWidth    = 15
+	originColumnMinTTY = 90 // drop the origin column below this terminal width
 )
 
 // sessionLayout holds the computed column widths for the session table.
@@ -13,31 +15,40 @@ const (
 type sessionLayout struct {
 	status     int
 	project    int
+	origin     int
 	context    int
 	activity   int
 	totalWidth int
 }
 
 // calcSessionLayout computes column widths for the given terminal width.
-// Fixed columns (status, context, activity) keep their size.
-// All remaining space goes to the project column.
-// Accounts for 3 separator spaces between the 4 columns.
+// Fixed columns (status, origin, context, activity) keep their size.
+// All remaining space goes to the project column. The origin column is
+// dropped on narrow terminals to keep the project column readable.
+// Accounts for one separator space between each pair of adjacent columns.
 func calcSessionLayout(width int) sessionLayout {
 	l := sessionLayout{
 		status:   fixedStatusWidth,
 		context:  fixedContextWidth,
 		activity: fixedActivityWidth,
 	}
+	if width >= originColumnMinTTY {
+		l.origin = fixedOriginWidth
+	}
 
-	const columnGaps = 3 // spaces between 4 columns
-	fixed := l.status + l.context + l.activity + columnGaps
+	// One space between each pair of adjacent visible columns.
+	gaps := 3 // status|project|context|activity
+	if l.origin > 0 {
+		gaps = 4 // status|project|origin|context|activity
+	}
+	fixed := l.status + l.origin + l.context + l.activity + gaps
 	remaining := width - fixed
 	if remaining < 1 {
 		remaining = 1
 	}
 	l.project = remaining
 
-	l.totalWidth = l.status + l.project + l.context + l.activity + columnGaps
+	l.totalWidth = l.status + l.project + l.origin + l.context + l.activity + gaps
 
 	return l
 }

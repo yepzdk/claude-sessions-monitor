@@ -403,6 +403,20 @@ main {
 .session-title::before { content: '"'; }
 .session-title::after { content: '"'; }
 
+.session-origin {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    border: 1px solid currentColor;
+    opacity: 0.85;
+}
+
+.session-origin.origin-terminal { color: var(--muted); }
+.session-origin.origin-ide      { color: var(--blue); }
+.session-origin.origin-desktop  { color: var(--yellow); }
+
 .session-context {
     flex-shrink: 0;
     display: flex;

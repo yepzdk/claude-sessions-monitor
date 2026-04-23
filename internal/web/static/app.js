@@ -185,6 +185,7 @@
                     ${stoppedBadge}
                     ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
                     ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
+                    ${s.origin && s.origin.category ? `<span class="session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
                     <span class="session-context">
                         <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
                         <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>

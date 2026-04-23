@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Origin column showing where each session was launched from — terminal emulator (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or IDE (Zed, VS Code, Cursor, VSCodium, JetBrains). Detection walks the Claude process's parent chain and inspects its environment; results are snapshotted to `~/.claude-monitor/origins/<sessionId>.json` so the badge persists after the session ends. The column is shown in both the terminal dashboard (drops out gracefully below 90 columns) and the web dashboard, and is also included in the JSON/SSE API responses.
 - Linux process detection via `/proc/<pid>/cwd` — live session status now works correctly on Linux without requiring `lsof`
 - Project naming from `cwd` field in JSONL logs — accurate, lossless project names on all platforms (replaces heuristic decoding of encoded directory names)
 - Session title display — custom titles set by Claude Code are shown in both TUI and web dashboard

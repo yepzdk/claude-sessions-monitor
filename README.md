@@ -13,7 +13,8 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Git branch display** shows current branch for each session
 - **Status indicators**: Working, Needs Input, Waiting
 - **Usage view** with API quota bars and per-session token breakdown (press `u`)
-- **Session badges**: Desktop [D], Unsandboxed [!S], Ghost [ghost]
+- **Origin column** showing whether each session was launched from a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the Claude process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end
+- **Session badges**: Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
 - **macOS menu bar app** - native SwiftUI app for persistent session visibility
@@ -190,10 +191,13 @@ Claude Code Sessions
 
 ● Working: 1  ▲ Needs Input: 1  ◉ Waiting: 0
 
-STATUS          PROJECT                             LAST ACTIVITY   LAST MESSAGE
-───────────────────────────────────────────────────────────────────────────────────────────
-● Working       myorg/api-server @main              5s ago          Implementing auth middleware
-▲ Needs Input   work/claude-sessions-monitor @feat  12s ago         Let me check the git status
+STATUS          PROJECT                             ORIGIN     CONTEXT          LAST ACTIVITY
+─────────────────────────────────────────────────────────────────────────────────────────────
+● Working       myorg/api-server @main              Ghostty    ███████░░░ 68%   Now
+  Implementing auth middleware
+
+▲ Needs Input   work/claude-sessions-monitor @feat  Zed        ██░░░░░░░░ 21%   12s ago
+  Let me check the git status
 
 h: history | u: usage | Ctrl+C: quit
 ```
