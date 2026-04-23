@@ -54,6 +54,28 @@ sudo mv csm /usr/local/bin/
 
 **macOS:** Use Homebrew (above) or download `csm-darwin-amd64` / `csm-darwin-arm64` from releases.
 
+### Debian / Ubuntu (.deb)
+
+Grab the `.deb` matching your architecture from the [latest release](https://github.com/yepzdk/claude-sessions-monitor/releases/latest) and install with `dpkg`. The asset filename is `csm_<version>_<arch>.deb`:
+
+```bash
+# replace X.Y.Z with the release version, e.g. 0.6.0
+VERSION=X.Y.Z
+ARCH=amd64   # or arm64
+curl -LO "https://github.com/yepzdk/claude-sessions-monitor/releases/download/v${VERSION}/csm_${VERSION}_${ARCH}.deb"
+sudo dpkg -i "csm_${VERSION}_${ARCH}.deb"
+```
+
+### Fedora / RHEL (.rpm)
+
+Asset filename is `csm-<version>.<arch>.rpm` (arch is `x86_64` or `aarch64`):
+
+```bash
+VERSION=X.Y.Z
+ARCH=x86_64   # or aarch64
+sudo rpm -i "https://github.com/yepzdk/claude-sessions-monitor/releases/download/v${VERSION}/csm-${VERSION}.${ARCH}.rpm"
+```
+
 ### Build from source
 
 ```bash
