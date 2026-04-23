@@ -107,10 +107,8 @@ func classifyOrigin(env map[string]string, ancestors []ProcessInfo) Origin {
 	if tp := env["TERM_PROGRAM"]; tp == "zed" {
 		return newOrigin("zed")
 	}
-	if _, ok := env["TERMINAL_EMULATOR"]; ok {
-		if env["TERMINAL_EMULATOR"] == "JetBrains-JediTerm" {
-			return newOrigin("jetbrains")
-		}
+	if env["TERMINAL_EMULATOR"] == "JetBrains-JediTerm" {
+		return newOrigin("jetbrains")
 	}
 
 	// The first ancestor is usually the claude CLI process itself; what we

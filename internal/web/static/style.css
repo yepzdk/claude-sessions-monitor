@@ -409,7 +409,6 @@ main {
     border-radius: 3px;
     flex-shrink: 0;
     white-space: nowrap;
-    text-transform: lowercase;
     border: 1px solid currentColor;
     opacity: 0.85;
 }
