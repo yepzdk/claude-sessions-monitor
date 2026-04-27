@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://nfpm.goreleaser.com/schema.json
+#
+# nfpm config for building csm .deb and .rpm packages.
+# VERSION and ARCH are expected to be set in the environment by the Makefile
+# (VERSION must not start with 'v' — deb requires the version to start with a digit).
+
+name: csm
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: Jesper Pedersen <pejes@aarhus.dk>
+description: |
+  Claude Sessions Monitor — a lightweight CLI to monitor Claude Code sessions
+  across multiple projects, with live dashboard, web dashboard, and history view.
+vendor: yepzdk
+homepage: https://github.com/yepzdk/claude-sessions-monitor
+license: MIT
+
+contents:
+  - src: ./dist/csm-linux-${ARCH}
+    dst: /usr/bin/csm
+    expand: true
+    file_info:
+      mode: 0755
+      owner: root
+      group: root

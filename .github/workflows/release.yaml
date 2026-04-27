@@ -24,6 +24,16 @@ jobs:
       - name: Build binaries
         run: make build-all
 
+      - name: Install nfpm
+        env:
+          NFPM_VERSION: 2.46.3
+        run: |
+          curl -sSL -o /tmp/nfpm.deb "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          sudo dpkg -i /tmp/nfpm.deb
+
+      - name: Build Linux packages
+        run: make packages
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -32,6 +42,10 @@ jobs:
             dist/csm-darwin-arm64
             dist/csm-linux-amd64
             dist/csm-linux-arm64
+            dist/csm_*_amd64.deb
+            dist/csm_*_arm64.deb
+            dist/csm-*.x86_64.rpm
+            dist/csm-*.aarch64.rpm
           generate_release_notes: true
 
       - name: Update Homebrew formula
