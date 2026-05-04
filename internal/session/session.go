@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -44,6 +45,7 @@ type Session struct {
 	HasUnsandboxed bool      `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
 	ContextPercent float64   `json:"context_percent,omitempty"` // Percentage of context window used
 	ContextTokens  int       `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
+	Model          string    `json:"model,omitempty"`           // Model id from the latest assistant usage (e.g. "claude-opus-4-7")
 	SessionTitle   string    `json:"session_title,omitempty"`   // Custom title set by user/Claude
 }
 
@@ -571,7 +573,7 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	session.HasUnsandboxed = detectUnsandboxedCommands(entries)
 
 	// Extract context usage
-	session.ContextPercent, session.ContextTokens = extractContextUsage(entries)
+	session.ContextPercent, session.ContextTokens, session.Model = extractContextUsage(entries)
 
 	// Determine status from log entries
 	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning, info.ModTime())
@@ -691,11 +693,11 @@ func detectUnsandboxedCommands(entries []LogEntry) bool {
 	return false
 }
 
-// extractContextUsage extracts context usage from the last assistant entry with usage data
-// Returns the percentage of context window used and total input tokens.
+// extractContextUsage extracts context usage from the last assistant entry with usage data.
+// Returns the percentage of context window used, total input tokens, and the model id.
 // Only considers entries after the most recent compact/microcompact boundary,
 // since context is reset during compaction.
-func extractContextUsage(entries []LogEntry) (float64, int) {
+func extractContextUsage(entries []LogEntry) (float64, int, string) {
 	// Find the most recent compact/microcompact boundary
 	lastBoundaryIdx := -1
 	for i := len(entries) - 1; i >= 0; i-- {
@@ -725,10 +727,10 @@ func extractContextUsage(entries []LogEntry) (float64, int) {
 
 		window := contextWindowForModel(entry.Message.Model)
 		percent := float64(totalTokens) / float64(window) * 100
-		return percent, totalTokens
+		return percent, totalTokens, entry.Message.Model
 	}
 
-	return 0, 0
+	return 0, 0, ""
 }
 
 // decodeProjectName converts the directory name to a readable project name
@@ -809,17 +811,57 @@ func readLastEntries(filePath string, count int) ([]LogEntry, error) {
 // DefaultContextWindow is the fallback context window size for Claude models (200K tokens)
 const DefaultContextWindow = 200000
 
+// ExtendedContextWindow is the 1M context window available on Opus/Sonnet from
+// generation 4.6 onward.
+const ExtendedContextWindow = 1_000_000
+
+// ContextWindowForModel is the exported variant of contextWindowForModel,
+// for use by the UI layer to label the active context window.
+func ContextWindowForModel(model string) int {
+	return contextWindowForModel(model)
+}
+
 // contextWindowForModel returns the context window size for a given model ID.
-// Opus 4.6 and Sonnet 4.6 have 1M context windows; all others default to 200K.
+// Opus and Sonnet from generation 4.6 onward have 1M context windows; Haiku and
+// older models use the 200K default.
 func contextWindowForModel(model string) int {
-	switch {
-	case strings.Contains(model, "opus-4-6"):
-		return 1_000_000
-	case strings.Contains(model, "sonnet-4-6"):
-		return 1_000_000
-	default:
+	family, major, minor, ok := parseClaudeModel(model)
+	if !ok {
 		return DefaultContextWindow
 	}
+	if family != "opus" && family != "sonnet" {
+		return DefaultContextWindow
+	}
+	if major > 4 || (major == 4 && minor >= 6) {
+		return ExtendedContextWindow
+	}
+	return DefaultContextWindow
+}
+
+// parseClaudeModel extracts the family ("opus", "sonnet", "haiku") and the
+// generation (major, minor) from model ids of the form
+// "claude-<family>-<major>-<minor>[-suffix]". Returns ok=false for anything
+// that doesn't match — including "<synthetic>", empty strings, and unknown
+// families — so callers can fall back to a safe default.
+func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
+	const prefix = "claude-"
+	if !strings.HasPrefix(model, prefix) {
+		return "", 0, 0, false
+	}
+	parts := strings.Split(model[len(prefix):], "-")
+	if len(parts) < 3 {
+		return "", 0, 0, false
+	}
+	family = parts[0]
+	maj, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", 0, 0, false
+	}
+	min, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return "", 0, 0, false
+	}
+	return family, maj, min, true
 }
 
 // GhostThreshold is the duration after which a running process with no log activity

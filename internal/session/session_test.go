@@ -12,6 +12,7 @@ func TestExtractContextUsage(t *testing.T) {
 		entries        []LogEntry
 		wantPercent    float64
 		wantTokens     int
+		wantModel      string
 		wantHasContext bool
 	}{
 		{
@@ -58,6 +59,7 @@ func TestExtractContextUsage(t *testing.T) {
 			},
 			wantPercent:    2.051, // (10 + 1000 + 19000 + 500) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     20510,
+			wantModel:      "claude-opus-4-6",
 			wantHasContext: true,
 		},
 		{
@@ -93,6 +95,7 @@ func TestExtractContextUsage(t *testing.T) {
 			},
 			wantPercent:    4.021, // (10 + 1000 + 39000 + 200) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     40210,
+			wantModel:      "claude-opus-4-6",
 			wantHasContext: true,
 		},
 		{
@@ -114,6 +117,7 @@ func TestExtractContextUsage(t *testing.T) {
 			},
 			wantPercent:    18.11, // (100 + 10000 + 170000 + 1000) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     181100,
+			wantModel:      "claude-opus-4-6",
 			wantHasContext: true,
 		},
 		{
@@ -193,6 +197,7 @@ func TestExtractContextUsage(t *testing.T) {
 			},
 			wantPercent:    2.051, // (10 + 1000 + 19000 + 500) / 1000000 * 100 (opus-4-6 = 1M)
 			wantTokens:     20510,
+			wantModel:      "claude-opus-4-6",
 			wantHasContext: true,
 		},
 		{
@@ -214,13 +219,36 @@ func TestExtractContextUsage(t *testing.T) {
 			},
 			wantPercent:    10.255, // (10 + 1000 + 19000 + 500) / 200000 * 100 (haiku = 200K)
 			wantTokens:     20510,
+			wantModel:      "claude-haiku-4-5-20251001",
+			wantHasContext: true,
+		},
+		{
+			name: "opus-4-7 uses 1M context window",
+			entries: []LogEntry{
+				{
+					Type: "assistant",
+					Message: &Message{
+						Role:  "assistant",
+						Model: "claude-opus-4-7",
+						Usage: &Usage{
+							InputTokens:              200,
+							CacheCreationInputTokens: 15000,
+							CacheReadInputTokens:     228000,
+							OutputTokens:             515,
+						},
+					},
+				},
+			},
+			wantPercent:    24.3715, // 243715 / 1000000 * 100
+			wantTokens:     243715,
+			wantModel:      "claude-opus-4-7",
 			wantHasContext: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			percent, tokens := extractContextUsage(tt.entries)
+			percent, tokens, model := extractContextUsage(tt.entries)
 			hasContext := tokens > 0
 
 			if hasContext != tt.wantHasContext {
@@ -229,6 +257,10 @@ func TestExtractContextUsage(t *testing.T) {
 
 			if tokens != tt.wantTokens {
 				t.Errorf("tokens = %d, want %d", tokens, tt.wantTokens)
+			}
+
+			if model != tt.wantModel {
+				t.Errorf("model = %q, want %q", model, tt.wantModel)
 			}
 
 			// Compare percentages with small tolerance for floating point
@@ -246,12 +278,20 @@ func TestContextWindowForModel(t *testing.T) {
 		want  int
 	}{
 		{"claude-opus-4-6", 1_000_000},
-		{"opus", 200_000},
+		{"claude-opus-4-7", 1_000_000},
 		{"claude-sonnet-4-6", 1_000_000},
+		{"claude-sonnet-4-7", 1_000_000},
+		{"claude-opus-5-0", 1_000_000},
+		{"claude-sonnet-10-0", 1_000_000},
+		{"opus", 200_000},
 		{"sonnet", 200_000},
 		{"claude-haiku-4-5-20251001", 200_000},
+		{"claude-haiku-4-7", 200_000},
 		{"haiku", 200_000},
+		{"claude-opus-4-5", 200_000},
 		{"claude-sonnet-4-5-20250929", 200_000},
+		{"claude-opus-3-7", 200_000},
+		{"<synthetic>", 200_000},
 		{"", 200_000},
 		{"unknown-model", 200_000},
 	}

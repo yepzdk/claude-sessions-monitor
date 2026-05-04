@@ -11,8 +11,8 @@ func TestCalcSessionLayout_WideTerminal(t *testing.T) {
 	if l.origin != fixedOriginWidth {
 		t.Errorf("expected origin=%d, got %d", fixedOriginWidth, l.origin)
 	}
-	if l.context != 16 {
-		t.Errorf("expected context=16, got %d", l.context)
+	if l.context != fixedContextWidth {
+		t.Errorf("expected context=%d, got %d", fixedContextWidth, l.context)
 	}
 	if l.activity != 15 {
 		t.Errorf("expected activity=15, got %d", l.activity)

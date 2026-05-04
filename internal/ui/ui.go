@@ -330,12 +330,23 @@ func formatContext(s session.Session, width int) string {
 
 	// Build bar: colored filled blocks + dim empty blocks + percentage
 	label := fmt.Sprintf(" %.0f%%", pct)
+
+	// Append a marker when the active model uses an extended context window so
+	// users can tell at a glance that "24%" is of 1M, not 200K.
+	suffix := ""
+	if session.ContextWindowForModel(s.Model) > session.DefaultContextWindow {
+		suffix = " (1M)"
+	}
+
 	bar := color + strings.Repeat("█", filled) + Reset +
 		Dim + strings.Repeat("░", empty) + Reset +
 		label
+	if suffix != "" {
+		bar += Dim + suffix + Reset
+	}
 
-	// Pad to width (visible length = bar chars + label chars)
-	visibleLen := contextBarWidth + len(label)
+	// Pad to width (visible length = bar chars + label chars + suffix chars)
+	visibleLen := contextBarWidth + len(label) + len(suffix)
 	if visibleLen < width {
 		bar += strings.Repeat(" ", width-visibleLen)
 	}

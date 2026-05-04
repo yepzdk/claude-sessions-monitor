@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Active model id is now exposed on the session JSON/SSE API and indicated in both dashboards: the terminal shows a dim `(1M)` suffix on the context cell when the session is using an extended context window, and the web dashboard shows a small `1M` badge with the full model id on hover
 - Native `.deb` and `.rpm` Linux packages published with each release (amd64 and arm64)
 - Origin column showing where each session was launched from — terminal emulator (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or IDE (Zed, VS Code, Cursor, VSCodium, JetBrains). Detection walks the Claude process's parent chain and inspects its environment; results are snapshotted to `~/.claude-monitor/origins/<sessionId>.json` so the badge persists after the session ends. The column is shown in both the terminal dashboard (drops out gracefully below 90 columns) and the web dashboard, and is also included in the JSON/SSE API responses.
 - Linux process detection via `/proc/<pid>/cwd` — live session status now works correctly on Linux without requiring `lsof`
@@ -31,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Multi-tool_use detection: all tool calls in an assistant message are now checked, not just the first
 - Extended assistant "Working" window from 30 seconds to 2 minutes to reduce false "Waiting" during brief log gaps
 - Use log file modification time to detect active streaming writes, preventing "Waiting" during early response generation
-- Context percentage now uses model-specific context window sizes (Opus 4.6 and Sonnet 4.6 use 1M, others use 200K)
+- Context percentage now correctly recognises 1M-context models from Opus/Sonnet generation 4.6 onward (e.g. `claude-opus-4-7`, `claude-sonnet-4-7`, future generations); previously only `opus-4-6` and `sonnet-4-6` were detected, so newer models were treated as 200K and reported up to 5× too high
 
 ### Added
 
