@@ -185,8 +185,9 @@
                     ${stoppedBadge}
                     ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
                     ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
-                    ${s.origin && s.origin.category ? `<span class="session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
-                    <span class="session-context">
+                    ${s.origin && s.origin.category ? `<span class="badge session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
+                    ${isExtendedContextModel(s.model) ? `<span class="badge session-model-badge" title="${esc(s.model)}">1M</span>` : ''}
+                    <span class="session-context" title="${esc(s.model || '')}">
                         <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
                         <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>
                     </span>
@@ -738,5 +739,18 @@
         const d = document.createElement('div');
         d.textContent = s;
         return d.innerHTML;
+    }
+
+    // Mirrors session.contextWindowForModel in Go: opus/sonnet from generation 4.6
+    // onward use the 1M extended context window.
+    function isExtendedContextModel(model) {
+        if (!model) return false;
+        const m = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/.exec(model);
+        if (!m) return false;
+        const family = m[1];
+        const major = parseInt(m[2], 10);
+        const minor = parseInt(m[3], 10);
+        if (family !== 'opus' && family !== 'sonnet') return false;
+        return major > 4 || (major === 4 && minor >= 6);
     }
 })();

@@ -4,7 +4,7 @@ package ui
 const (
 	fixedStatusWidth   = 14 // "● Needs Input" = 13 chars + 1 padding
 	fixedOriginWidth   = 10 // "Claude Desktop" truncated; most origins fit in 9
-	fixedContextWidth  = 16 // progress bar (10) + " 100%" (5) + 1 padding
+	fixedContextWidth  = 21 // progress bar (10) + " 100%" (5) + " (1M)" suffix (5) + 1 padding
 	fixedActivityWidth = 15 // "LAST ACTIVITY" header + padding
 	minProjectWidth    = 15
 	originColumnMinTTY = 90 // drop the origin column below this terminal width
