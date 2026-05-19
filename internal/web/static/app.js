@@ -452,12 +452,14 @@
     let timelineEntries = [];
     let currentLogFile = '';
     let timelineFilter = 'all'; // all, assistant, user
+    let timelineLoadMoreClicks = 0;
 
     function openDetail(logFile, project) {
         currentLogFile = logFile;
         timelineOffset = 0;
         timelineEntries = [];
         timelineFilter = 'all';
+        timelineLoadMoreClicks = 0;
         detailTitle.textContent = project;
         detailOverlay.classList.remove('hidden');
 
@@ -507,7 +509,7 @@
 
         let html = `<div class="metrics-grid">
             <div class="metric-card"><div class="metric-label">Turns</div><div class="metric-value blue">${m.turn_count}</div></div>
-            <div class="metric-card"><div class="metric-label">User Prompts</div><div class="metric-value green">${m.user_prompt_count}</div></div>
+            <div class="metric-card metric-clickable" data-action="show-user-prompts" title="Show user prompts in timeline"><div class="metric-label">User Prompts</div><div class="metric-value green">${m.user_prompt_count}</div></div>
             <div class="metric-card"><div class="metric-label">Tool Results</div><div class="metric-value">${m.tool_result_count}</div></div>
             <div class="metric-card"><div class="metric-label">Assistant Messages</div><div class="metric-value purple">${m.assistant_message_count}</div></div>
             <div class="metric-card"><div class="metric-label">Duration</div><div class="metric-value">${duration}</div></div>
@@ -545,22 +547,48 @@
         }
 
         detailMetrics.innerHTML = html;
+
+        const userPromptsCard = detailMetrics.querySelector('[data-action="show-user-prompts"]');
+        if (userPromptsCard) {
+            userPromptsCard.addEventListener('click', showUserPromptsTimeline);
+        }
     }
 
-    async function loadTimeline(logFile, reset) {
+    function showUserPromptsTimeline() {
+        document.querySelectorAll('.detail-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.detail === 'timeline');
+        });
+        detailMetrics.classList.remove('active');
+        detailTimeline.classList.add('active');
+
+        timelineFilter = 'user';
+        loadTimeline(currentLogFile, true, 'page').then(() => {
+            detailTimeline.scrollTop = 0;
+        });
+    }
+
+    async function loadTimeline(logFile, reset, mode = 'page') {
         if (reset) {
             timelineOffset = 0;
             timelineEntries = [];
+            timelineLoadMoreClicks = 0;
             detailTimeline.innerHTML = '<div class="loading">Loading timeline...</div>';
         }
 
+        const SERVER_MAX = 500;
         try {
-            const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=50`);
-            if (!resp.ok) throw new Error(await resp.text());
-            const data = await resp.json();
-            timelineTotal = data.total;
-            timelineEntries = timelineEntries.concat(data.entries || []);
-            timelineOffset += (data.entries || []).length;
+            do {
+                const remaining = Math.max(1, timelineTotal - timelineOffset);
+                const limit = mode === 'all' ? Math.min(SERVER_MAX, remaining) : 50;
+                const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}`);
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                timelineTotal = data.total;
+                const batch = data.entries || [];
+                timelineEntries = timelineEntries.concat(batch);
+                timelineOffset += batch.length;
+                if (batch.length === 0) break;
+            } while (mode === 'all' && timelineOffset < timelineTotal);
             renderTimeline();
         } catch (err) {
             detailTimeline.innerHTML = `<div class="empty-state">Failed to load timeline</div>`;
@@ -636,7 +664,11 @@
         html += '</div>';
 
         if (timelineOffset < timelineTotal) {
-            html += `<button class="load-more" id="load-more-btn">Load more (${timelineOffset}/${timelineTotal})</button>`;
+            const loadAll = timelineLoadMoreClicks >= 2;
+            const label = loadAll
+                ? `Load all remaining (${timelineTotal - timelineOffset})`
+                : `Load more (${timelineOffset}/${timelineTotal})`;
+            html += `<button class="load-more" id="load-more-btn" data-mode="${loadAll ? 'all' : 'page'}">${label}</button>`;
         }
 
         detailTimeline.innerHTML = html;
@@ -650,7 +682,11 @@
 
         const loadMoreBtn = document.getElementById('load-more-btn');
         if (loadMoreBtn) {
-            loadMoreBtn.addEventListener('click', () => loadTimeline(currentLogFile, false));
+            loadMoreBtn.addEventListener('click', () => {
+                const mode = loadMoreBtn.dataset.mode === 'all' ? 'all' : 'page';
+                timelineLoadMoreClicks += 1;
+                loadTimeline(currentLogFile, false, mode);
+            });
         }
     }
 
