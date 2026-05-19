@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Web dashboard: clicking the "User Prompts" metric card in the session detail modal now jumps to the Timeline tab with the `User` filter applied, scrolled to the first prompt
+- Web dashboard: timeline "Load more" escalates after the second click — the third click loads all remaining entries in one go (chunked server-side at 500 per request) instead of forcing repeated clicks
 - Active model id is now exposed on the session JSON/SSE API and indicated in both dashboards: the terminal shows a dim `(1M)` suffix on the context cell when the session is using an extended context window, and the web dashboard shows a small `1M` badge with the full model id on hover
 - Native `.deb` and `.rpm` Linux packages published with each release (amd64 and arm64)
 - Origin column showing where each session was launched from — terminal emulator (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or IDE (Zed, VS Code, Cursor, VSCodium, JetBrains). Detection walks the Claude process's parent chain and inspects its environment; results are snapshotted to `~/.claude-monitor/origins/<sessionId>.json` so the badge persists after the session ends. The column is shown in both the terminal dashboard (drops out gracefully below 90 columns) and the web dashboard, and is also included in the JSON/SSE API responses.
