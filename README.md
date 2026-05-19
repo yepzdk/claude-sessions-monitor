@@ -17,7 +17,6 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Session badges**: Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
 - **Cross-platform** - macOS and Linux
-- **macOS menu bar app** - native SwiftUI app for persistent session visibility
 
 ## Installation
 
@@ -26,12 +25,6 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 ```bash
 brew tap yepzdk/tools
 brew install csm
-```
-
-### Homebrew Cask (macOS menu bar app)
-
-```bash
-brew install --cask yepzdk/tools/csm-menubar
 ```
 
 ### From releases
@@ -150,52 +143,6 @@ Features:
 - **Timeline filters** to show All, Assistant, or User messages
 - REST API: `/api/sessions`, `/api/history`, `/api/usage`, `/api/sessions/timeline`, `/api/sessions/metrics`
 - Embedded in the binary via `go:embed` — no external files or build step needed
-
-### macOS menu bar app
-
-A native SwiftUI menu bar app that shows session status at a glance. Requires macOS 13+ (Ventura).
-
-Features:
-- **Status icon** in the menu bar with color reflecting aggregate session state (green = working, yellow = needs input, blue = waiting, gray = idle)
-- **Session popover** with active session list showing project, status, branch, context usage, and last activity
-- **Smart process management** - auto-starts `csm --web-only` if not already running, connects to existing server if available
-- **Web dashboard link** - opens the full web dashboard in your browser
-
-Build and run:
-
-```bash
-# From the project root (builds Go binary + Swift app together)
-make menubar
-
-# Run the app
-macos/CSMMenuBar/.build/debug/CSMMenuBar
-```
-
-The build bundles the `csm` Go binary alongside the Swift executable, so no separate `csm` installation is required. The app automatically manages the `csm --web-only` server process. If you already have `csm --web-only` running, the app connects to it without starting a duplicate. When you quit the app, it only terminates the server if it started one.
-
-#### Packaging as a .app bundle
-
-To package the menu bar app as a proper macOS `.app` bundle (launchable from Spotlight/Applications):
-
-```bash
-# Build the .app bundle
-make menubar-app
-
-# Install to Applications
-cp -r macos/CSMMenuBar/.build/CSMMenuBar.app /Applications/
-```
-
-The bundle is ad-hoc code-signed for local use (no Apple Developer account needed).
-
-You can also use `make menubar-install` to build, install to `/Applications/`, and remove the quarantine attribute in one step.
-
-#### macOS Gatekeeper warning
-
-Since the `.app` bundle is ad-hoc signed (not notarized with an Apple Developer ID), macOS may show a "cannot verify that this app is free from malware" warning. There are three ways to resolve this:
-
-- **Option A: System Settings** — Go to System Settings > Privacy & Security, scroll down, and click "Open Anyway" next to the CSMMenuBar message.
-- **Option B: Remove quarantine attribute** — Run `xattr -d com.apple.quarantine /Applications/CSMMenuBar.app` in Terminal.
-- **Option C: Install via Homebrew cask** — `brew install --cask yepzdk/tools/csm-menubar` handles quarantine removal automatically.
 
 ## Status Types
 
