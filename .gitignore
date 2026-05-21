@@ -4,7 +4,3 @@ csm
 # Build artifacts
 dist/
 claude-sessions-monitor
-
-# Swift build artifacts
-macos/CSMMenuBar/.build/
-macos/CSMMenuBar/.swiftpm/

@@ -59,11 +59,3 @@ jobs:
             -H "Authorization: token $HOMEBREW_TAP_PAT" \
             https://api.github.com/repos/yepzdk/homebrew-tools/dispatches \
             -d "{\"event_type\":\"update-csm\",\"client_payload\":{\"version\":\"$VERSION\"}}"
-
-  release-menubar:
-    needs: release
-    uses: ./.github/workflows/release-menubar.yaml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets:
-      HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
