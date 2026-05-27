@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"syscall"
 )
@@ -81,16 +82,51 @@ func createAndAttach(name string) error {
 		return fmt.Errorf("tmux new-session failed: %w\noutput: %s", err, string(out))
 	}
 
-	// Hide the status bar for this session only — there's a single window
-	// in slice 1, so it's just noise. Slice 2 may re-enable it once the
-	// window switcher becomes useful.
+	// Hide the status bar — we don't have the agent-switching UX yet, so
+	// it's just noise. Slice 2b re-enables it when the sidebar uses it.
 	if out, err := exec.Command("tmux",
 		"set-option", "-t", name, "status", "off",
 	).CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux set-option status off failed: %w\noutput: %s", err, string(out))
 	}
 
+	// Remember where `csm manage` was launched so the spawn prompt can
+	// default to the current project.
+	if cwd, err := os.Getwd(); err == nil {
+		_ = exec.Command("tmux", "set-environment", "-t", name, "CSM_PROJECT_ROOT", cwd).Run()
+	}
+
+	// Load the csm key bindings (Ctrl-n to spawn an agent). The bindings are
+	// server-global by tmux's nature; the helpers they invoke guard on being
+	// inside the csm session, so they're inert elsewhere.
+	if err := installBindings(name, bin); err != nil {
+		return err
+	}
+
 	return execTmux("attach", "-t", name)
+}
+
+// installBindings writes a generated tmux config with the csm key bindings
+// and sources it into the session.
+func installBindings(name, bin string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("unable to determine home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".claude-monitor", "tmux")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create tmux config dir: %w", err)
+	}
+	conf := filepath.Join(dir, "bindings.conf")
+	// Root-table binding: plain Ctrl-n (no prefix) spawns an agent.
+	content := fmt.Sprintf("bind-key -n C-n run-shell \"%s __spawn\"\n", bin)
+	if err := os.WriteFile(conf, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write bindings config: %w", err)
+	}
+	if out, err := exec.Command("tmux", "source-file", conf).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux source-file failed: %w\noutput: %s", err, string(out))
+	}
+	return nil
 }
 
 // execTmux replaces the current process with `tmux <args...>`. On success

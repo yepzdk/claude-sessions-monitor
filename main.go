@@ -28,6 +28,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "__spawn" {
+		if err := manage.Spawn(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "spawn: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Parse flags
 	listOnce := flag.Bool("l", false, "List sessions once and exit")
