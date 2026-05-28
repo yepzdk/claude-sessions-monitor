@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/manage"
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 	"github.com/itk-dev/claude-sessions-monitor/internal/ui"
 	"github.com/itk-dev/claude-sessions-monitor/internal/web"
@@ -20,22 +19,6 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "manage" {
-		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
-		if err := manage.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "manage: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "__spawn" {
-		if err := manage.Spawn(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "spawn: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	// Parse flags
 	listOnce := flag.Bool("l", false, "List sessions once and exit")
 	jsonOutput := flag.Bool("json", false, "Output as JSON (requires -l)")
