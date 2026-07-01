@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Sessions no longer stay stuck on "Working" after Claude has yielded back to the user. Two cases are fixed: a finished tool whose result is the last entry (Claude asked a question without a turn-completion marker), and a user prompt left unanswered after a completed turn. Both now age out to "Waiting" with the real last message instead of showing "Working" indefinitely.
-- Sharply reduced CPU usage of the live view (previously ~40-50% at idle). Session logs are now parsed in a single pass and cached by file mtime/size, so unchanged sessions are no longer re-read every refresh; the `ps`/`lsof` process scan and the full discovery result are also short-lived cached, collapsing the terminal loop, web SSE stream, and API requests onto a single scan per tick.
+- Sessions no longer stay stuck on "Working" after Claude has yielded back to the user; idle sessions now age out to "Waiting" with the real last message.
+- Sharply reduced CPU usage of the live view (previously ~40-50% at idle) by caching session log parsing.
 
 ### Removed
 

@@ -304,6 +304,9 @@ func Discover() ([]Session, error) {
 	runningDirs := cachedRunningClaudeDirs()
 
 	var sessions []Session
+	// Track the log files we actually parse this sweep so stale entries can be
+	// evicted from the parse cache afterwards (see pruneParseCache).
+	liveFiles := map[string]struct{}{}
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -324,6 +327,8 @@ func Discover() ([]Session, error) {
 		}
 
 		for i, logFile := range logFiles {
+			liveFiles[logFile] = struct{}{}
+
 			// Pair each log file with a PID by index (most recent log gets first PID)
 			var sessionPids []int
 			if i < len(pids) {
@@ -338,6 +343,10 @@ func Discover() ([]Session, error) {
 			sessions = append(sessions, session)
 		}
 	}
+
+	// Evict parse-cache entries for logs no longer in the active set, keeping the
+	// cache bounded to the current working set over a long-running server.
+	pruneParseCache(liveFiles)
 
 	// Sort by status priority, then by last activity
 	sort.Slice(sessions, func(i, j int) bool {
@@ -891,6 +900,13 @@ func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 // is considered a ghost (orphaned) process
 const GhostThreshold = 10 * time.Minute
 
+// recentActivityWindow bounds every "Working" inference in determineStatus: a
+// tool result, user prompt, assistant message, or progress heartbeat only counts
+// as active work while it is younger than this. Older signals age out to Waiting,
+// which is what keeps a session from staying stuck on "Working" after Claude has
+// yielded back to the user without writing a turn-completion marker.
+const recentActivityWindow = 2 * time.Minute
+
 // determineStatus analyzes log entries to determine session status.
 // fileModTime is the log file's modification time, used to detect recent writes
 // that may not yet appear as parsed entries (e.g., during streaming).
@@ -978,7 +994,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 				// All tools got results - check if turn completed or still working
 				if lastSystem != nil && lastSystem.Timestamp.After(lastUser.Timestamp) {
 					// Turn completed after tool results
-				} else if time.Since(lastUser.Timestamp) < 2*time.Minute {
+				} else if time.Since(lastUser.Timestamp) < recentActivityWindow {
 					// No turn_duration marker yet, but the tool result is recent —
 					// Claude is very likely still working (about to continue the turn).
 					return StatusWorking, "Processing...", false
@@ -1001,7 +1017,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// execute without user interaction. A recent pending tool_use likely means
 	// the tool is currently executing, not waiting for approval.
 	if hasPendingToolUse {
-		if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < 2*time.Minute {
+		if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < recentActivityWindow {
 			return StatusWorking, "Using: " + pendingToolName, false
 		}
 		return StatusNeedsInput, "Using: " + pendingToolName, false
@@ -1019,7 +1035,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 			// must not stay pinned on "Working"; fall through to the staleness
 			// checks below, which resolve it to Waiting.
 			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) &&
-				time.Since(lastUser.Timestamp) < 2*time.Minute {
+				time.Since(lastUser.Timestamp) < recentActivityWindow {
 				return StatusWorking, "Processing...", false
 			}
 			if lastUser == nil || !lastUser.Timestamp.After(lastSystem.Timestamp) {
@@ -1041,7 +1057,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// Progress heartbeats (progress, hook_progress, agent_progress) indicate
 	// active work: tool execution, hook callbacks, or subagent activity.
 	// A recent heartbeat is a strong signal that the session is working.
-	if lastProgress != nil && time.Since(lastProgress.Timestamp) < 2*time.Minute {
+	if lastProgress != nil && time.Since(lastProgress.Timestamp) < recentActivityWindow {
 		task := extractTask(lastAssistant)
 		return StatusWorking, task, false
 	}
@@ -1064,18 +1080,21 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// flipping to "Waiting" during brief gaps between log writes.
 	if lastAssistant != nil {
 		task := extractTask(lastAssistant)
-		if time.Since(lastAssistant.Timestamp) < 2*time.Minute {
+		if time.Since(lastAssistant.Timestamp) < recentActivityWindow {
 			return StatusWorking, task, false
 		}
 	}
 
 	// If a genuine user prompt is the most recent entry (e.g. first message in
-	// session), Claude is processing it. A user message that only carries a
-	// tool_result does NOT count — that is the tail of Claude's own turn, not a
-	// new prompt, and treating it as work is what made sessions stick on
-	// "Working" after Claude yielded back to the user without a turn_duration.
+	// session), Claude is processing it — but only while the prompt is recent. A
+	// user message that only carries a tool_result does NOT count: that is the
+	// tail of Claude's own turn, not a new prompt, and treating it as work is
+	// what made sessions stick on "Working" after Claude yielded back to the user
+	// without a turn_duration. The recency bound matters just as much: a genuine
+	// prompt left unanswered (user walked away, or Claude stalled) must age out to
+	// Waiting instead of staying pinned on "Working".
 	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) {
-		if isUserPrompt(lastUser) {
+		if isUserPrompt(lastUser) && time.Since(lastUser.Timestamp) < recentActivityWindow {
 			return StatusWorking, "Processing...", false
 		}
 	}

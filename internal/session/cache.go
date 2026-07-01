@@ -66,6 +66,21 @@ func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int)
 	return pl, nil
 }
 
+// pruneParseCache drops cached parses for log files not in liveFiles. Without it
+// the cache would grow unbounded over a long-running server's lifetime, as every
+// session's log path lingers forever after the session ends or its file is
+// deleted. Discover() calls this each sweep with the paths it actually parsed, so
+// the cache tracks the current working set rather than everything ever seen.
+func pruneParseCache(liveFiles map[string]struct{}) {
+	parseCacheMu.Lock()
+	defer parseCacheMu.Unlock()
+	for path := range parseCache {
+		if _, ok := liveFiles[path]; !ok {
+			delete(parseCache, path)
+		}
+	}
+}
+
 // --- 2. Process-scan cache ---------------------------------------------------
 
 var (
