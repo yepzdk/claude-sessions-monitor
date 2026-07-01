@@ -607,6 +607,24 @@ func TestDetermineStatus(t *testing.T) {
 			wantTask:   "Processing...",
 		},
 		{
+			// Regression: Claude ran a tool, got the result, then yielded to the
+			// user (e.g. asked a question) WITHOUT writing a turn_duration marker.
+			// Once the tool_result is stale this must resolve to Waiting, not stay
+			// stuck on "Working" forever.
+			name: "tool_use with tool_result stale and no turn_duration",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(4 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Read"}},
+				}},
+				{Type: "user", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "tool_result"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
 			name: "tool_use with tool_result and turn completed",
 			entries: []LogEntry{
 				{Type: "assistant", Timestamp: ago(30 * time.Second), Message: &Message{
@@ -741,6 +759,22 @@ func TestDetermineStatus(t *testing.T) {
 			isRunning:  true,
 			wantStatus: StatusWorking,
 			wantTask:   "Processing...",
+		},
+		{
+			// Regression: a user prompt arrived after a completed turn but was
+			// left unanswered for a long time (user walked away, or Claude
+			// stalled). It must not stay pinned on "Working" indefinitely.
+			name: "turn completed then stale unanswered user message",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(3 * time.Hour)},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(3 * time.Hour)},
+				{Type: "user", Timestamp: ago(3 * time.Hour), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Do more"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
 		},
 		{
 			name: "user message is most recent no assistant yet",
