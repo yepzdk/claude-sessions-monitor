@@ -607,6 +607,24 @@ func TestDetermineStatus(t *testing.T) {
 			wantTask:   "Processing...",
 		},
 		{
+			// Regression: Claude ran a tool, got the result, then yielded to the
+			// user (e.g. asked a question) WITHOUT writing a turn_duration marker.
+			// Once the tool_result is stale this must resolve to Waiting, not stay
+			// stuck on "Working" forever.
+			name: "tool_use with tool_result stale and no turn_duration",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(4 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "tool_use", Name: "Read"}},
+				}},
+				{Type: "user", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "tool_result"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
 			name: "tool_use with tool_result and turn completed",
 			entries: []LogEntry{
 				{Type: "assistant", Timestamp: ago(30 * time.Second), Message: &Message{
@@ -735,6 +753,42 @@ func TestDetermineStatus(t *testing.T) {
 				{Type: "assistant", Timestamp: ago(3 * time.Minute)},
 				{Type: "system", Subtype: "turn_duration", Timestamp: ago(3 * time.Minute)},
 				{Type: "user", Timestamp: ago(10 * time.Second), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Do more"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWorking,
+			wantTask:   "Processing...",
+		},
+		{
+			// Regression: a genuine user prompt arrived AFTER a completed turn
+			// (strictly later than the turn_duration marker) and was then left
+			// unanswered past the recency window. Timestamps are deliberately
+			// staggered — with equal timestamps the prompt is not "after" the
+			// system marker and the buggy fall-through path is never reached, so
+			// this must age out to Waiting rather than stay pinned on "Working".
+			name: "turn completed then stale unanswered user message",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(10 * time.Minute)},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(4 * time.Minute)},
+				{Type: "user", Timestamp: ago(3 * time.Minute), Message: &Message{
+					Content: []ContentItem{{Type: "text", Text: "Do more"}},
+				}},
+			},
+			isRunning:  true,
+			wantStatus: StatusWaiting,
+			wantTask:   "-",
+		},
+		{
+			// Counterpart to the case above: the same shape but with a RECENT
+			// prompt after the completed turn. Claude is genuinely processing it,
+			// so this must report Working — proving the staleness fix doesn't
+			// over-correct and flip active sessions to Waiting.
+			name: "turn completed then recent unanswered user message",
+			entries: []LogEntry{
+				{Type: "assistant", Timestamp: ago(10 * time.Minute)},
+				{Type: "system", Subtype: "turn_duration", Timestamp: ago(4 * time.Minute)},
+				{Type: "user", Timestamp: ago(30 * time.Second), Message: &Message{
 					Content: []ContentItem{{Type: "text", Text: "Do more"}},
 				}},
 			},

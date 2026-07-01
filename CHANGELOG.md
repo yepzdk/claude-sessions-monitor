@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Sessions no longer stay stuck on "Working" after Claude has yielded back to the user; idle sessions now age out to "Waiting" with the real last message.
+- Sharply reduced CPU usage of the live view (previously ~40-50% at idle) by caching session log parsing.
+
 ### Removed
 
 - macOS menu bar app (`CSMMenuBar.app`) — the SwiftUI menu bar app, its build targets, release workflow, and Homebrew cask have been removed. Use the web dashboard (`csm --web`) for at-a-glance session monitoring instead. The `--web-only` headless mode remains available for running csm as a background server.

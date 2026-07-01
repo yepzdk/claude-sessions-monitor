@@ -283,6 +283,12 @@ func encodeProjectPath(path string) string {
 
 // Discover finds all active Claude sessions
 func Discover() ([]Session, error) {
+	// Serve a recent result if the TUI loop, SSE hub, and/or HTTP handlers are
+	// all refreshing within the same tick.
+	if cached, ok := cachedResult(); ok {
+		return cached, nil
+	}
+
 	projectsDir, err := ClaudeProjectsDir()
 	if err != nil {
 		return nil, err
@@ -293,10 +299,14 @@ func Discover() ([]Session, error) {
 		return nil, err
 	}
 
-	// Get directories where Claude is currently running
-	runningDirs := getRunningClaudeDirs()
+	// Get directories where Claude is currently running (TTL-cached to avoid
+	// spawning ps/lsof on every refresh).
+	runningDirs := cachedRunningClaudeDirs()
 
 	var sessions []Session
+	// Track the log files we actually parse this sweep so stale entries can be
+	// evicted from the parse cache afterwards (see pruneParseCache).
+	liveFiles := map[string]struct{}{}
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -317,6 +327,8 @@ func Discover() ([]Session, error) {
 		}
 
 		for i, logFile := range logFiles {
+			liveFiles[logFile] = struct{}{}
+
 			// Pair each log file with a PID by index (most recent log gets first PID)
 			var sessionPids []int
 			if i < len(pids) {
@@ -332,6 +344,10 @@ func Discover() ([]Session, error) {
 		}
 	}
 
+	// Evict parse-cache entries for logs no longer in the active set, keeping the
+	// cache bounded to the current working set over a long-running server.
+	pruneParseCache(liveFiles)
+
 	// Sort by status priority, then by last activity
 	sort.Slice(sessions, func(i, j int) bool {
 		// Priority: Working > NeedsInput > Waiting > Idle > Inactive
@@ -342,6 +358,7 @@ func Discover() ([]Session, error) {
 		return sessions[i].LastActivity.After(sessions[j].LastActivity)
 	})
 
+	storeResult(sessions)
 	return sessions, nil
 }
 
@@ -503,6 +520,103 @@ func findActiveLogs(dir string, runningCount int) ([]string, error) {
 	return result, nil
 }
 
+// parsedLog holds everything a single pass over a JSONL log file yields.
+// These fields only change when the file itself changes, so they are safe to
+// cache against the file's (modTime, size); the time-relative status is derived
+// separately on every call (see applyParsedLog).
+type parsedLog struct {
+	entries        []LogEntry // last N full JSON entries
+	summary        string
+	cwd            string
+	title          string
+	lastMessage    string
+	gitBranch      string
+	hasUnsandboxed bool
+	contextPercent float64
+	contextTokens  int
+	model          string
+	// lastEntryTime is the most recent non-zero entry timestamp, used as
+	// LastActivity when present (falls back to file modTime otherwise).
+	lastEntryTime time.Time
+}
+
+// parseLogFile scans a JSONL log file exactly once and extracts every field the
+// live view needs. It replaces three separate full-file passes (readLastEntries,
+// QuickSessionStats, extractSummary) that parseSession previously made.
+//
+// It keeps the last `keep` fully-parsed entries (for status/usage/message
+// extraction, which need Message.Content and Usage), while capturing the
+// early-file metadata (cwd, title) and the most recent summary in the same pass.
+func parseLogFile(logFile string, keep int) (parsedLog, error) {
+	file, err := os.Open(logFile)
+	if err != nil {
+		return parsedLog{}, err
+	}
+	defer file.Close()
+
+	var pl parsedLog
+	var entries []LogEntry
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024) // 10MB max line
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// Cheap string-prefix extraction for early-file metadata (avoids full
+		// JSON parse). cwd stays constant within a session (first non-empty
+		// wins); title can change (last non-empty wins).
+		if pl.cwd == "" {
+			if c := extractStringField(line, `"cwd":"`); c != "" {
+				pl.cwd = c
+			}
+		}
+		if t := extractStringField(line, `"customTitle":"`); t != "" {
+			pl.title = t
+		}
+
+		// Most recent summary entry (summaries are cheap to detect first).
+		if strings.Contains(line, `"type":"summary"`) {
+			var entry LogEntry
+			if json.Unmarshal([]byte(line), &entry) == nil &&
+				entry.Type == "summary" && entry.Summary != "" {
+				pl.summary = entry.Summary
+			}
+			continue
+		}
+
+		var entry LogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	// Keep only the last N entries.
+	if len(entries) > keep {
+		entries = entries[len(entries)-keep:]
+	}
+	pl.entries = entries
+
+	// Derive fields that only depend on the file contents.
+	pl.lastMessage = extractLastAssistantMessage(entries)
+	pl.gitBranch = extractGitBranch(entries)
+	pl.hasUnsandboxed = detectUnsandboxedCommands(entries)
+	pl.contextPercent, pl.contextTokens, pl.model = extractContextUsage(entries)
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !entries[i].Timestamp.IsZero() {
+			pl.lastEntryTime = entries[i].Timestamp
+			break
+		}
+	}
+
+	return pl, scanner.Err()
+}
+
 // parseSession parses a session from its log file
 func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	session := Session{
@@ -540,96 +654,50 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 	}
 	session.LastActivity = info.ModTime()
 
-	// Read last N lines of the file to determine status
-	entries, err := readLastEntries(logFile, 100)
+	// Fetch the parsed log (single full-file pass), reusing the cache when the
+	// file is unchanged since it was last parsed.
+	pl, err := cachedParseLogFile(logFile, info.ModTime(), info.Size(), 100)
 	if err != nil {
 		return session, nil // Return with defaults
 	}
 
-	if len(entries) == 0 {
+	if len(pl.entries) == 0 {
 		return session, nil
 	}
 
-	// Use QuickSessionStats for metadata that needs a full-file scan (cwd and title
-	// may appear early in the file, outside the last-100-entries window)
-	_, _, _, _, _, sessionCwd, sessionTitle := QuickSessionStats(logFile)
-	if sessionCwd != "" {
-		session.Project = extractProjectName(sessionCwd)
+	applyParsedLog(&session, pl, isRunning, pid, info.ModTime())
+	return session, nil
+}
+
+// applyParsedLog populates a Session from a parsedLog. The file-derived fields
+// come straight from pl (cacheable); the status and PID fields are recomputed
+// on every call because they depend on wall-clock time and the running-process
+// set, both of which change without the file changing.
+func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fileModTime time.Time) {
+	if pl.cwd != "" {
+		session.Project = extractProjectName(pl.cwd)
 	}
-	if sessionTitle != "" {
-		session.SessionTitle = sessionTitle
+	if pl.title != "" {
+		session.SessionTitle = pl.title
 	}
+	session.Summary = pl.summary
+	session.LastMessage = pl.lastMessage
+	session.GitBranch = pl.gitBranch
+	session.HasUnsandboxed = pl.hasUnsandboxed
+	session.ContextPercent = pl.contextPercent
+	session.ContextTokens = pl.contextTokens
+	session.Model = pl.model
 
-	// Extract summary from the log file (scans entire file)
-	session.Summary = extractSummary(logFile)
+	// Time-relative + running-dependent: must be recomputed each call.
+	session.Status, session.Task, session.IsGhost = determineStatus(pl.entries, isRunning, fileModTime)
 
-	// Extract last assistant message text
-	session.LastMessage = extractLastAssistantMessage(entries)
-
-	// Extract git branch (use most recent non-empty)
-	session.GitBranch = extractGitBranch(entries)
-
-	// Detect if any commands ran without sandbox
-	session.HasUnsandboxed = detectUnsandboxedCommands(entries)
-
-	// Extract context usage
-	session.ContextPercent, session.ContextTokens, session.Model = extractContextUsage(entries)
-
-	// Determine status from log entries
-	session.Status, session.Task, session.IsGhost = determineStatus(entries, isRunning, info.ModTime())
-
-	// Store PID for all running sessions (used by --kill-ghosts)
 	if isRunning && pid > 0 {
 		session.GhostPID = pid
 	}
 
-	// Get actual last activity timestamp from entries
-	for i := len(entries) - 1; i >= 0; i-- {
-		if !entries[i].Timestamp.IsZero() {
-			session.LastActivity = entries[i].Timestamp
-			break
-		}
+	if !pl.lastEntryTime.IsZero() {
+		session.LastActivity = pl.lastEntryTime
 	}
-
-	return session, nil
-}
-
-// extractSummary reads the entire file to find the most recent summary entry
-// Summaries are typically at the beginning of the file, so we need to scan it all
-func extractSummary(logFile string) string {
-	file, err := os.Open(logFile)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-
-	var lastSummary string
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		// Quick check before full JSON parse
-		if !strings.Contains(line, `"type":"summary"`) {
-			continue
-		}
-
-		var entry LogEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
-		}
-
-		if entry.Type == "summary" && entry.Summary != "" {
-			lastSummary = entry.Summary
-		}
-	}
-
-	return lastSummary
 }
 
 // extractLastAssistantMessage extracts the last text message from an assistant entry
@@ -772,42 +840,6 @@ func formatProjectPath(path string) string {
 	return path
 }
 
-// readLastEntries reads the last N valid JSON entries from a JSONL file
-func readLastEntries(filePath string, count int) ([]LogEntry, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var entries []LogEntry
-	scanner := bufio.NewScanner(file)
-	// Increase buffer size for very long lines (some entries can be several MB)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024) // 10MB max
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var entry LogEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
-		}
-
-		entries = append(entries, entry)
-	}
-
-	// Return last N entries
-	if len(entries) > count {
-		entries = entries[len(entries)-count:]
-	}
-
-	return entries, scanner.Err()
-}
-
 // DefaultContextWindow is the fallback context window size for Claude models (200K tokens)
 const DefaultContextWindow = 200000
 
@@ -867,6 +899,13 @@ func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 // GhostThreshold is the duration after which a running process with no log activity
 // is considered a ghost (orphaned) process
 const GhostThreshold = 10 * time.Minute
+
+// recentActivityWindow bounds every "Working" inference in determineStatus: a
+// tool result, user prompt, assistant message, or progress heartbeat only counts
+// as active work while it is younger than this. Older signals age out to Waiting,
+// which is what keeps a session from staying stuck on "Working" after Claude has
+// yielded back to the user without writing a turn-completion marker.
+const recentActivityWindow = 2 * time.Minute
 
 // determineStatus analyzes log entries to determine session status.
 // fileModTime is the log file's modification time, used to detect recent writes
@@ -955,9 +994,16 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 				// All tools got results - check if turn completed or still working
 				if lastSystem != nil && lastSystem.Timestamp.After(lastUser.Timestamp) {
 					// Turn completed after tool results
-				} else {
+				} else if time.Since(lastUser.Timestamp) < recentActivityWindow {
+					// No turn_duration marker yet, but the tool result is recent —
+					// Claude is very likely still working (about to continue the turn).
 					return StatusWorking, "Processing...", false
 				}
+				// All tools resolved but the last result is stale and no
+				// turn_duration/end_turn followed. Claude commonly ends a turn here
+				// (e.g. asking the user a question) without writing a completion
+				// marker, so fall through to the time-based checks below, which
+				// resolve this to Waiting/Needs Input rather than a stuck "Working".
 			} else {
 				// Some tool_use blocks have no result yet
 				hasPendingToolUse = true
@@ -971,7 +1017,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// execute without user interaction. A recent pending tool_use likely means
 	// the tool is currently executing, not waiting for approval.
 	if hasPendingToolUse {
-		if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < 2*time.Minute {
+		if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < recentActivityWindow {
 			return StatusWorking, "Using: " + pendingToolName, false
 		}
 		return StatusNeedsInput, "Using: " + pendingToolName, false
@@ -983,11 +1029,18 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// otherwise cause a false "Working" status on a completed turn.
 	if lastSystem != nil {
 		if lastAssistant == nil || lastSystem.Timestamp.After(lastAssistant.Timestamp) {
-			// If a new user message arrived after the turn completed, Claude is working on it
-			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) {
+			// If a new user message arrived after the turn completed, Claude is
+			// working on it — but only while that prompt is recent. A prompt left
+			// with no response for minutes (user walked away, or Claude stalled)
+			// must not stay pinned on "Working"; fall through to the staleness
+			// checks below, which resolve it to Waiting.
+			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) &&
+				time.Since(lastUser.Timestamp) < recentActivityWindow {
 				return StatusWorking, "Processing...", false
 			}
-			return StatusWaiting, "-", false
+			if lastUser == nil || !lastUser.Timestamp.After(lastSystem.Timestamp) {
+				return StatusWaiting, "-", false
+			}
 		}
 	}
 
@@ -1004,7 +1057,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// Progress heartbeats (progress, hook_progress, agent_progress) indicate
 	// active work: tool execution, hook callbacks, or subagent activity.
 	// A recent heartbeat is a strong signal that the session is working.
-	if lastProgress != nil && time.Since(lastProgress.Timestamp) < 2*time.Minute {
+	if lastProgress != nil && time.Since(lastProgress.Timestamp) < recentActivityWindow {
 		task := extractTask(lastAssistant)
 		return StatusWorking, task, false
 	}
@@ -1027,18 +1080,42 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// flipping to "Waiting" during brief gaps between log writes.
 	if lastAssistant != nil {
 		task := extractTask(lastAssistant)
-		if time.Since(lastAssistant.Timestamp) < 2*time.Minute {
+		if time.Since(lastAssistant.Timestamp) < recentActivityWindow {
 			return StatusWorking, task, false
 		}
 	}
 
-	// If user message is the most recent entry (e.g. first message in session),
-	// Claude is processing it
+	// If a genuine user prompt is the most recent entry (e.g. first message in
+	// session), Claude is processing it — but only while the prompt is recent. A
+	// user message that only carries a tool_result does NOT count: that is the
+	// tail of Claude's own turn, not a new prompt, and treating it as work is
+	// what made sessions stick on "Working" after Claude yielded back to the user
+	// without a turn_duration. The recency bound matters just as much: a genuine
+	// prompt left unanswered (user walked away, or Claude stalled) must age out to
+	// Waiting instead of staying pinned on "Working".
 	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) {
-		return StatusWorking, "Processing...", false
+		if isUserPrompt(lastUser) && time.Since(lastUser.Timestamp) < recentActivityWindow {
+			return StatusWorking, "Processing...", false
+		}
 	}
 
 	return StatusWaiting, "-", false
+}
+
+// isUserPrompt reports whether a user log entry is a genuine user prompt
+// (carries text) rather than only a tool_result echoed back to Claude. Claude's
+// tool results are recorded as user-role messages, so distinguishing them is
+// what tells a session that yielded to the user apart from one actively working.
+func isUserPrompt(entry *LogEntry) bool {
+	if entry == nil || entry.Message == nil {
+		return false
+	}
+	for _, content := range entry.Message.Content {
+		if content.Type == "text" && strings.TrimSpace(content.Text) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // extractTask extracts a task description from an assistant entry
