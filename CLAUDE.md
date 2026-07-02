@@ -59,19 +59,19 @@ The `main` branch is protected:
 
 Releases are fully automated. When a PR is merged to `main`:
 
-1. **Auto Tag and Release** (`.github/workflows/auto-tag.yaml`):
+**Auto Tag and Release** (`.github/workflows/auto-tag.yaml`) does everything in one job:
    - Triggers on push to `main` branch
    - Gets the latest tag and increments the patch version (e.g., v0.3.8 → v0.3.9)
    - Creates and pushes the new tag
-   - Builds binaries for darwin/linux × amd64/arm64
+   - Builds binaries for darwin/linux × amd64/arm64 (plus `.deb`/`.rpm` packages)
    - Creates GitHub release with binaries attached
-   - Sends `repository_dispatch` event to `yepzdk/homebrew-tools`
+   - Hashes the built binaries, rewrites `Formula/csm.rb`, and commits it to
+     `yepzdk/homebrew-tools` using `HOMEBREW_TAP_PAT`
 
-2. **Homebrew tap update** (`yepzdk/homebrew-tools`):
-   - Workflow triggers on `repository_dispatch` with type `update-csm`
-   - Downloads the new binaries and calculates SHA256 hashes
-   - Updates `Formula/csm.rb` with new version and hashes
-   - Commits and pushes automatically
+Only **one** secret is involved: `HOMEBREW_TAP_PAT` in *this* repo, a token with
+`contents: write` on `yepzdk/homebrew-tools`. The tap repo no longer runs its own
+workflow, so there is no second copy of the token to keep in sync. When rotating
+the PAT, update it here (`gh secret set HOMEBREW_TAP_PAT -R yepzdk/claude-sessions-monitor`).
 
 ### Manual Version Bumps
 
@@ -88,15 +88,13 @@ The auto-tag workflow will continue from that version for subsequent patch relea
 ### Troubleshooting releases
 
 **Homebrew not seeing new version:**
-1. Check if release workflow succeeded: `gh run list`
-2. Check if release was created: `gh release list`
-3. Check homebrew-tools workflow: `gh run list -R yepzdk/homebrew-tools`
-4. Verify formula was updated: `gh api repos/yepzdk/homebrew-tools/contents/Formula/csm.rb --jq '.content' | base64 -d | head -5`
+1. Check if the release workflow succeeded: `gh run list` (look at the "Update Homebrew formula" step)
+2. Check if the release was created: `gh release list`
+3. Verify the formula was updated: `gh api repos/yepzdk/homebrew-tools/contents/Formula/csm.rb --jq '.content' | base64 -d | head -5`
+4. If the formula step failed with an auth error, the `HOMEBREW_TAP_PAT` in this repo has likely expired — rotate it (see above).
 
-**Manual trigger (if dispatch failed):**
-```bash
-gh workflow run update-csm.yml -R yepzdk/homebrew-tools -f version=X.X.X
-```
+**Users hitting `Refusing to load formula ... untrusted tap`:** this is Homebrew's
+third-party-tap policy, not a release problem. Run `brew trust yepzdk/tools` once.
 
 **Manual formula update (if automation completely fails):**
 1. Get SHA256 hashes for binaries:
