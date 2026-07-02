@@ -94,14 +94,84 @@ jobs:
             dist/csm-*.aarch64.rpm
           generate_release_notes: true
 
+      # Update the Homebrew formula directly from the binaries we just built,
+      # rather than firing a repository_dispatch that makes the tap re-download
+      # and re-hash them. This keeps the whole release in one workflow with one
+      # token (HOMEBREW_TAP_PAT, scoped to the tap's contents), so there is no
+      # second secret in the tap repo to fall out of sync on rotation.
       - name: Update Homebrew formula
         env:
           HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
           TAG_NAME: ${{ steps.next_version.outputs.new_tag }}
         run: |
+          set -euo pipefail
           VERSION="${TAG_NAME#v}"
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: token $HOMEBREW_TAP_PAT" \
-            https://api.github.com/repos/yepzdk/homebrew-tools/dispatches \
-            -d "{\"event_type\":\"update-csm\",\"client_payload\":{\"version\":\"$VERSION\"}}"
+          BASE_URL="https://github.com/yepzdk/claude-sessions-monitor/releases/download/${TAG_NAME}"
+
+          # Hash the binaries we already built in dist/ — no re-download needed.
+          sha_darwin_arm64=$(sha256sum dist/csm-darwin-arm64 | awk '{print $1}')
+          sha_darwin_amd64=$(sha256sum dist/csm-darwin-amd64 | awk '{print $1}')
+          sha_linux_arm64=$(sha256sum dist/csm-linux-arm64 | awk '{print $1}')
+          sha_linux_amd64=$(sha256sum dist/csm-linux-amd64 | awk '{print $1}')
+
+          # Clone the tap using the PAT this workflow already holds.
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_PAT}@github.com/yepzdk/homebrew-tools.git" tap
+          cd tap
+
+          # Heredoc body is left-aligned on purpose: cat writes it verbatim, so
+          # any leading indentation would end up in the committed formula.
+          cat > Formula/csm.rb <<FORMULA_EOF
+          class Csm < Formula
+            desc "CLI tool to monitor Claude Code sessions"
+            homepage "https://github.com/yepzdk/claude-sessions-monitor"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "${BASE_URL}/csm-darwin-arm64"
+                sha256 "${sha_darwin_arm64}"
+              end
+              on_intel do
+                url "${BASE_URL}/csm-darwin-amd64"
+                sha256 "${sha_darwin_amd64}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${BASE_URL}/csm-linux-arm64"
+                sha256 "${sha_linux_arm64}"
+              end
+              on_intel do
+                url "${BASE_URL}/csm-linux-amd64"
+                sha256 "${sha_linux_amd64}"
+              end
+            end
+
+            def install
+              bin.install Dir["*"].first => "csm"
+            end
+
+            test do
+              assert_match "csm version", shell_output("#{bin}/csm -v")
+            end
+          end
+          FORMULA_EOF
+          # Strip the YAML `run:` block indentation that the heredoc captured,
+          # leaving the formula's own 2-space Ruby indentation intact.
+          sed -i 's/^          //' Formula/csm.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/csm.rb
+          # No-op releases (re-run on an unchanged formula) are a clean success,
+          # not a failed commit.
+          if git diff --cached --quiet; then
+            echo "Homebrew formula already up to date for ${TAG_NAME}"
+          else
+            git commit -m "Update csm formula to ${TAG_NAME}"
+            git push
+            echo "Homebrew formula updated to ${TAG_NAME}"
+          fi
