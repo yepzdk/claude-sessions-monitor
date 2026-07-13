@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Context usage is no longer overstated ~5x for Claude 5 family models (`claude-fable-5`, `claude-sonnet-5`): their two-part model ids now parse correctly and map to the 1M context window. (#51)
 - Sessions no longer stay stuck on "Working" after Claude has yielded back to the user; idle sessions now age out to "Waiting" with the real last message.
 - Sharply reduced CPU usage of the live view (previously ~40-50% at idle) by caching session log parsing.
 

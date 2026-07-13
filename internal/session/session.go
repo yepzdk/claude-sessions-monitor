@@ -854,14 +854,15 @@ func ContextWindowForModel(model string) int {
 }
 
 // contextWindowForModel returns the context window size for a given model ID.
-// Opus and Sonnet from generation 4.6 onward have 1M context windows; Haiku and
-// older models use the 200K default.
+// Opus and Sonnet from generation 4.6 onward, plus the Claude 5 family
+// (Fable/Sonnet 5), have 1M context windows; Haiku and older models use the
+// 200K default.
 func contextWindowForModel(model string) int {
 	family, major, minor, ok := parseClaudeModel(model)
 	if !ok {
 		return DefaultContextWindow
 	}
-	if family != "opus" && family != "sonnet" {
+	if family != "opus" && family != "sonnet" && family != "fable" {
 		return DefaultContextWindow
 	}
 	if major > 4 || (major == 4 && minor >= 6) {
@@ -870,18 +871,20 @@ func contextWindowForModel(model string) int {
 	return DefaultContextWindow
 }
 
-// parseClaudeModel extracts the family ("opus", "sonnet", "haiku") and the
-// generation (major, minor) from model ids of the form
-// "claude-<family>-<major>-<minor>[-suffix]". Returns ok=false for anything
-// that doesn't match — including "<synthetic>", empty strings, and unknown
-// families — so callers can fall back to a safe default.
+// parseClaudeModel extracts the family ("opus", "sonnet", "fable", "haiku")
+// and the generation (major, minor) from model ids of the form
+// "claude-<family>-<major>[-<minor>][-suffix]". The Claude 5 family drops the
+// minor version ("claude-fable-5", "claude-sonnet-5"); it is treated as 0.
+// Returns ok=false for anything that doesn't match — including "<synthetic>",
+// empty strings, and non-numeric majors — so callers can fall back to a safe
+// default.
 func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 	const prefix = "claude-"
 	if !strings.HasPrefix(model, prefix) {
 		return "", 0, 0, false
 	}
 	parts := strings.Split(model[len(prefix):], "-")
-	if len(parts) < 3 {
+	if len(parts) < 2 {
 		return "", 0, 0, false
 	}
 	family = parts[0]
@@ -889,9 +892,11 @@ func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 	if err != nil {
 		return "", 0, 0, false
 	}
-	min, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return "", 0, 0, false
+	min := 0
+	if len(parts) >= 3 {
+		if v, err := strconv.Atoi(parts[2]); err == nil {
+			min = v
+		}
 	}
 	return family, maj, min, true
 }
