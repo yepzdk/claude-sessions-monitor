@@ -172,11 +172,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	render := func() {
 		switch viewMode {
 		case ViewModeHistory:
-			ui.ClearScreen()
+			ui.MoveCursorHome()
 			sessions, _ := session.DiscoverHistory(historyDays)
 			ui.RenderHistory(sessions, historyDays, true)
 		case ViewModeUsage:
-			ui.ClearScreen()
+			ui.MoveCursorHome()
 			usage := session.ComputeUsage()
 			apiQuota := session.FetchAPIQuota()
 			ui.RenderUsage(usage, apiQuota, true)

@@ -11,14 +11,19 @@ import (
 // RenderHistory renders the session history view with date grouping
 // When showFooter is true, uses \r\n for raw terminal mode
 func RenderHistory(sessions []session.HistorySession, days int, showFooter bool) {
-	// Use \r\n when in interactive mode (showFooter=true means raw terminal)
+	// Use rawNewline when in interactive mode (showFooter=true means raw
+	// terminal) so a refresh overwrites the previous frame in place instead
+	// of flashing a blank screen — see rawNewline in ui.go.
 	nl := "\n"
 	if showFooter {
-		nl = "\r\n"
+		nl = rawNewline
 	}
 
 	if len(sessions) == 0 {
 		fmt.Printf("No sessions found in the past %d days.%s", days, nl)
+		if showFooter {
+			fmt.Print("\033[J")
+		}
 		return
 	}
 
@@ -111,6 +116,8 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 
 	if showFooter {
 		fmt.Printf("%s%sl: live view | u: usage | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		// Erase anything left over below this frame from a previous, longer one.
+		fmt.Print("\033[J")
 	}
 }
 
