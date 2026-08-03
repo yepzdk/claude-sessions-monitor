@@ -150,23 +150,33 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 	} else {
 		fmt.Printf("%sh: history | u: usage | Ctrl+C: quit%s%s", Dim, Reset, rawNewline)
 	}
-
-	// Erase anything left over below this frame from a previous, longer one
-	// (e.g. a session or subagent row that's no longer there).
-	fmt.Print("\033[J")
 }
 
-// ClearScreen clears the terminal screen
-func ClearScreen() {
-	fmt.Print("\033[2J\033[H")
+// newlineFor returns the line ending a render function should use: rawNewline
+// in interactive mode (showFooter true), or a plain "\n" for one-shot,
+// non-terminal output where erase-to-end-of-line escapes would just be noise.
+func newlineFor(showFooter bool) string {
+	if showFooter {
+		return rawNewline
+	}
+	return "\n"
 }
 
 // MoveCursorHome moves the cursor to the top-left without erasing the
-// screen. Used before a redraw instead of ClearScreen so each refresh
-// overwrites the previous frame in place — see rawNewline for why a full
-// clear-then-redraw causes a visible flash on some terminals.
+// screen. Called once before a redraw so each refresh overwrites the
+// previous frame in place — see rawNewline for why a full clear-then-redraw
+// causes a visible flash on some terminals.
 func MoveCursorHome() {
 	fmt.Print("\033[H")
+}
+
+// EraseToEnd erases from the cursor to the end of the screen. Called once
+// after a full redraw completes, to clear any rows left over from a
+// previous, longer frame (e.g. a session or subagent row that's no longer
+// there). This is a per-render-cycle concern, not something each view needs
+// to remember to do itself — see main.go's render loop for the call site.
+func EraseToEnd() {
+	fmt.Print("\033[J")
 }
 
 // EnterAltScreen switches to the terminal's alternate screen buffer.

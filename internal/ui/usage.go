@@ -14,13 +14,7 @@ const usageBarWidth = 20
 // RenderUsage renders the token usage view in the terminal.
 // Uses \r\n for newlines when in raw terminal mode (showFooter=true).
 func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFooter bool) {
-	// Use rawNewline when in interactive mode (showFooter=true means raw
-	// terminal) so a refresh overwrites the previous frame in place instead
-	// of flashing a blank screen — see rawNewline in ui.go.
-	nl := "\n"
-	if showFooter {
-		nl = rawNewline
-	}
+	nl := newlineFor(showFooter)
 
 	fmt.Printf("%sToken Usage%s%s%s", Bold, Reset, nl, nl)
 
@@ -101,8 +95,6 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 	// Footer
 	if showFooter {
 		fmt.Printf("%s%sr: refresh | l: live | h: history | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
-		// Erase anything left over below this frame from a previous, longer one.
-		fmt.Print("\033[J")
 	}
 }
 

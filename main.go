@@ -184,6 +184,9 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			sessions, _ := session.Discover()
 			ui.RenderLive(sessions, webURL, lastClaudeStatus)
 		}
+		// Erase anything left over below this frame from a previous, longer
+		// one, once per render cycle rather than each view remembering to.
+		ui.EraseToEnd()
 	}
 
 	// Initial render
