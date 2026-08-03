@@ -272,13 +272,23 @@ func sessionIDFromLogFile(logFile string) string {
 }
 
 // encodeProjectPath converts a filesystem path to the encoded directory name format
+// used for the per-project folders under ~/.claude/projects.
+//
+// Claude Code replaces every character outside [A-Za-z0-9-] with a dash, so this
+// must do the same rather than special-casing a few separators. Enumerating them
+// silently breaks any path containing another character — e.g. a home directory
+// like /home/user@corp.example, where an unencoded '@' makes the computed key
+// miss the real directory and every session gets reported as inactive.
 func encodeProjectPath(path string) string {
 	// /Users/username/Projects/org/project -> -Users-username-Projects-org-project
-	// Replace /, ., and _ with dashes to match Claude Code's encoding scheme
-	encoded := strings.ReplaceAll(path, "/", "-")
-	encoded = strings.ReplaceAll(encoded, ".", "-")
-	encoded = strings.ReplaceAll(encoded, "_", "-")
-	return encoded
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, path)
 }
 
 // Discover finds all active Claude sessions

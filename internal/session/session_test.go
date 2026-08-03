@@ -467,6 +467,16 @@ func TestEncodeProjectPath(t *testing.T) {
 			path: "/Users/username/Projects/org/my_project.v2",
 			want: "-Users-username-Projects-org-my-project-v2",
 		},
+		{
+			name: "home directory containing an @",
+			path: "/home/jdoe@corp.example/Projects/org/project",
+			want: "-home-jdoe-corp-example-Projects-org-project",
+		},
+		{
+			name: "path with spaces and other punctuation",
+			path: "/Users/user name/Projects/org/app (v2)",
+			want: "-Users-user-name-Projects-org-app--v2-",
+		},
 	}
 
 	for _, tt := range tests {
