@@ -195,6 +195,7 @@
                     <a class="session-history-link" title="View project history">&#x29D6;</a>
                 </div>
                 ${s.last_message ? `<div class="session-bottom">${esc(s.last_message)}</div>` : ''}
+                ${renderSubagents(s.subagents)}
             </div>`;
         }).join('');
 
@@ -208,11 +209,43 @@
                     showProjectHistory(project);
                     return;
                 }
+                // A click on a nested subagent opens that agent's log, not the parent's
+                const subagent = e.target.closest('.subagent');
+                if (subagent && subagent.dataset.logfile) {
+                    openDetail(subagent.dataset.logfile, subagent.dataset.label);
+                    return;
+                }
                 const logFile = card.dataset.logfile;
                 const project = card.querySelector('.session-project').textContent;
                 if (logFile) openDetail(logFile, project);
             });
         });
+    }
+
+    // Render a session's live subagents as rows nested under its card.
+    // Only running agents reach here — the backend drops finished ones.
+    function renderSubagents(subagents) {
+        if (!subagents || subagents.length === 0) return '';
+
+        return `<div class="session-subagents">` + subagents.map(a => {
+            const label = a.agent_type || (a.id || '').slice(0, 8);
+            // The agent's latest message is the most useful line; fall back to
+            // the task it was spawned with before it has said anything.
+            const detail = a.task || a.description || '';
+            const showDescription = a.task && a.description;
+
+            return `<div class="subagent" data-logfile="${esc(a.log_file || '')}" data-label="${esc(label)}">
+                <div class="subagent-top">
+                    <span class="subagent-branch">&#x2514;</span>
+                    <span class="session-status working">&#x25CF;</span>
+                    <span class="subagent-label">${esc(label)}</span>
+                    ${a.blocking ? `<span class="badge subagent-blocking" title="The parent turn cannot continue until this agent finishes">blocking</span>` : ''}
+                    ${showDescription ? `<span class="subagent-description">${esc(a.description)}</span>` : ''}
+                    <span class="session-activity">${formatAge(a.last_activity)}</span>
+                </div>
+                ${detail ? `<div class="subagent-bottom">${esc(detail)}</div>` : ''}
+            </div>`;
+        }).join('') + `</div>`;
     }
 
     // Navigate to history tab filtered by project

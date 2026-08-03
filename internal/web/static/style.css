@@ -464,6 +464,68 @@ main {
     white-space: nowrap;
 }
 
+/* Subagents nested under their parent session card */
+.session-subagents {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.subagent {
+    border-radius: 4px;
+    padding: 0.125rem 0.25rem 0.125rem 1.25rem;
+    transition: background-color 0.15s;
+}
+
+.subagent:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+
+.subagent-top {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Keeps the age right-aligned whether or not a description is present */
+.subagent-top .session-activity { margin-left: auto; }
+
+.subagent-branch {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+
+.subagent-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.subagent-blocking {
+    color: var(--yellow);
+}
+
+.subagent-description {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subagent-bottom {
+    margin-top: 0.125rem;
+    padding-left: 1.75rem;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Stopped session cards */
 .session-card.stopped {
     opacity: 0.55;

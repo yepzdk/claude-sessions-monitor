@@ -20,33 +20,34 @@ import (
 type Status string
 
 const (
-	StatusWorking      Status = "Working"
-	StatusNeedsInput   Status = "Needs Input"
-	StatusWaiting      Status = "Waiting"
-	StatusIdle         Status = "Idle"
-	StatusInactive     Status = "Inactive"
+	StatusWorking    Status = "Working"
+	StatusNeedsInput Status = "Needs Input"
+	StatusWaiting    Status = "Waiting"
+	StatusIdle       Status = "Idle"
+	StatusInactive   Status = "Inactive"
 )
 
 // Session represents a Claude Code session
 type Session struct {
-	Project        string    `json:"project"`
-	Status         Status    `json:"status"`
-	LastActivity   time.Time `json:"last_activity"`
-	Task           string    `json:"task"`
-	Summary        string    `json:"summary,omitempty"`
-	LastMessage    string    `json:"last_message,omitempty"`
-	LogFile        string    `json:"log_file"`
-	ProjectPath    string    `json:"-"`                         // Full path to the project directory
-	SessionID      string    `json:"session_id,omitempty"`      // Claude session UUID (log filename stem)
-	Origin         Origin    `json:"origin,omitempty"`          // Where the session was launched from
-	IsGhost        bool      `json:"is_ghost,omitempty"`        // True if process running but log is stale
-	GhostPID       int       `json:"ghost_pid,omitempty"`       // PID of the ghost process (for killing)
-	GitBranch      string    `json:"git_branch,omitempty"`      // Current git branch
-	HasUnsandboxed bool      `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
-	ContextPercent float64   `json:"context_percent,omitempty"` // Percentage of context window used
-	ContextTokens  int       `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
-	Model          string    `json:"model,omitempty"`           // Model id from the latest assistant usage (e.g. "claude-opus-4-7")
-	SessionTitle   string    `json:"session_title,omitempty"`   // Custom title set by user/Claude
+	Project        string     `json:"project"`
+	Status         Status     `json:"status"`
+	LastActivity   time.Time  `json:"last_activity"`
+	Task           string     `json:"task"`
+	Summary        string     `json:"summary,omitempty"`
+	LastMessage    string     `json:"last_message,omitempty"`
+	LogFile        string     `json:"log_file"`
+	ProjectPath    string     `json:"-"`                         // Full path to the project directory
+	SessionID      string     `json:"session_id,omitempty"`      // Claude session UUID (log filename stem)
+	Origin         Origin     `json:"origin,omitempty"`          // Where the session was launched from
+	IsGhost        bool       `json:"is_ghost,omitempty"`        // True if process running but log is stale
+	GhostPID       int        `json:"ghost_pid,omitempty"`       // PID of the ghost process (for killing)
+	GitBranch      string     `json:"git_branch,omitempty"`      // Current git branch
+	HasUnsandboxed bool       `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
+	ContextPercent float64    `json:"context_percent,omitempty"` // Percentage of context window used
+	ContextTokens  int        `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
+	Model          string     `json:"model,omitempty"`           // Model id from the latest assistant usage (e.g. "claude-opus-4-7")
+	SessionTitle   string     `json:"session_title,omitempty"`   // Custom title set by user/Claude
+	Subagents      []Subagent `json:"subagents,omitempty"`       // Live subagents spawned by this session
 }
 
 // RunningProcess represents a Claude process with its PID and working directory
@@ -64,7 +65,7 @@ type LogEntry struct {
 	Summary     string    `json:"summary,omitempty"` // For type: "summary" entries
 	GitBranch   string    `json:"gitBranch,omitempty"`
 	CWD         string    `json:"cwd,omitempty"`         // Working directory of the Claude process
-	CustomTitle string    `json:"customTitle,omitempty"`  // User/Claude-set session title
+	CustomTitle string    `json:"customTitle,omitempty"` // User/Claude-set session title
 }
 
 // Message represents the message field in a log entry
@@ -169,10 +170,12 @@ type Usage struct {
 
 // ContentItem represents an item in the content array
 type ContentItem struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	Name  string          `json:"name,omitempty"`  // For tool_use
-	Input json.RawMessage `json:"input,omitempty"` // For tool_use inputs
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Name      string          `json:"name,omitempty"`        // For tool_use
+	ID        string          `json:"id,omitempty"`          // For tool_use
+	ToolUseID string          `json:"tool_use_id,omitempty"` // For tool_result
+	Input     json.RawMessage `json:"input,omitempty"`       // For tool_use inputs
 }
 
 // BashToolInput represents the input for a Bash tool_use entry
@@ -690,6 +693,17 @@ func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fil
 
 	// Time-relative + running-dependent: must be recomputed each call.
 	session.Status, session.Task, session.IsGhost = determineStatus(pl.entries, isRunning, fileModTime)
+
+	// A session that dispatched a subagent writes nothing to its own log until
+	// the result comes back, so determineStatus sees a stale file and reports
+	// Needs Input / Waiting. The subagent's log is where the work is visible.
+	session.Subagents = discoverSubagents(session.LogFile, pendingToolUseIDs(pl.entries), isRunning)
+	if len(session.Subagents) > 0 && rollUpSubagentStatus(session.Status) {
+		session.Status = StatusWorking
+		if session.Task == "" || session.Task == "-" {
+			session.Task = subagentTask(session.Subagents)
+		}
+	}
 
 	if isRunning && pid > 0 {
 		session.GhostPID = pid
