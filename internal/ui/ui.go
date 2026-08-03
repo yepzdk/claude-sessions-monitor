@@ -149,6 +149,21 @@ func ClearScreen() {
 	fmt.Print("\033[2J\033[H")
 }
 
+// EnterAltScreen switches to the terminal's alternate screen buffer.
+// Besides preserving the user's scrollback, this is the conventional signal
+// that an application is a full-screen TUI. Block-based terminals (JetBrains'
+// terminal, Warp) ignore bare cursor-control sequences on the main buffer and
+// only redraw in place once the alternate buffer is active.
+func EnterAltScreen() {
+	fmt.Print("\033[?1049h")
+}
+
+// ExitAltScreen returns to the normal screen buffer, restoring whatever was
+// on screen before EnterAltScreen was called.
+func ExitAltScreen() {
+	fmt.Print("\033[?1049l")
+}
+
 // HideCursor hides the terminal cursor
 func HideCursor() {
 	fmt.Print("\033[?25l")

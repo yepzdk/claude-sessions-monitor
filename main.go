@@ -153,14 +153,15 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		lastClaudeStatus = session.FetchClaudeStatus()
 	}
 
-	// Hide cursor and ensure cleanup on exit
+	// Take over the screen and ensure cleanup on exit
+	ui.EnterAltScreen()
 	ui.HideCursor()
 	defer func() {
 		close(done)
 		ui.CleanupRawInput()
 		ui.ShowCursor()
 		ui.ResetTerminalTitle()
-		ui.ClearScreen()
+		ui.ExitAltScreen()
 		fmt.Println("Goodbye!")
 	}()
 
