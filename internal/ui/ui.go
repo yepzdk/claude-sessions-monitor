@@ -41,13 +41,15 @@ func RenderList(sessions []session.Session) {
 
 	l := calcSessionLayout(getTerminalWidth())
 
-	// Header
-	fmt.Println(sessionHeader(l))
-	fmt.Println(strings.Repeat("─", l.totalWidth))
+	var buf strings.Builder
+	buf.WriteString(sessionHeader(l) + "\n")
+	buf.WriteString(strings.Repeat("─", l.totalWidth) + "\n")
 
 	for _, s := range sessions {
-		renderSessionRow(s, l, "\n")
+		renderSessionRow(&buf, s, l, "\n")
 	}
+
+	fmt.Print(buf.String())
 }
 
 // sessionHeader returns the column header row matching the given layout.
@@ -88,12 +90,20 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
 
+	// Build the whole frame in memory and write it out in a single syscall.
+	// Printing each line separately means the terminal can render partway
+	// through a frame — any row whose text changed briefly shows blank (or
+	// the old content) between writes, which is what "flicker on updated
+	// rows" actually is. One write makes each redraw atomic from the
+	// terminal's point of view.
+	var buf strings.Builder
+
 	// Move cursor to top without erasing — see rawNewline for why the screen
 	// isn't cleared up front.
-	fmt.Print("\033[H")
+	buf.WriteString("\033[H")
 
 	// Header
-	fmt.Printf("%sClaude Code Sessions%s%s%s", Bold, Reset, rawNewline, rawNewline)
+	fmt.Fprintf(&buf, "%sClaude Code Sessions%s%s%s", Bold, Reset, rawNewline, rawNewline)
 
 	// Split sessions into active and inactive (ghosts are included in inactive)
 	var active, inactive []session.Session
@@ -107,49 +117,51 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 
 	// Status summary (only active sessions)
 	counts := countByStatus(active)
-	fmt.Printf("%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
-	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
-	fmt.Printf("%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
-	fmt.Print(rawNewline)
+	fmt.Fprintf(&buf, "%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
+	fmt.Fprintf(&buf, "%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
+	fmt.Fprintf(&buf, "%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
+	buf.WriteString(rawNewline)
 
-	fmt.Print(rawNewline)
+	buf.WriteString(rawNewline)
 
 	if len(active) == 0 {
-		fmt.Printf("%sNo active Claude sessions.%s%s", Dim, Reset, rawNewline)
+		fmt.Fprintf(&buf, "%sNo active Claude sessions.%s%s", Dim, Reset, rawNewline)
 	} else {
 		l := calcSessionLayout(getTerminalWidth())
 
 		// Column headers
-		fmt.Printf("%s%s", sessionHeader(l), rawNewline)
-		fmt.Printf("%s%s", strings.Repeat("─", l.totalWidth), rawNewline)
+		fmt.Fprintf(&buf, "%s%s", sessionHeader(l), rawNewline)
+		fmt.Fprintf(&buf, "%s%s", strings.Repeat("─", l.totalWidth), rawNewline)
 
 		for _, s := range active {
-			renderSessionRow(s, l, rawNewline)
+			renderSessionRow(&buf, s, l, rawNewline)
 		}
 	}
 
 	// Show Claude service status
 	statusLink := terminalLink("https://status.claude.com/", "status.claude.com")
-	fmt.Print(rawNewline)
+	buf.WriteString(rawNewline)
 	if claudeStatus != nil && claudeStatus.Available {
 		switch claudeStatus.Indicator {
 		case "minor":
-			fmt.Printf("%s%s Claude: %s - %s%s%s", Yellow, "\u26A0", claudeStatus.Description, statusLink, Reset, rawNewline)
+			fmt.Fprintf(&buf, "%s%s Claude: %s - %s%s%s", Yellow, "\u26A0", claudeStatus.Description, statusLink, Reset, rawNewline)
 		case "major", "critical":
-			fmt.Printf("%s%s Claude: %s - %s%s%s", Red, "\u2716", claudeStatus.Description, statusLink, Reset, rawNewline)
+			fmt.Fprintf(&buf, "%s%s Claude: %s - %s%s%s", Red, "\u2716", claudeStatus.Description, statusLink, Reset, rawNewline)
 		default:
-			fmt.Printf("%sClaude: %s - %s%s%s", Dim, claudeStatus.Description, statusLink, Reset, rawNewline)
+			fmt.Fprintf(&buf, "%sClaude: %s - %s%s%s", Dim, claudeStatus.Description, statusLink, Reset, rawNewline)
 		}
 	} else {
-		fmt.Printf("%sClaude: Status unavailable - %s%s%s", Dim, statusLink, Reset, rawNewline)
+		fmt.Fprintf(&buf, "%sClaude: Status unavailable - %s%s%s", Dim, statusLink, Reset, rawNewline)
 	}
 
 	// Show help footer
 	if webURL != "" {
-		fmt.Printf("%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s%s", Dim, webURL, Reset, rawNewline)
+		fmt.Fprintf(&buf, "%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s%s", Dim, webURL, Reset, rawNewline)
 	} else {
-		fmt.Printf("%sh: history | u: usage | Ctrl+C: quit%s%s", Dim, Reset, rawNewline)
+		fmt.Fprintf(&buf, "%sh: history | u: usage | Ctrl+C: quit%s%s", Dim, Reset, rawNewline)
 	}
+
+	fmt.Print(buf.String())
 }
 
 // newlineFor returns the line ending a render function should use: rawNewline
@@ -430,7 +442,7 @@ func formatOrigin(o session.Origin, width int) string {
 // renderSessionRow renders a single session row using the given layout.
 // The main row shows status, project, origin (optional), context, and activity.
 // A second indented line shows the last message using the full width.
-func renderSessionRow(s session.Session, l sessionLayout, nl string) {
+func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, nl string) {
 	activity := formatElapsed(time.Since(s.LastActivity))
 	if s.Status == session.StatusWorking {
 		activity = "Now"
@@ -451,7 +463,7 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 			formatContext(s, l.context),
 			l.activity, activity)
 	}
-	fmt.Print(row + nl)
+	buf.WriteString(row + nl)
 
 	// Second line: last message aligned with status text (after "● ")
 	// Sanitize to prevent ANSI escape injection from log content
@@ -464,12 +476,12 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 		msgWidth := l.totalWidth - indent
 		if msgWidth > 0 {
 			msg := truncate(desc, msgWidth)
-			fmt.Printf("%s%s%s%s", strings.Repeat(" ", indent), Dim, msg, Reset+nl)
+			fmt.Fprintf(buf, "%s%s%s%s", strings.Repeat(" ", indent), Dim, msg, Reset+nl)
 		}
 	}
 
 	// Blank line after each session block for visual grouping
-	fmt.Print(nl)
+	buf.WriteString(nl)
 }
 
 // formatProject formats the project name with optional indicators, padded to maxLen visible chars
