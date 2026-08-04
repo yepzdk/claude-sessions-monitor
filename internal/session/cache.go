@@ -44,6 +44,17 @@ var (
 	parseCache   = map[string]cachedParse{}
 )
 
+// isFatalParseError reports whether a parseLogFile error means the result has
+// nothing usable and should be discarded entirely, vs. a scan error (e.g. a
+// line beyond the scanner's buffer limit) encountered after some entries were
+// already gathered, which is still worth keeping. Treating any error as fatal
+// used to discard everything already parsed, and the caller then defaulted
+// the session to Inactive regardless of whether it was actually running --
+// see parseSession's zero-value default.
+func isFatalParseError(err error, entryCount int) bool {
+	return err != nil && entryCount == 0
+}
+
 // cachedParseLogFile returns the parsed log for logFile, reusing a cached parse
 // when the file's (modTime, size) is unchanged since it was last parsed.
 func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int) (parsedLog, error) {
@@ -56,7 +67,7 @@ func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int)
 
 	// Miss: parse outside the lock (file I/O should not block other lookups).
 	pl, err := parseLogFile(logFile, keep)
-	if err != nil {
+	if isFatalParseError(err, len(pl.entries)) {
 		return parsedLog{}, err
 	}
 

@@ -1,8 +1,10 @@
 package session
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,6 +132,58 @@ func TestParseLogFile_ExtractsAllFields(t *testing.T) {
 	}
 	if pl.lastEntryTime.IsZero() {
 		t.Error("lastEntryTime is zero")
+	}
+}
+
+// A line beyond the scanner's max size aborts the scan (bufio.Scanner's
+// behavior, not something parseLogFile can avoid), but every entry parsed
+// before that point must still come back rather than being thrown away.
+func TestParseLogFile_OversizedLineKeepsEarlierEntries(t *testing.T) {
+	dir := t.TempDir()
+	oversized := `{"type":"assistant","timestamp":"2026-06-01T10:00:10Z","message":{"role":"assistant","content":[{"type":"text","text":"` +
+		strings.Repeat("x", 200) + `"}]}}`
+	content := sampleLog + oversized + "\n"
+	path, _, _ := writeLog(t, dir, "s.jsonl", content)
+
+	// A tiny limit (well under the oversized line's length, well over every
+	// other line's) reproduces the scanner hitting bufio.ErrTooLong without
+	// allocating a real maxLogLineBytes-sized string in the test.
+	pl, err := parseLogFileWithLimit(path, 100, 250)
+
+	if err == nil {
+		t.Fatal("parseLogFileWithLimit: want a scan error from the oversized line, got nil")
+	}
+	// The two entries from sampleLog, parsed before the scanner gave up.
+	if len(pl.entries) != 2 {
+		t.Errorf("entries = %d, want 2 (the ones parsed before the oversized line)", len(pl.entries))
+	}
+	if pl.lastMessage != "On it" {
+		t.Errorf("lastMessage = %q, want the last entry parsed before the failure", pl.lastMessage)
+	}
+}
+
+// cachedParseLogFile must not turn a partial scan (some entries recovered,
+// then a scan error) into total data loss -- that cascades into parseSession
+// defaulting the session to Inactive regardless of whether it's running.
+func TestIsFatalParseError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		entryCount int
+		want       bool
+	}{
+		{"no error", nil, 5, false},
+		{"no error, no entries (empty file)", nil, 0, false},
+		{"error, nothing recovered", bufio.ErrTooLong, 0, true},
+		{"error, some entries recovered", bufio.ErrTooLong, 2, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isFatalParseError(tt.err, tt.entryCount)
+			if got != tt.want {
+				t.Errorf("isFatalParseError(%v, %d) = %v, want %v", tt.err, tt.entryCount, got, tt.want)
+			}
+		})
 	}
 }
 
