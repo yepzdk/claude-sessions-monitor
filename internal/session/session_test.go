@@ -508,6 +508,47 @@ func TestUsageJSONParsing(t *testing.T) {
 	}
 }
 
+// parseSession must not default a session to Inactive just because it wasn't
+// given a specific pid, as long as the caller still asserts isRunning=true.
+// Discover() passes isRunning=true with pid=0 for a log file it can't
+// confidently attribute to a specific pid (more candidate logs in a
+// directory than confidently-paired pids) -- treating that as "not running"
+// is what let a genuinely active session be reported as Inactive.
+func TestParseSession_RunningWithoutConfidentPID(t *testing.T) {
+	dir := t.TempDir()
+	recent := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
+	content := `{"type":"assistant","timestamp":"` + recent + `","message":{"role":"assistant","content":[{"type":"text","text":"Still working"}]}}` + "\n"
+	path, _, _ := writeLog(t, dir, "s.jsonl", content)
+
+	s, err := parseSession("proj", path, true, 0)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if s.Status == StatusInactive {
+		t.Errorf("status = %q, want anything but Inactive (isRunning was true)", s.Status)
+	}
+	if s.GhostPID != 0 {
+		t.Errorf("GhostPID = %d, want 0 (no confident pid was given, so none should be assigned for --kill-ghosts)", s.GhostPID)
+	}
+}
+
+// The converse: a log file the caller has no running pid for at all must
+// still report Inactive, same as before this change.
+func TestParseSession_NotRunning(t *testing.T) {
+	dir := t.TempDir()
+	recent := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
+	content := `{"type":"assistant","timestamp":"` + recent + `","message":{"role":"assistant","content":[{"type":"text","text":"Still working"}]}}` + "\n"
+	path, _, _ := writeLog(t, dir, "s.jsonl", content)
+
+	s, err := parseSession("proj", path, false, 0)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if s.Status != StatusInactive {
+		t.Errorf("status = %q, want %q (isRunning was false)", s.Status, StatusInactive)
+	}
+}
+
 func TestDetermineStatus(t *testing.T) {
 	now := time.Now()
 

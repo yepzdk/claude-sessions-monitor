@@ -329,13 +329,28 @@ func Discover() ([]Session, error) {
 		for i, logFile := range logFiles {
 			liveFiles[logFile] = struct{}{}
 
-			// Pair each log file with a PID by index (most recent log gets first PID)
-			var sessionPids []int
+			// findActiveLogs already decided every file here is a plausible
+			// candidate for one of this directory's runningCount processes, but
+			// pairing a *specific* pid to a *specific* file by array position
+			// (most-recent log <-> first ps result) has no real correspondence --
+			// neither list is ordered by anything that ties them together. When
+			// a directory holds more candidate logs than confidently-paired
+			// pids (i >= len(pids)), still treat the session as running rather
+			// than defaulting it to not-running: a session that's actually
+			// closed just gets correctly demoted to Waiting by its own content
+			// staleness, whereas the reverse -- a genuinely active session
+			// getting marked not-running because it lost a positional pairing
+			// it was never guaranteed to win -- surfaces as that session
+			// wrongly showing Inactive. Only carry a specific pid through
+			// (for GhostPID / --kill-ghosts) when the pairing is one we're
+			// actually confident in.
+			isRunning := len(pids) > 0
+			pid := 0
 			if i < len(pids) {
-				sessionPids = []int{pids[i]}
+				pid = pids[i]
 			}
 
-			session, err := parseSession(entry.Name(), logFile, sessionPids)
+			session, err := parseSession(entry.Name(), logFile, isRunning, pid)
 			if err != nil {
 				continue
 			}
@@ -435,9 +450,22 @@ func findMostRecentLog(dir string) (string, error) {
 	return mostRecent, nil
 }
 
+// activeLogFreshnessWindow is the second-chance window for a log file that
+// didn't make the top-runningCount cut by recency. There is no reliable way
+// to attribute a specific running pid to a specific log file in a directory
+// with more than one (Claude Code exposes no pid/session correlation), so a
+// genuinely active session's log can lose that race to an unrelated, merely
+// fresher file in the same directory -- most commonly when it goes quiet for
+// a while for a mundane reason (extended thinking, a long tool call, the user
+// stepping away mid-turn). Losing the race then meant the log was dropped
+// entirely: not shown with a wrong status, just never considered at all.
+// 30 minutes comfortably covers any of those normal quiet periods while still
+// excluding logs from sessions that ended hours or days ago.
+const activeLogFreshnessWindow = 30 * time.Minute
+
 // findActiveLogs returns all active JSONL log files for a project directory.
-// If runningCount > 0, returns at least that many files (the most recently modified),
-// plus any additional files modified within the last 5 minutes.
+// If runningCount > 0, returns at least that many files (the most recently
+// modified), plus any additional files modified within activeLogFreshnessWindow.
 // If runningCount == 0, returns only the single most recent file.
 func findActiveLogs(dir string, runningCount int) ([]string, error) {
 	entries, err := os.ReadDir(dir)
@@ -500,7 +528,7 @@ func findActiveLogs(dir string, runningCount int) ([]string, error) {
 	}
 
 	// Running processes: collect active logs
-	recentThreshold := time.Now().Add(-5 * time.Minute)
+	recentThreshold := time.Now().Add(-activeLogFreshnessWindow)
 	seen := make(map[string]bool)
 	var result []string
 
@@ -618,7 +646,7 @@ func parseLogFile(logFile string, keep int) (parsedLog, error) {
 }
 
 // parseSession parses a session from its log file
-func parseSession(projectName, logFile string, pids []int) (Session, error) {
+func parseSession(projectName, logFile string, isRunning bool, pid int) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
 		LogFile:     logFile,
@@ -627,12 +655,6 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 		SessionID:   sessionIDFromLogFile(logFile),
 	}
 
-	// Check if Claude is running in this project directory
-	isRunning := len(pids) > 0
-	pid := 0
-	if isRunning {
-		pid = pids[0]
-	}
 
 	// Resolve the session's origin (terminal / IDE / Claude Desktop).
 	// Historical sessions can only be classified if we previously cached them
