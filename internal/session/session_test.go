@@ -6,6 +6,60 @@ import (
 	"time"
 )
 
+func TestSessionLessStableOrderForWorkingSessions(t *testing.T) {
+	now := time.Now()
+
+	// Two Working sessions whose real LastActivity differs by a hair --
+	// exactly the jitter that made rows swap between refreshes even though
+	// both display "Now". Regardless of which one is nominally "more recent",
+	// project name must decide the order.
+	beta := Session{Project: "beta", Status: StatusWorking, SessionID: "s2", LastActivity: now}
+	alpha := Session{Project: "alpha", Status: StatusWorking, SessionID: "s1", LastActivity: now.Add(-2 * time.Millisecond)}
+
+	if !sessionLess(alpha, beta) {
+		t.Errorf("sessionLess(alpha, beta) = false, want true (alpha's project sorts first regardless of LastActivity)")
+	}
+	if sessionLess(beta, alpha) {
+		t.Errorf("sessionLess(beta, alpha) = true, want false")
+	}
+
+	// Swapping which one has the newer timestamp must not change the order.
+	alphaNewer := Session{Project: "alpha", Status: StatusWorking, SessionID: "s1", LastActivity: now}
+	betaOlder := Session{Project: "beta", Status: StatusWorking, SessionID: "s2", LastActivity: now.Add(-2 * time.Millisecond)}
+	if !sessionLess(alphaNewer, betaOlder) {
+		t.Errorf("sessionLess(alpha, beta) = false, want true (order must not flip when LastActivity does)")
+	}
+
+	// Same project: session ID is the final, fully deterministic tiebreaker.
+	sameProjectA := Session{Project: "same", Status: StatusWorking, SessionID: "aaa", LastActivity: now}
+	sameProjectB := Session{Project: "same", Status: StatusWorking, SessionID: "bbb", LastActivity: now.Add(-time.Hour)}
+	if !sessionLess(sameProjectA, sameProjectB) {
+		t.Errorf("sessionLess by session ID = false, want true")
+	}
+}
+
+func TestSessionLessNonWorkingUsesLastActivity(t *testing.T) {
+	now := time.Now()
+
+	// Outside the Working bucket, recency still decides the order -- this
+	// isn't touched by the stability fix above.
+	newer := Session{Project: "z", Status: StatusWaiting, LastActivity: now}
+	older := Session{Project: "a", Status: StatusWaiting, LastActivity: now.Add(-time.Minute)}
+
+	if !sessionLess(newer, older) {
+		t.Errorf("sessionLess(newer, older) = false, want true (more recent Waiting session sorts first)")
+	}
+}
+
+func TestSessionLessStatusPriority(t *testing.T) {
+	working := Session{Status: StatusWorking, LastActivity: time.Now().Add(-time.Hour)}
+	waiting := Session{Status: StatusWaiting, LastActivity: time.Now()}
+
+	if !sessionLess(working, waiting) {
+		t.Errorf("sessionLess(working, waiting) = false, want true (status priority beats recency)")
+	}
+}
+
 func TestExtractContextUsage(t *testing.T) {
 	tests := []struct {
 		name           string

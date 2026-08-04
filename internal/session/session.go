@@ -350,16 +350,34 @@ func Discover() ([]Session, error) {
 
 	// Sort by status priority, then by last activity
 	sort.Slice(sessions, func(i, j int) bool {
-		// Priority: Working > NeedsInput > Waiting > Idle > Inactive
-		pi, pj := statusPriority(sessions[i].Status), statusPriority(sessions[j].Status)
-		if pi != pj {
-			return pi < pj
-		}
-		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+		return sessionLess(sessions[i], sessions[j])
 	})
 
 	storeResult(sessions)
 	return sessions, nil
+}
+
+// sessionLess orders sessions by status priority, then by last activity.
+//
+// Working sessions are the exception: renderSessionRow always displays "Now"
+// for them regardless of the actual LastActivity, so sorting by that
+// timestamp swaps their rows on nothing the user can see — each session's
+// log picks up new entries at slightly different real-world moments, and
+// that jitter alone reorders the list every refresh. Break ties among
+// Working sessions by project then session ID instead, both fixed for the
+// session's lifetime, so those rows hold a stable order.
+func sessionLess(a, b Session) bool {
+	pa, pb := statusPriority(a.Status), statusPriority(b.Status)
+	if pa != pb {
+		return pa < pb
+	}
+	if a.Status == StatusWorking && b.Status == StatusWorking {
+		if a.Project != b.Project {
+			return a.Project < b.Project
+		}
+		return a.SessionID < b.SessionID
+	}
+	return a.LastActivity.After(b.LastActivity)
 }
 
 // statusPriority returns the sort priority for a status (lower = higher priority)
