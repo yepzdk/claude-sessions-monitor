@@ -317,13 +317,38 @@ func extractStringField(line, prefix string) string {
 
 // extractPromptFromLine extracts user prompt text from a JSONL line using
 // fast string matching. Handles both plain string content and object arrays.
+// Turns that are pure Claude Code scaffolding (a local-command-caveat marker,
+// a slash-command invocation) carry no user-authored text, so they're reduced
+// to the invoked command or skipped rather than shown as raw wrapper markup.
 func extractPromptFromLine(line string) string {
+	text := rawPromptText(line)
+	if text == "" {
+		return ""
+	}
+
+	if idx := strings.Index(text, "<command-name>"); idx >= 0 {
+		start := idx + len("<command-name>")
+		if end := strings.Index(text[start:], "</command-name>"); end >= 0 {
+			return truncateString(strings.TrimSpace(text[start:start+end]), 120)
+		}
+	}
+	if strings.Contains(text, "<local-command-caveat>") {
+		return ""
+	}
+
+	return truncateString(text, 120)
+}
+
+// rawPromptText extracts and JSON-unescapes the first user-message content
+// found in a JSONL line, trying both plain string content and object array
+// content shapes.
+func rawPromptText(line string) string {
 	// Try plain string content: "content":"..."
 	const contentStr = `"content":"`
 	if idx := strings.Index(line, contentStr); idx >= 0 {
 		start := idx + len(contentStr)
 		if text := extractQuotedValue(line, start); text != "" {
-			return truncateString(text, 120)
+			return text
 		}
 	}
 
@@ -334,7 +359,7 @@ func extractPromptFromLine(line string) string {
 		if tidx := strings.Index(line[cidx:], textField); tidx >= 0 {
 			start := cidx + tidx + len(textField)
 			if text := extractQuotedValue(line, start); text != "" {
-				return truncateString(text, 120)
+				return text
 			}
 		}
 	}
@@ -349,8 +374,10 @@ func extractQuotedValue(line string, start int) string {
 		return ""
 	}
 	i := start
+	hasEscape := false
 	for i < len(line) {
 		if line[i] == '\\' {
+			hasEscape = true
 			i += 2 // skip escaped character
 			continue
 		}
@@ -362,7 +389,21 @@ func extractQuotedValue(line string, start int) string {
 	if i <= start || i > len(line) {
 		return ""
 	}
-	return line[start:i]
+	raw := line[start:i]
+	if !hasEscape {
+		return raw
+	}
+	return unescapeJSONString(raw)
+}
+
+// unescapeJSONString decodes JSON string escapes in a raw, still-escaped
+// JSON string value by re-quoting it and letting encoding/json decode it.
+func unescapeJSONString(s string) string {
+	var decoded string
+	if err := json.Unmarshal([]byte(`"`+s+`"`), &decoded); err != nil {
+		return s
+	}
+	return decoded
 }
 
 // truncateString truncates s to a maximum visible length (in runes, not bytes),

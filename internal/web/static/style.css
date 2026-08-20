@@ -5,8 +5,8 @@
     --bg-card: #1f2335;
     --border: #3b4261;
     --text: #c0caf5;
-    --text-dim: #565f89;
-    --text-muted: #737aa2;
+    --text-dim: #8993c0;
+    --text-muted: #a3abce;
     --green: #9ece6a;
     --yellow: #e0af68;
     --blue: #7aa2f7;
@@ -61,9 +61,59 @@ nav {
 .tab:hover { color: var(--text); background: var(--bg-hover); }
 .tab.active { color: var(--text); background: var(--bg); }
 
+/* Header API quota */
+.header-quota {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+.header-quota-item {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+}
+
+.header-quota-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.header-quota-bar {
+    width: 50px;
+    height: 5px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.header-quota-fill {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+}
+
+.header-quota-fill.low { background: var(--green); }
+.header-quota-fill.medium { background: var(--yellow); }
+.header-quota-fill.high { background: var(--red); }
+
+.header-quota-pct {
+    color: var(--text-muted);
+    font-weight: 600;
+    min-width: 2rem;
+}
+
+.header-quota-error {
+    color: var(--text-dim);
+    cursor: help;
+}
+
 /* Claude service status */
 #claude-status {
-    margin-left: auto;
     flex-shrink: 0;
 }
 
@@ -391,7 +441,7 @@ main {
 .session-branch::before { content: '@'; }
 
 .session-title {
-    color: var(--muted);
+    color: var(--text-muted);
     font-size: 0.75rem;
     font-style: italic;
     flex-shrink: 1;
@@ -413,11 +463,11 @@ main {
     opacity: 0.85;
 }
 
-.session-origin.origin-terminal { color: var(--muted); }
+.session-origin.origin-terminal { color: var(--text-muted); }
 .session-origin.origin-ide      { color: var(--blue); }
 .session-origin.origin-desktop  { color: var(--yellow); }
 
-.session-model-badge { color: var(--muted); }
+.session-model-badge { color: var(--text-muted); }
 
 .session-context {
     flex-shrink: 0;
@@ -473,12 +523,47 @@ main {
 }
 
 .subagent {
+    position: relative;
     border-radius: 4px;
     padding: 0.125rem 0.25rem 0.125rem 1.25rem;
     transition: background-color 0.15s;
 }
 
 .subagent:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+
+/* Tree connector, drawn in CSS rather than with box-drawing glyphs (whose
+   vertical metrics vary by font and don't reliably center against the dot).
+   The trunk bridges the flex gap into neighboring rows so it reads as one
+   continuous line; the first row extends it up through session-subagents'
+   own margin so the list visibly hangs from the parent card, and the last
+   row stops it at its own elbow. */
+.subagent::before {
+    content: '';
+    position: absolute;
+    left: 0.375rem;
+    top: -0.375rem;
+    bottom: -0.375rem;
+    width: 1px;
+    background: var(--border);
+}
+
+.subagent:first-child::before {
+    top: -0.5rem;
+}
+
+.subagent:last-child::before {
+    bottom: calc(100% - 0.75rem);
+}
+
+.subagent::after {
+    content: '';
+    position: absolute;
+    left: 0.375rem;
+    top: 0.75rem;
+    width: 0.5rem;
+    height: 1px;
+    background: var(--border);
+}
 
 .subagent-top {
     display: flex;
@@ -488,12 +573,6 @@ main {
 
 /* Keeps the age right-aligned whether or not a description is present */
 .subagent-top .session-activity { margin-left: auto; }
-
-.subagent-branch {
-    color: var(--text-dim);
-    flex-shrink: 0;
-    font-size: 0.75rem;
-}
 
 .subagent-label {
     font-size: 0.75rem;

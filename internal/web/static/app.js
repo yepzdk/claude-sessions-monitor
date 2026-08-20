@@ -24,6 +24,7 @@
     const detailTimeline = document.getElementById('detail-timeline');
     const connStatus = document.getElementById('connection-status');
     const claudeStatusEl = document.getElementById('claude-status');
+    const headerQuotaEl = document.getElementById('header-quota');
 
     // --- Tab navigation ---
     document.querySelectorAll('.tab').forEach(tab => {
@@ -40,6 +41,7 @@
         statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
         if (view === 'usage') loadUsage();
+        loadHeaderQuota();
         window.location.hash = view;
     }
 
@@ -74,9 +76,12 @@
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             stopClaudeStatusPolling();
+            stopHeaderQuotaPolling();
         } else {
             if (Date.now() - claudeStatusFetchedAt > 60000) loadClaudeStatus();
             startClaudeStatusPolling();
+            if (Date.now() - headerQuotaFetchedAt > 60000) loadHeaderQuota();
+            startHeaderQuotaPolling();
         }
     });
 
@@ -117,6 +122,82 @@
 
     loadClaudeStatus();
     startClaudeStatusPolling();
+
+    // --- Header API quota ---
+    // /api/oauth/usage is an undocumented Anthropic endpoint reported to get
+    // stuck returning 429 for the rest of the session once rate-limited (no
+    // documented safe interval, no recovery). Poll conservatively -- well
+    // above the ~30-60s interval reported to trigger it, and above the
+    // server's own 60s cache TTL so most polls just hit that cache -- but
+    // circuit-break the moment a fetch fails for any reason other than "no
+    // OAuth token configured": stop polling and say so, rather than either
+    // hammering an already-broken endpoint or silently going stale forever
+    // (which a tab left open on a second monitor would otherwise do, since
+    // visibilitychange never fires for a tab that's visible but unfocused).
+    let headerQuotaInterval = null;
+    let headerQuotaFetchedAt = 0;
+    let headerQuotaBroken = false;
+
+    async function loadHeaderQuota() {
+        if (headerQuotaBroken) return;
+        try {
+            const resp = await fetch('/api/quota');
+            renderHeaderQuota(await resp.json());
+            headerQuotaFetchedAt = Date.now();
+        } catch (err) {
+            renderHeaderQuota(null);
+        }
+    }
+
+    function renderHeaderQuota(apiQuota) {
+        if (!headerQuotaEl) return;
+        if (!apiQuota) {
+            headerQuotaEl.innerHTML = '';
+            return;
+        }
+        if (!apiQuota.available) {
+            if (apiQuota.error === 'OAuth token not found') {
+                headerQuotaEl.innerHTML = '';
+                return;
+            }
+            headerQuotaBroken = true;
+            stopHeaderQuotaPolling();
+            headerQuotaEl.innerHTML = `<span class="header-quota-item header-quota-error" title="${esc(apiQuota.error || 'unknown error')}">quota unavailable</span>`;
+            return;
+        }
+        let html = '';
+        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour);
+        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day);
+        headerQuotaEl.innerHTML = html;
+    }
+
+    function renderHeaderQuotaBar(shortLabel, fullLabel, bucket) {
+        const pct = Math.min(bucket.utilization || 0, 100);
+        const cls = pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
+        let title = `${fullLabel} quota: ${Math.round(pct)}%`;
+        if (bucket.resets_at) {
+            const remaining = new Date(bucket.resets_at) - Date.now();
+            if (remaining > 0) title += `, resets in ${formatDurationHuman(remaining * 1e6)}`;
+        }
+        return `<span class="header-quota-item" title="${esc(title)}">
+            <span class="header-quota-label">${esc(shortLabel)}</span>
+            <span class="header-quota-bar"><span class="header-quota-fill ${cls}" style="width:${pct}%"></span></span>
+            <span class="header-quota-pct">${Math.round(pct)}%</span>
+        </span>`;
+    }
+
+    function startHeaderQuotaPolling() {
+        stopHeaderQuotaPolling();
+        if (headerQuotaBroken) return;
+        headerQuotaInterval = setInterval(loadHeaderQuota, 5 * 60 * 1000);
+    }
+
+    function stopHeaderQuotaPolling() {
+        if (headerQuotaInterval) { clearInterval(headerQuotaInterval); headerQuotaInterval = null; }
+    }
+
+    loadHeaderQuota();
+    startHeaderQuotaPolling();
 
     // --- SSE ---
     function connectSSE() {
@@ -229,18 +310,18 @@
 
         return `<div class="session-subagents">` + subagents.map(a => {
             const label = a.agent_type || (a.id || '').slice(0, 8);
-            // The agent's latest message is the most useful line; fall back to
-            // the task it was spawned with before it has said anything.
-            const detail = a.task || a.description || '';
-            const showDescription = a.task && a.description;
+            // a.description is the short label the agent was spawned with; a.task
+            // is its latest freeform status message. The label is the more useful
+            // title, with the live status (if any) elaborating on the second line.
+            const title = a.description || a.task || '';
+            const detail = a.description && a.task ? a.task : '';
 
             return `<div class="subagent" data-logfile="${esc(a.log_file || '')}" data-label="${esc(label)}">
                 <div class="subagent-top">
-                    <span class="subagent-branch">&#x2514;</span>
                     <span class="session-status working">&#x25CF;</span>
                     <span class="subagent-label">${esc(label)}</span>
                     ${a.blocking ? `<span class="badge subagent-blocking" title="The parent turn cannot continue until this agent finishes">blocking</span>` : ''}
-                    ${showDescription ? `<span class="subagent-description">${esc(a.description)}</span>` : ''}
+                    ${title ? `<span class="subagent-description">${esc(title)}</span>` : ''}
                     <span class="session-activity">${formatAge(a.last_activity)}</span>
                 </div>
                 ${detail ? `<div class="subagent-bottom">${esc(detail)}</div>` : ''}
@@ -538,7 +619,6 @@
             ? formatDuration((new Date(m.last_timestamp) - new Date(m.first_timestamp)) * 1000000)
             : '-';
         const totalTokens = m.total_input_tokens + m.total_output_tokens + m.total_cache_creation_tokens + m.total_cache_read_tokens;
-        const maxToken = Math.max(m.total_input_tokens, m.total_output_tokens, m.total_cache_creation_tokens, m.total_cache_read_tokens, 1);
 
         let html = `<div class="metrics-grid">
             <div class="metric-card"><div class="metric-label">Turns</div><div class="metric-value blue">${m.turn_count}</div></div>
@@ -558,12 +638,15 @@
             { label: 'Cache Create', value: m.total_cache_creation_tokens, color: 'var(--yellow)' },
             { label: 'Cache Read', value: m.total_cache_read_tokens, color: 'var(--purple)' },
         ];
-        const logMax = Math.log(maxToken + 1);
         bars.forEach(b => {
-            const pct = b.value > 0 ? (Math.log(b.value + 1) / logMax) * 100 : 0;
+            const pct = totalTokens > 0 ? (b.value / totalTokens) * 100 : 0;
+            // A proportional width alone can round a real but tiny share (e.g. input
+            // tokens next to cache reads) down to sub-pixel -- indistinguishable from
+            // zero. Floor it so any nonzero value stays visible.
+            const width = b.value > 0 ? `max(3px, ${pct}%)` : '0';
             html += `<div class="token-bar-row">
                 <span class="token-bar-label">${b.label}</span>
-                <div class="token-bar-track"><div class="token-bar-fill" style="width:${pct}%;background:${b.color}"></div></div>
+                <div class="token-bar-track"><div class="token-bar-fill" style="width:${width};background:${b.color}"></div></div>
                 <span class="token-bar-value">${fmtNum(b.value)}</span>
             </div>`;
         });
@@ -807,7 +890,9 @@
         if (!s) return '';
         const d = document.createElement('div');
         d.textContent = s;
-        return d.innerHTML;
+        // textContent -> innerHTML escapes &, <, > but not quotes; callers also use
+        // this inside double-quoted HTML attributes, so escape those too.
+        return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // Mirrors session.contextWindowForModel in Go: opus/sonnet from generation 4.6

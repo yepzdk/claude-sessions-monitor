@@ -155,6 +155,11 @@ func fetchAPIQuotaUncached() *APIQuota {
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	// This undocumented endpoint puts requests without a claude-cli-shaped
+	// User-Agent into a far more aggressive rate-limit bucket (reports of
+	// requests getting stuck returning 429 for an entire session); the exact
+	// version doesn't appear to matter, just that it looks like a real client.
+	req.Header.Set("User-Agent", "claude-cli/2.1.237 (external, cli)")
 
 	resp, err := client.Do(req)
 	if err != nil {

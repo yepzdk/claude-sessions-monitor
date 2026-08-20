@@ -178,6 +178,13 @@ func handleUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"local": usage, "api_quota": apiQuota})
 }
 
+// handleQuota returns just the API quota, without the local-usage log scan
+// handleUsage also does. For callers (like the header widget) that poll
+// regularly and only need the quota numbers.
+func handleQuota(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, session.FetchAPIQuota())
+}
+
 // handleClaudeStatus returns the current Claude service status as JSON.
 func handleClaudeStatus(w http.ResponseWriter, r *http.Request) {
 	status := session.FetchClaudeStatus()

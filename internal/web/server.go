@@ -41,6 +41,7 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	mux.HandleFunc("/api/sessions/timeline", handleTimeline)
 	mux.HandleFunc("/api/sessions/metrics", handleMetrics)
 	mux.HandleFunc("/api/usage", handleUsage)
+	mux.HandleFunc("/api/quota", handleQuota)
 	mux.HandleFunc("/api/claude-status", handleClaudeStatus)
 	mux.HandleFunc("/api/events", s.hub.HandleSSE)
 
@@ -95,6 +96,11 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'")
+		// embed.FS reports a zero mod-time for every file, which browsers
+		// treat as a green light for long heuristic caching -- without this,
+		// a csm upgrade can leave the dashboard silently stuck on old
+		// HTML/CSS/JS until the user thinks to hard-refresh.
+		w.Header().Set("Cache-Control", "no-cache")
 		next.ServeHTTP(w, r)
 	})
 }
