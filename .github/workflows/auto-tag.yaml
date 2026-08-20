@@ -18,7 +18,7 @@ jobs:
       new_tag: ${{ steps.next_version.outputs.new_tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Need full history for tags
 
@@ -61,9 +61,9 @@ jobs:
           echo "Created and pushed tag: $NEW_TAG"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.21'
+          go-version: '1.25'
           cache: false
 
       - name: Build binaries
@@ -80,7 +80,7 @@ jobs:
         run: make packages
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.next_version.outputs.new_tag }}
           files: |
