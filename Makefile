@@ -1,10 +1,21 @@
-.PHONY: build build-all install packages clean
+.PHONY: build build-all install packages clean fmt check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 # nfpm requires a version starting with a digit (deb policy), so strip any leading 'v'.
 PKG_VERSION := $(patsubst v%,%,$(VERSION))
+
+# Format all Go code (gofmt is the only style authority — see CONTRIBUTING.md)
+fmt:
+	gofmt -w .
+
+# Everything CI enforces, runnable locally before pushing
+check:
+	@gofmt -l . | grep . && { echo "Not gofmt-clean — run 'make fmt'"; exit 1; } || true
+	go vet ./...
+	go build $(LDFLAGS) -o /dev/null .
+	go test ./...
 
 # Build for current platform
 build:

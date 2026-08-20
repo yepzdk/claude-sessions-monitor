@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Community health files: MIT `LICENSE`, code of conduct, contributing guide, security policy, and issue/PR templates.
+- CI workflow checking formatting, vet, build and tests on every pull request, plus `make fmt` / `make check` and an `.editorconfig` so style stays consistent and formatting churn stays out of feature diffs.
 - Live subagents are now shown as nested rows under their parent session in both dashboards, and a parent with a running subagent no longer reports as idle. (#54)
 
 ### Changed
