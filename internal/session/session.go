@@ -604,11 +604,11 @@ type parsedLog struct {
 // QuickSessionStats, extractSummary) that parseSession previously made.
 //
 // maxLogLineBytes bounds a single JSONL line bufio.Scanner will accept before
-// aborting the scan. Generous headroom for an unusually large single JSON line
-// (e.g. an extended-thinking response with tens of thousands of reasoning
-// tokens serialized as one line) -- see cachedParseLogFile for why hitting
-// this limit no longer means losing every entry already parsed before it.
-const maxLogLineBytes = 100 * 1024 * 1024
+// aborting the scan. The largest line observed in real logs is ~1.2MB, so
+// 10MB leaves ample headroom without a raise that has no evidence behind it
+// -- see cachedParseLogFile for why hitting this limit no longer means losing
+// every entry already parsed before it.
+const maxLogLineBytes = 10 * 1024 * 1024
 
 // It keeps the last `keep` fully-parsed entries (for status/usage/message
 // extraction, which need Message.Content and Usage), while capturing the
