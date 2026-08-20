@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Community health files: MIT `LICENSE`, code of conduct, contributing guide, security policy, and issue/PR templates.
+- Live subagents are now shown as nested rows under their parent session in both dashboards, and a parent with a running subagent no longer reports as idle. (#54)
 
 ### Changed
 
@@ -17,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sessions in a home directory containing characters other than letters, digits or dashes (e.g. an `@`) no longer all report as Inactive. (#53)
+- A genuinely active session that goes quiet for a while (extended thinking, a long tool call) no longer vanishes from the dashboard or reports as Inactive. (#58)
+- A single unreadable log line no longer discards everything already parsed from that session's log. (#57)
+- Working sessions no longer swap rows between refreshes when they all display the same activity text. (#56)
+- The live view no longer repeats or flickers in block-based terminals; it now uses the alternate screen buffer and restores prior scrollback on exit. (#55)
 - Context usage is no longer overstated ~5x for Claude 5 family models (`claude-fable-5`, `claude-sonnet-5`): their two-part model ids now parse correctly and map to the 1M context window. (#51)
 - Sessions no longer stay stuck on "Working" after Claude has yielded back to the user; idle sessions now age out to "Waiting" with the real last message.
 - Sharply reduced CPU usage of the live view (previously ~40-50% at idle) by caching session log parsing.
