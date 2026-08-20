@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Community health files: MIT `LICENSE`, code of conduct, contributing guide, security policy, and issue/PR templates.
 - CI workflow checking formatting, vet, build and tests on every pull request, plus `make fmt` / `make check` and an `.editorconfig` so style stays consistent and formatting churn stays out of feature diffs.
 - Live subagents are now shown as nested rows under their parent session in both dashboards, and a parent with a running subagent no longer reports as idle. (#54)
+- Jump to a session's terminal from the live view: select a row with `↑`/`↓` and press `Enter` to bring its Ghostty tab to the front. macOS and Ghostty only for now. (#48)
 
 ### Changed
 

@@ -36,7 +36,8 @@ type Session struct {
 	Summary        string     `json:"summary,omitempty"`
 	LastMessage    string     `json:"last_message,omitempty"`
 	LogFile        string     `json:"log_file"`
-	ProjectPath    string     `json:"-"`                         // Full path to the project directory
+	ProjectPath    string     `json:"-"`                         // Encoded project directory name (as used under ~/.claude/projects)
+	CWD            string     `json:"-"`                         // Absolute working directory recorded in the log
 	SessionID      string     `json:"session_id,omitempty"`      // Claude session UUID (log filename stem)
 	Origin         Origin     `json:"origin,omitempty"`          // Where the session was launched from
 	IsGhost        bool       `json:"is_ghost,omitempty"`        // True if process running but log is stale
@@ -728,6 +729,7 @@ func parseSession(projectName, logFile string, isRunning bool, pid int) (Session
 func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fileModTime time.Time) {
 	if pl.cwd != "" {
 		session.Project = extractProjectName(pl.cwd)
+		session.CWD = pl.cwd
 	}
 	if pl.title != "" {
 		session.SessionTitle = pl.title

@@ -13,6 +13,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Git branch display** shows current branch for each session
 - **Status indicators**: Working, Needs Input, Waiting
 - **Usage view** with API quota bars and per-session token breakdown (press `u`)
+- **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal tab to the front (macOS + Ghostty)
 - **Origin column** showing whether each session was launched from a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the Claude process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end
 - **Session badges**: Unsandboxed [!S], Ghost [ghost]
 - **Zero dependencies** - single binary, easy to install
@@ -118,11 +119,26 @@ csm -v
 
 | Key | Action |
 |-----|--------|
+| `↑` / `↓` | Select a session row |
+| `Enter` | Bring the selected session's terminal tab to the front |
 | `h` | Switch to history view |
 | `l` | Switch to live view |
 | `u` | Switch to usage view (API quota + token breakdown) |
 | `w` | Open web dashboard in browser (when `--web` is active) |
 | `Ctrl+C` | Quit |
+
+#### Jumping to a session
+
+`Enter` focuses the terminal tab running the selected session, leaving csm where it is.
+This currently works on **macOS with Ghostty**; other terminals report that they can't be
+focused rather than doing nothing. The first jump triggers the standard macOS Automation
+consent dialog — allow it once and it won't ask again.
+
+Sessions are matched to tabs by working directory, so if a project has both a Claude tab
+and a plain shell open, csm picks the Claude one and notes that it guessed. Once Ghostty
+ships [#11922](https://github.com/ghostty-org/ghostty/pull/11922) (merged upstream,
+unreleased at the time of writing) csm matches on the exact tty instead, and the guess
+disappears — no configuration needed.
 
 ### Usage view
 
@@ -168,7 +184,7 @@ STATUS          PROJECT                             ORIGIN     CONTEXT          
 ▲ Needs Input   work/claude-sessions-monitor @feat  Zed        ██░░░░░░░░ 21%   12s ago
   Let me check the git status
 
-h: history | u: usage | Ctrl+C: quit
+↑↓: select | Enter: jump | h: history | u: usage | Ctrl+C: quit
 ```
 
 ## Building

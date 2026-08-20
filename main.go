@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/itk-dev/claude-sessions-monitor/internal/jump"
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 	"github.com/itk-dev/claude-sessions-monitor/internal/ui"
 	"github.com/itk-dev/claude-sessions-monitor/internal/web"
@@ -147,6 +148,14 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	viewMode := ViewModeLive
 	historyDays := 7
 
+	// Row selection for jumping. -1 means nothing is selected; the live view
+	// starts that way so the first arrow press lands on the top row.
+	selected := -1
+	jumpMsg := ""
+	// Sessions as of the last render, so a keypress acts on exactly the rows
+	// the user can see rather than re-discovering and racing the ticker.
+	var visible []session.Session
+
 	// Claude status: fetch on-demand (user interaction), use cached on ticker
 	var lastClaudeStatus *session.ClaudeStatus
 	refreshClaudeStatus := func() {
@@ -182,7 +191,13 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			ui.RenderUsage(usage, apiQuota, true)
 		default:
 			sessions, _ := session.Discover()
-			ui.RenderLive(sessions, webURL, lastClaudeStatus)
+			// Sessions come and go between frames, so the selection is clamped
+			// on every render rather than only when a key moves it.
+			visible = ui.ActiveSessions(sessions)
+			if selected >= len(visible) {
+				selected = len(visible) - 1
+			}
+			ui.RenderLive(sessions, webURL, lastClaudeStatus, selected, jumpMsg)
 		}
 		// Erase anything left over below this frame from a previous, longer
 		// one, once per render cycle rather than each view remembering to.
@@ -205,10 +220,40 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		case <-ctx.Done():
 			return
 		case key := <-keyCh:
+			// Any keypress clears feedback from the previous jump, so a stale
+			// message never sits under a table it no longer describes.
+			jumpMsg = ""
 			switch key {
+			case ui.KeyUp, ui.KeyDown:
+				if viewMode != ViewModeLive || len(visible) == 0 {
+					break
+				}
+				switch {
+				case selected < 0:
+					// First arrow press selects rather than moving, so Up is
+					// not a no-op on a freshly started view.
+					selected = 0
+				case key == ui.KeyUp && selected > 0:
+					selected--
+				case key == ui.KeyDown && selected < len(visible)-1:
+					selected++
+				}
+				render()
+			case ui.KeyEnter, '\n':
+				if viewMode != ViewModeLive || selected < 0 || selected >= len(visible) {
+					break
+				}
+				res, err := jump.Focus(visible[selected])
+				if err != nil {
+					jumpMsg = err.Error()
+				} else {
+					jumpMsg = res.Message()
+				}
+				render()
 			case 'h', 'H':
 				if viewMode != ViewModeHistory {
 					viewMode = ViewModeHistory
+					selected = -1
 					render()
 					lastHistoryRender = time.Now()
 				}
@@ -221,6 +266,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			case 'u', 'U':
 				if viewMode != ViewModeUsage {
 					viewMode = ViewModeUsage
+					selected = -1
 					render()
 				}
 			case 'r', 'R':
