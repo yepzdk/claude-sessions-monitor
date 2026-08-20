@@ -44,10 +44,10 @@ var appCatalog = map[string]struct {
 	"terminator":     {"Terminator", OriginTerminal},
 	"tmux":           {"tmux", OriginTerminal}, // best-effort when we can't see further up
 	// IDEs
-	"zed":      {"Zed", OriginIDE},
-	"vscode":   {"VS Code", OriginIDE},
-	"codium":   {"VSCodium", OriginIDE},
-	"cursor":   {"Cursor", OriginIDE},
+	"zed":       {"Zed", OriginIDE},
+	"vscode":    {"VS Code", OriginIDE},
+	"codium":    {"VSCodium", OriginIDE},
+	"cursor":    {"Cursor", OriginIDE},
 	"jetbrains": {"JetBrains", OriginIDE},
 	// Desktop
 	"claude-desktop": {"Claude Desktop", OriginDesktop},

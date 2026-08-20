@@ -686,7 +686,6 @@ func parseSession(projectName, logFile string, isRunning bool, pid int) (Session
 		SessionID:   sessionIDFromLogFile(logFile),
 	}
 
-
 	// Resolve the session's origin (terminal / IDE / Claude Desktop).
 	// Historical sessions can only be classified if we previously cached them
 	// while live, so we load from cache first and only detect when the process

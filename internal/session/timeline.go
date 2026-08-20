@@ -12,7 +12,7 @@ import (
 
 // TimelineContent represents a single content block in a timeline entry
 type TimelineContent struct {
-	Type  string `json:"type"`            // text, tool_use, tool_result
+	Type  string `json:"type"` // text, tool_use, tool_result
 	Text  string `json:"text,omitempty"`
 	Tool  string `json:"tool,omitempty"`  // tool name for tool_use
 	Input string `json:"input,omitempty"` // stringified JSON for tool_use
@@ -21,7 +21,7 @@ type TimelineContent struct {
 // TimelineEntry represents a single entry in a session timeline
 type TimelineEntry struct {
 	Timestamp time.Time         `json:"timestamp"`
-	Type      string            `json:"type"`                 // user, assistant, system, summary
+	Type      string            `json:"type"` // user, assistant, system, summary
 	Subtype   string            `json:"subtype,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Content   []TimelineContent `json:"content,omitempty"`
@@ -45,7 +45,7 @@ type SessionMetrics struct {
 	ContextPercent           float64        `json:"context_percent"`
 	ContextTokens            int            `json:"context_tokens"`
 	FirstTimestamp           time.Time      `json:"first_timestamp"`
-	LastTimestamp             time.Time      `json:"last_timestamp"`
+	LastTimestamp            time.Time      `json:"last_timestamp"`
 }
 
 // ValidateLogFilePath checks that a log file path is under the Claude projects

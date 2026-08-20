@@ -103,10 +103,10 @@ func TestExtractContextUsage(t *testing.T) {
 						Role:  "assistant",
 						Model: "claude-opus-4-6",
 						Usage: &Usage{
-							InputTokens:                10,
-							CacheCreationInputTokens:   1000,
-							CacheReadInputTokens:       19000,
-							OutputTokens:               500,
+							InputTokens:              10,
+							CacheCreationInputTokens: 1000,
+							CacheReadInputTokens:     19000,
+							OutputTokens:             500,
 						},
 					},
 				},
@@ -391,9 +391,9 @@ func TestLogEntryNewFields(t *testing.T) {
 
 func TestDecodeProjectName(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{
 			name:  "macOS with Projects marker",
@@ -633,8 +633,8 @@ func TestDetermineStatus(t *testing.T) {
 		wantTask    string
 	}{
 		{
-			name:       "empty entries not running",
-			entries:    nil,
+			name:        "empty entries not running",
+			entries:     nil,
 			isRunning:   false,
 			fileModTime: zeroTime,
 			wantStatus:  StatusInactive,

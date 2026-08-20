@@ -323,4 +323,3 @@ func extractIntField(line, prefix string) int {
 	}
 	return n
 }
-
