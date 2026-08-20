@@ -6,6 +6,60 @@ import (
 	"time"
 )
 
+func TestSessionLessStableOrderForWorkingSessions(t *testing.T) {
+	now := time.Now()
+
+	// Two Working sessions whose real LastActivity differs by a hair --
+	// exactly the jitter that made rows swap between refreshes even though
+	// both display "Now". Regardless of which one is nominally "more recent",
+	// project name must decide the order.
+	beta := Session{Project: "beta", Status: StatusWorking, SessionID: "s2", LastActivity: now}
+	alpha := Session{Project: "alpha", Status: StatusWorking, SessionID: "s1", LastActivity: now.Add(-2 * time.Millisecond)}
+
+	if !sessionLess(alpha, beta) {
+		t.Errorf("sessionLess(alpha, beta) = false, want true (alpha's project sorts first regardless of LastActivity)")
+	}
+	if sessionLess(beta, alpha) {
+		t.Errorf("sessionLess(beta, alpha) = true, want false")
+	}
+
+	// Swapping which one has the newer timestamp must not change the order.
+	alphaNewer := Session{Project: "alpha", Status: StatusWorking, SessionID: "s1", LastActivity: now}
+	betaOlder := Session{Project: "beta", Status: StatusWorking, SessionID: "s2", LastActivity: now.Add(-2 * time.Millisecond)}
+	if !sessionLess(alphaNewer, betaOlder) {
+		t.Errorf("sessionLess(alpha, beta) = false, want true (order must not flip when LastActivity does)")
+	}
+
+	// Same project: session ID is the final, fully deterministic tiebreaker.
+	sameProjectA := Session{Project: "same", Status: StatusWorking, SessionID: "aaa", LastActivity: now}
+	sameProjectB := Session{Project: "same", Status: StatusWorking, SessionID: "bbb", LastActivity: now.Add(-time.Hour)}
+	if !sessionLess(sameProjectA, sameProjectB) {
+		t.Errorf("sessionLess by session ID = false, want true")
+	}
+}
+
+func TestSessionLessNonWorkingUsesLastActivity(t *testing.T) {
+	now := time.Now()
+
+	// Outside the Working bucket, recency still decides the order -- this
+	// isn't touched by the stability fix above.
+	newer := Session{Project: "z", Status: StatusWaiting, LastActivity: now}
+	older := Session{Project: "a", Status: StatusWaiting, LastActivity: now.Add(-time.Minute)}
+
+	if !sessionLess(newer, older) {
+		t.Errorf("sessionLess(newer, older) = false, want true (more recent Waiting session sorts first)")
+	}
+}
+
+func TestSessionLessStatusPriority(t *testing.T) {
+	working := Session{Status: StatusWorking, LastActivity: time.Now().Add(-time.Hour)}
+	waiting := Session{Status: StatusWaiting, LastActivity: time.Now()}
+
+	if !sessionLess(working, waiting) {
+		t.Errorf("sessionLess(working, waiting) = false, want true (status priority beats recency)")
+	}
+}
+
 func TestExtractContextUsage(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -467,6 +521,16 @@ func TestEncodeProjectPath(t *testing.T) {
 			path: "/Users/username/Projects/org/my_project.v2",
 			want: "-Users-username-Projects-org-my-project-v2",
 		},
+		{
+			name: "home directory containing an @",
+			path: "/home/jdoe@corp.example/Projects/org/project",
+			want: "-home-jdoe-corp-example-Projects-org-project",
+		},
+		{
+			name: "path with spaces and other punctuation",
+			path: "/Users/user name/Projects/org/app (v2)",
+			want: "-Users-user-name-Projects-org-app--v2-",
+		},
 	}
 
 	for _, tt := range tests {
@@ -505,6 +569,47 @@ func TestUsageJSONParsing(t *testing.T) {
 	}
 	if entry.Message.Usage.OutputTokens != 500 {
 		t.Errorf("OutputTokens = %d, want 500", entry.Message.Usage.OutputTokens)
+	}
+}
+
+// parseSession must not default a session to Inactive just because it wasn't
+// given a specific pid, as long as the caller still asserts isRunning=true.
+// Discover() passes isRunning=true with pid=0 for a log file it can't
+// confidently attribute to a specific pid (more candidate logs in a
+// directory than confidently-paired pids) -- treating that as "not running"
+// is what let a genuinely active session be reported as Inactive.
+func TestParseSession_RunningWithoutConfidentPID(t *testing.T) {
+	dir := t.TempDir()
+	recent := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
+	content := `{"type":"assistant","timestamp":"` + recent + `","message":{"role":"assistant","content":[{"type":"text","text":"Still working"}]}}` + "\n"
+	path, _, _ := writeLog(t, dir, "s.jsonl", content)
+
+	s, err := parseSession("proj", path, true, 0)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if s.Status == StatusInactive {
+		t.Errorf("status = %q, want anything but Inactive (isRunning was true)", s.Status)
+	}
+	if s.GhostPID != 0 {
+		t.Errorf("GhostPID = %d, want 0 (no confident pid was given, so none should be assigned for --kill-ghosts)", s.GhostPID)
+	}
+}
+
+// The converse: a log file the caller has no running pid for at all must
+// still report Inactive, same as before this change.
+func TestParseSession_NotRunning(t *testing.T) {
+	dir := t.TempDir()
+	recent := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
+	content := `{"type":"assistant","timestamp":"` + recent + `","message":{"role":"assistant","content":[{"type":"text","text":"Still working"}]}}` + "\n"
+	path, _, _ := writeLog(t, dir, "s.jsonl", content)
+
+	s, err := parseSession("proj", path, false, 0)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if s.Status != StatusInactive {
+		t.Errorf("status = %q, want %q (isRunning was false)", s.Status, StatusInactive)
 	}
 }
 

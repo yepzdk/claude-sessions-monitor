@@ -41,13 +41,15 @@ func RenderList(sessions []session.Session) {
 
 	l := calcSessionLayout(getTerminalWidth())
 
-	// Header
-	fmt.Println(sessionHeader(l))
-	fmt.Println(strings.Repeat("─", l.totalWidth))
+	var buf strings.Builder
+	buf.WriteString(sessionHeader(l) + "\n")
+	buf.WriteString(strings.Repeat("─", l.totalWidth) + "\n")
 
 	for _, s := range sessions {
-		renderSessionRow(s, l, "\n")
+		renderSessionRow(&buf, s, l, "\n")
 	}
+
+	fmt.Print(buf.String())
 }
 
 // sessionHeader returns the column header row matching the given layout.
@@ -74,6 +76,13 @@ func RenderJSON(sessions []session.Session) error {
 	return encoder.Encode(sessions)
 }
 
+// rawNewline is the line ending used for interactive (raw terminal mode)
+// redraws: erase-to-end-of-line, then CRLF. Erasing per line lets a refresh
+// overwrite the previous frame in place instead of clearing the whole screen
+// up front — a full clear-then-redraw is what causes the visible flash/blink
+// some terminals show on every refresh tick.
+const rawNewline = "\033[K\r\n"
+
 // RenderLive renders the live dashboard view
 // Uses \r\n for newlines to work correctly in raw terminal mode
 // If webURL is non-empty, the web dashboard shortcut is shown in the footer.
@@ -81,11 +90,20 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
 
-	// Clear screen and move cursor to top
-	fmt.Print("\033[2J\033[H")
+	// Build the whole frame in memory and write it out in a single syscall.
+	// Printing each line separately means the terminal can render partway
+	// through a frame — any row whose text changed briefly shows blank (or
+	// the old content) between writes, which is what "flicker on updated
+	// rows" actually is. One write makes each redraw atomic from the
+	// terminal's point of view.
+	var buf strings.Builder
+
+	// Move cursor to top without erasing — see rawNewline for why the screen
+	// isn't cleared up front.
+	buf.WriteString("\033[H")
 
 	// Header
-	fmt.Printf("%sClaude Code Sessions%s\r\n\r\n", Bold, Reset)
+	fmt.Fprintf(&buf, "%sClaude Code Sessions%s%s%s", Bold, Reset, rawNewline, rawNewline)
 
 	// Split sessions into active and inactive (ghosts are included in inactive)
 	var active, inactive []session.Session
@@ -99,54 +117,93 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 
 	// Status summary (only active sessions)
 	counts := countByStatus(active)
-	fmt.Printf("%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
-	fmt.Printf("%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
-	fmt.Printf("%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
-	fmt.Print("\r\n")
+	fmt.Fprintf(&buf, "%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
+	fmt.Fprintf(&buf, "%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
+	fmt.Fprintf(&buf, "%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
+	buf.WriteString(rawNewline)
 
-	fmt.Print("\r\n")
+	buf.WriteString(rawNewline)
 
 	if len(active) == 0 {
-		fmt.Printf("%sNo active Claude sessions.%s\r\n", Dim, Reset)
+		fmt.Fprintf(&buf, "%sNo active Claude sessions.%s%s", Dim, Reset, rawNewline)
 	} else {
 		l := calcSessionLayout(getTerminalWidth())
 
 		// Column headers
-		fmt.Printf("%s\r\n", sessionHeader(l))
-		fmt.Printf("%s\r\n", strings.Repeat("─", l.totalWidth))
+		fmt.Fprintf(&buf, "%s%s", sessionHeader(l), rawNewline)
+		fmt.Fprintf(&buf, "%s%s", strings.Repeat("─", l.totalWidth), rawNewline)
 
 		for _, s := range active {
-			renderSessionRow(s, l, "\r\n")
+			renderSessionRow(&buf, s, l, rawNewline)
 		}
 	}
 
 	// Show Claude service status
 	statusLink := terminalLink("https://status.claude.com/", "status.claude.com")
-	fmt.Print("\r\n")
+	buf.WriteString(rawNewline)
 	if claudeStatus != nil && claudeStatus.Available {
 		switch claudeStatus.Indicator {
 		case "minor":
-			fmt.Printf("%s%s Claude: %s - %s%s\r\n", Yellow, "\u26A0", claudeStatus.Description, statusLink, Reset)
+			fmt.Fprintf(&buf, "%s%s Claude: %s - %s%s%s", Yellow, "\u26A0", claudeStatus.Description, statusLink, Reset, rawNewline)
 		case "major", "critical":
-			fmt.Printf("%s%s Claude: %s - %s%s\r\n", Red, "\u2716", claudeStatus.Description, statusLink, Reset)
+			fmt.Fprintf(&buf, "%s%s Claude: %s - %s%s%s", Red, "\u2716", claudeStatus.Description, statusLink, Reset, rawNewline)
 		default:
-			fmt.Printf("%sClaude: %s - %s%s\r\n", Dim, claudeStatus.Description, statusLink, Reset)
+			fmt.Fprintf(&buf, "%sClaude: %s - %s%s%s", Dim, claudeStatus.Description, statusLink, Reset, rawNewline)
 		}
 	} else {
-		fmt.Printf("%sClaude: Status unavailable - %s%s\r\n", Dim, statusLink, Reset)
+		fmt.Fprintf(&buf, "%sClaude: Status unavailable - %s%s%s", Dim, statusLink, Reset, rawNewline)
 	}
 
 	// Show help footer
 	if webURL != "" {
-		fmt.Printf("%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s\r\n", Dim, webURL, Reset)
+		fmt.Fprintf(&buf, "%sh: history | u: usage | w: open webview (%s) | Ctrl+C: quit%s%s", Dim, webURL, Reset, rawNewline)
 	} else {
-		fmt.Printf("%sh: history | u: usage | Ctrl+C: quit%s\r\n", Dim, Reset)
+		fmt.Fprintf(&buf, "%sh: history | u: usage | Ctrl+C: quit%s%s", Dim, Reset, rawNewline)
 	}
+
+	fmt.Print(buf.String())
 }
 
-// ClearScreen clears the terminal screen
-func ClearScreen() {
-	fmt.Print("\033[2J\033[H")
+// newlineFor returns the line ending a render function should use: rawNewline
+// in interactive mode (showFooter true), or a plain "\n" for one-shot,
+// non-terminal output where erase-to-end-of-line escapes would just be noise.
+func newlineFor(showFooter bool) string {
+	if showFooter {
+		return rawNewline
+	}
+	return "\n"
+}
+
+// MoveCursorHome moves the cursor to the top-left without erasing the
+// screen. Called once before a redraw so each refresh overwrites the
+// previous frame in place — see rawNewline for why a full clear-then-redraw
+// causes a visible flash on some terminals.
+func MoveCursorHome() {
+	fmt.Print("\033[H")
+}
+
+// EraseToEnd erases from the cursor to the end of the screen. Called once
+// after a full redraw completes, to clear any rows left over from a
+// previous, longer frame (e.g. a session or subagent row that's no longer
+// there). This is a per-render-cycle concern, not something each view needs
+// to remember to do itself — see main.go's render loop for the call site.
+func EraseToEnd() {
+	fmt.Print("\033[J")
+}
+
+// EnterAltScreen switches to the terminal's alternate screen buffer.
+// Besides preserving the user's scrollback, this is the conventional signal
+// that an application is a full-screen TUI. Block-based terminals (JetBrains'
+// terminal, Warp) ignore bare cursor-control sequences on the main buffer and
+// only redraw in place once the alternate buffer is active.
+func EnterAltScreen() {
+	fmt.Print("\033[?1049h")
+}
+
+// ExitAltScreen returns to the normal screen buffer, restoring whatever was
+// on screen before EnterAltScreen was called.
+func ExitAltScreen() {
+	fmt.Print("\033[?1049l")
 }
 
 // HideCursor hides the terminal cursor
@@ -385,7 +442,7 @@ func formatOrigin(o session.Origin, width int) string {
 // renderSessionRow renders a single session row using the given layout.
 // The main row shows status, project, origin (optional), context, and activity.
 // A second indented line shows the last message using the full width.
-func renderSessionRow(s session.Session, l sessionLayout, nl string) {
+func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, nl string) {
 	activity := formatElapsed(time.Since(s.LastActivity))
 	if s.Status == session.StatusWorking {
 		activity = "Now"
@@ -406,7 +463,7 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 			formatContext(s, l.context),
 			l.activity, activity)
 	}
-	fmt.Print(row + nl)
+	buf.WriteString(row + nl)
 
 	// Second line: last message aligned with status text (after "● ")
 	// Sanitize to prevent ANSI escape injection from log content
@@ -419,7 +476,7 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 		msgWidth := l.totalWidth - indent
 		if msgWidth > 0 {
 			msg := truncate(desc, msgWidth)
-			fmt.Printf("%s%s%s%s", strings.Repeat(" ", indent), Dim, msg, Reset+nl)
+			fmt.Fprintf(buf, "%s%s%s%s", strings.Repeat(" ", indent), Dim, msg, Reset+nl)
 		}
 	}
 
@@ -429,7 +486,7 @@ func renderSessionRow(s session.Session, l sessionLayout, nl string) {
 	}
 
 	// Blank line after each session block for visual grouping
-	fmt.Print(nl)
+	buf.WriteString(nl)
 }
 
 // Indentation for nested subagent rows: "  └ " before the status symbol, and

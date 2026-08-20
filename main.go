@@ -153,14 +153,15 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		lastClaudeStatus = session.FetchClaudeStatus()
 	}
 
-	// Hide cursor and ensure cleanup on exit
+	// Take over the screen and ensure cleanup on exit
+	ui.EnterAltScreen()
 	ui.HideCursor()
 	defer func() {
 		close(done)
 		ui.CleanupRawInput()
 		ui.ShowCursor()
 		ui.ResetTerminalTitle()
-		ui.ClearScreen()
+		ui.ExitAltScreen()
 		fmt.Println("Goodbye!")
 	}()
 
@@ -171,11 +172,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	render := func() {
 		switch viewMode {
 		case ViewModeHistory:
-			ui.ClearScreen()
+			ui.MoveCursorHome()
 			sessions, _ := session.DiscoverHistory(historyDays)
 			ui.RenderHistory(sessions, historyDays, true)
 		case ViewModeUsage:
-			ui.ClearScreen()
+			ui.MoveCursorHome()
 			usage := session.ComputeUsage()
 			apiQuota := session.FetchAPIQuota()
 			ui.RenderUsage(usage, apiQuota, true)
@@ -183,6 +184,9 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			sessions, _ := session.Discover()
 			ui.RenderLive(sessions, webURL, lastClaudeStatus)
 		}
+		// Erase anything left over below this frame from a previous, longer
+		// one, once per render cycle rather than each view remembering to.
+		ui.EraseToEnd()
 	}
 
 	// Initial render

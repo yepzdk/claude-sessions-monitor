@@ -11,11 +11,7 @@ import (
 // RenderHistory renders the session history view with date grouping
 // When showFooter is true, uses \r\n for raw terminal mode
 func RenderHistory(sessions []session.HistorySession, days int, showFooter bool) {
-	// Use \r\n when in interactive mode (showFooter=true means raw terminal)
-	nl := "\n"
-	if showFooter {
-		nl = "\r\n"
-	}
+	nl := newlineFor(showFooter)
 
 	if len(sessions) == 0 {
 		fmt.Printf("No sessions found in the past %d days.%s", days, nl)
@@ -36,8 +32,12 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 		}
 	}
 
+	// Build the whole frame in memory and write it out in a single syscall —
+	// see rawNewline in ui.go for why printing line-by-line causes flicker.
+	var buf strings.Builder
+
 	// Header
-	fmt.Printf("%sSession History%s (past %d days)%s%s", Bold, Reset, days, nl, nl)
+	fmt.Fprintf(&buf, "%sSession History%s (past %d days)%s%s", Bold, Reset, days, nl, nl)
 
 	// Column headers (once at the top)
 	colHeader := fmt.Sprintf("%-*s %-*s %-*s %-*s %*s",
@@ -46,7 +46,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 		l.startTime, "TIME",
 		l.duration, "DURATION",
 		l.msgs, "MSGS")
-	fmt.Print(colHeader + nl)
+	buf.WriteString(colHeader + nl)
 
 	// Group sessions by date
 	var currentGroup string
@@ -76,7 +76,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 			if separatorLen < 1 {
 				separatorLen = 1
 			}
-			fmt.Printf("%s━━━ %s %s%s%s", Dim, group, strings.Repeat("━", separatorLen), Reset, nl)
+			fmt.Fprintf(&buf, "%s━━━ %s %s%s%s", Dim, group, strings.Repeat("━", separatorLen), Reset, nl)
 			currentGroup = group
 			rowsUsed++
 		}
@@ -93,7 +93,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 			l.startTime, startTime,
 			l.duration, duration,
 			l.msgs, s.MessageCount)
-		fmt.Print(row + nl)
+		buf.WriteString(row + nl)
 		rowsUsed++
 
 		totalDuration += s.Duration
@@ -102,16 +102,18 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool)
 
 	// Truncation indicator
 	if truncated > 0 {
-		fmt.Printf("%s  ... and %d more sessions%s%s", Dim, truncated, Reset, nl)
+		fmt.Fprintf(&buf, "%s  ... and %d more sessions%s%s", Dim, truncated, Reset, nl)
 	}
 
 	// Footer with totals
-	fmt.Printf("%s%s%s%s%s", nl, Dim, strings.Repeat("─", l.totalWidth), Reset, nl)
-	fmt.Printf("%sTotal: %d sessions, %s%s%s", Dim, totalSessions, formatDuration(totalDuration), Reset, nl)
+	fmt.Fprintf(&buf, "%s%s%s%s%s", nl, Dim, strings.Repeat("─", l.totalWidth), Reset, nl)
+	fmt.Fprintf(&buf, "%sTotal: %d sessions, %s%s%s", Dim, totalSessions, formatDuration(totalDuration), Reset, nl)
 
 	if showFooter {
-		fmt.Printf("%s%sl: live view | u: usage | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		fmt.Fprintf(&buf, "%s%sl: live view | u: usage | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
+
+	fmt.Print(buf.String())
 }
 
 // formatDuration formats a duration in a human-readable way

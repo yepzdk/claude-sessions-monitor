@@ -14,12 +14,13 @@ const usageBarWidth = 20
 // RenderUsage renders the token usage view in the terminal.
 // Uses \r\n for newlines when in raw terminal mode (showFooter=true).
 func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFooter bool) {
-	nl := "\n"
-	if showFooter {
-		nl = "\r\n"
-	}
+	nl := newlineFor(showFooter)
 
-	fmt.Printf("%sToken Usage%s%s%s", Bold, Reset, nl, nl)
+	// Build the whole frame in memory and write it out in a single syscall —
+	// see rawNewline in ui.go for why printing line-by-line causes flicker.
+	var buf strings.Builder
+
+	fmt.Fprintf(&buf, "%sToken Usage%s%s%s", Bold, Reset, nl, nl)
 
 	// --- API Quota Section ---
 	width := getTerminalWidth()
@@ -28,29 +29,29 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 	if separatorLen < 1 {
 		separatorLen = 1
 	}
-	fmt.Printf("%s━━━ %s %s%s%s", Dim, sectionHeader, strings.Repeat("━", separatorLen), Reset, nl)
+	fmt.Fprintf(&buf, "%s━━━ %s %s%s%s", Dim, sectionHeader, strings.Repeat("━", separatorLen), Reset, nl)
 
 	if apiQuota != nil && apiQuota.Available {
-		renderQuotaBucket("5-hour", apiQuota.FiveHour, nl)
-		renderQuotaBucket("7-day", apiQuota.SevenDay, nl)
+		renderQuotaBucket(&buf, "5-hour", apiQuota.FiveHour, nl)
+		renderQuotaBucket(&buf, "7-day", apiQuota.SevenDay, nl)
 		if apiQuota.SevenDaySonnet != nil {
-			renderQuotaBucket("Sonnet", apiQuota.SevenDaySonnet, nl)
+			renderQuotaBucket(&buf, "Sonnet", apiQuota.SevenDaySonnet, nl)
 		}
 		if apiQuota.SevenDayOpus != nil {
-			renderQuotaBucket("Opus", apiQuota.SevenDayOpus, nl)
+			renderQuotaBucket(&buf, "Opus", apiQuota.SevenDayOpus, nl)
 		}
 		if apiQuota.ExtraUsage != nil && apiQuota.ExtraUsage.IsEnabled {
-			fmt.Printf("  %sExtra usage: enabled%s%s", Dim, Reset, nl)
+			fmt.Fprintf(&buf, "  %sExtra usage: enabled%s%s", Dim, Reset, nl)
 		}
 	} else {
 		errMsg := "OAuth token not found"
 		if apiQuota != nil && apiQuota.Error != "" {
 			errMsg = apiQuota.Error
 		}
-		fmt.Printf("  %sNot available (%s)%s%s", Dim, errMsg, Reset, nl)
+		fmt.Fprintf(&buf, "  %sNot available (%s)%s%s", Dim, errMsg, Reset, nl)
 	}
 
-	fmt.Print(nl)
+	buf.WriteString(nl)
 
 	// --- Local Usage Section ---
 	sectionHeader = "Local Usage (5h window)"
@@ -58,17 +59,17 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 	if separatorLen < 1 {
 		separatorLen = 1
 	}
-	fmt.Printf("%s━━━ %s %s%s%s", Dim, sectionHeader, strings.Repeat("━", separatorLen), Reset, nl)
+	fmt.Fprintf(&buf, "%s━━━ %s %s%s%s", Dim, sectionHeader, strings.Repeat("━", separatorLen), Reset, nl)
 
 	if usage != nil && usage.TotalTokens > 0 {
-		fmt.Printf("  Total tokens:  %s (input: %s | output: %s | cache: %s)%s",
+		fmt.Fprintf(&buf, "  Total tokens:  %s (input: %s | output: %s | cache: %s)%s",
 			formatTokenCount(usage.TotalTokens),
 			formatTokenCount(usage.InputTokens),
 			formatTokenCount(usage.OutputTokens),
 			formatTokenCount(usage.CacheTokens),
 			nl)
-		fmt.Printf("  Sessions:      %d%s", len(usage.Sessions), nl)
-		fmt.Print(nl)
+		fmt.Fprintf(&buf, "  Sessions:      %d%s", len(usage.Sessions), nl)
+		buf.WriteString(nl)
 
 		// Per-session table
 		l := calcUsageLayout(width)
@@ -78,8 +79,8 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 			l.output, "OUTPUT",
 			l.cache, "CACHE",
 			l.total, "TOTAL")
-		fmt.Print(header + nl)
-		fmt.Printf("  %s%s", strings.Repeat("─", l.totalWidth), nl)
+		buf.WriteString(header + nl)
+		fmt.Fprintf(&buf, "  %s%s", strings.Repeat("─", l.totalWidth), nl)
 
 		for _, su := range usage.Sessions {
 			project := truncate(su.Project, l.project)
@@ -89,20 +90,22 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 				l.output, formatTokenCount(su.OutputTokens),
 				l.cache, formatTokenCount(su.CacheTokens),
 				l.total, formatTokenCount(su.TotalTokens))
-			fmt.Print(row + nl)
+			buf.WriteString(row + nl)
 		}
 	} else {
-		fmt.Printf("  %sNo token usage in the past 5 hours.%s%s", Dim, Reset, nl)
+		fmt.Fprintf(&buf, "  %sNo token usage in the past 5 hours.%s%s", Dim, Reset, nl)
 	}
 
 	// Footer
 	if showFooter {
-		fmt.Printf("%s%sr: refresh | l: live | h: history | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		fmt.Fprintf(&buf, "%s%sr: refresh | l: live | h: history | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
+
+	fmt.Print(buf.String())
 }
 
 // renderQuotaBucket renders a single quota bucket bar line.
-func renderQuotaBucket(label string, bucket *session.QuotaBucket, nl string) {
+func renderQuotaBucket(buf *strings.Builder, label string, bucket *session.QuotaBucket, nl string) {
 	if bucket == nil {
 		return
 	}
@@ -139,7 +142,7 @@ func renderQuotaBucket(label string, bucket *session.QuotaBucket, nl string) {
 		}
 	}
 
-	fmt.Printf("  %-8s %s %3.0f%%%s%s%s%s", label, bar, pct, Dim, resetStr, Reset+nl, nl)
+	fmt.Fprintf(buf, "  %-8s %s %3.0f%%%s%s%s%s", label, bar, pct, Dim, resetStr, Reset+nl, nl)
 }
 
 // formatTokenCount formats a token count as a human-readable string (e.g. "2.1M", "150K")

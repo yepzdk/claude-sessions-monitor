@@ -275,13 +275,23 @@ func sessionIDFromLogFile(logFile string) string {
 }
 
 // encodeProjectPath converts a filesystem path to the encoded directory name format
+// used for the per-project folders under ~/.claude/projects.
+//
+// Claude Code replaces every character outside [A-Za-z0-9-] with a dash, so this
+// must do the same rather than special-casing a few separators. Enumerating them
+// silently breaks any path containing another character — e.g. a home directory
+// like /home/user@corp.example, where an unencoded '@' makes the computed key
+// miss the real directory and every session gets reported as inactive.
 func encodeProjectPath(path string) string {
 	// /Users/username/Projects/org/project -> -Users-username-Projects-org-project
-	// Replace /, ., and _ with dashes to match Claude Code's encoding scheme
-	encoded := strings.ReplaceAll(path, "/", "-")
-	encoded = strings.ReplaceAll(encoded, ".", "-")
-	encoded = strings.ReplaceAll(encoded, "_", "-")
-	return encoded
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, path)
 }
 
 // Discover finds all active Claude sessions
@@ -332,13 +342,28 @@ func Discover() ([]Session, error) {
 		for i, logFile := range logFiles {
 			liveFiles[logFile] = struct{}{}
 
-			// Pair each log file with a PID by index (most recent log gets first PID)
-			var sessionPids []int
+			// findActiveLogs already decided every file here is a plausible
+			// candidate for one of this directory's runningCount processes, but
+			// pairing a *specific* pid to a *specific* file by array position
+			// (most-recent log <-> first ps result) has no real correspondence --
+			// neither list is ordered by anything that ties them together. When
+			// a directory holds more candidate logs than confidently-paired
+			// pids (i >= len(pids)), still treat the session as running rather
+			// than defaulting it to not-running: a session that's actually
+			// closed just gets correctly demoted to Waiting by its own content
+			// staleness, whereas the reverse -- a genuinely active session
+			// getting marked not-running because it lost a positional pairing
+			// it was never guaranteed to win -- surfaces as that session
+			// wrongly showing Inactive. Only carry a specific pid through
+			// (for GhostPID / --kill-ghosts) when the pairing is one we're
+			// actually confident in.
+			isRunning := len(pids) > 0
+			pid := 0
 			if i < len(pids) {
-				sessionPids = []int{pids[i]}
+				pid = pids[i]
 			}
 
-			session, err := parseSession(entry.Name(), logFile, sessionPids)
+			session, err := parseSession(entry.Name(), logFile, isRunning, pid)
 			if err != nil {
 				continue
 			}
@@ -353,16 +378,34 @@ func Discover() ([]Session, error) {
 
 	// Sort by status priority, then by last activity
 	sort.Slice(sessions, func(i, j int) bool {
-		// Priority: Working > NeedsInput > Waiting > Idle > Inactive
-		pi, pj := statusPriority(sessions[i].Status), statusPriority(sessions[j].Status)
-		if pi != pj {
-			return pi < pj
-		}
-		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+		return sessionLess(sessions[i], sessions[j])
 	})
 
 	storeResult(sessions)
 	return sessions, nil
+}
+
+// sessionLess orders sessions by status priority, then by last activity.
+//
+// Working sessions are the exception: renderSessionRow always displays "Now"
+// for them regardless of the actual LastActivity, so sorting by that
+// timestamp swaps their rows on nothing the user can see — each session's
+// log picks up new entries at slightly different real-world moments, and
+// that jitter alone reorders the list every refresh. Break ties among
+// Working sessions by project then session ID instead, both fixed for the
+// session's lifetime, so those rows hold a stable order.
+func sessionLess(a, b Session) bool {
+	pa, pb := statusPriority(a.Status), statusPriority(b.Status)
+	if pa != pb {
+		return pa < pb
+	}
+	if a.Status == StatusWorking && b.Status == StatusWorking {
+		if a.Project != b.Project {
+			return a.Project < b.Project
+		}
+		return a.SessionID < b.SessionID
+	}
+	return a.LastActivity.After(b.LastActivity)
 }
 
 // statusPriority returns the sort priority for a status (lower = higher priority)
@@ -438,9 +481,22 @@ func findMostRecentLog(dir string) (string, error) {
 	return mostRecent, nil
 }
 
+// activeLogFreshnessWindow is the second-chance window for a log file that
+// didn't make the top-runningCount cut by recency. There is no reliable way
+// to attribute a specific running pid to a specific log file in a directory
+// with more than one (Claude Code exposes no pid/session correlation), so a
+// genuinely active session's log can lose that race to an unrelated, merely
+// fresher file in the same directory -- most commonly when it goes quiet for
+// a while for a mundane reason (extended thinking, a long tool call, the user
+// stepping away mid-turn). Losing the race then meant the log was dropped
+// entirely: not shown with a wrong status, just never considered at all.
+// 30 minutes comfortably covers any of those normal quiet periods while still
+// excluding logs from sessions that ended hours or days ago.
+const activeLogFreshnessWindow = 30 * time.Minute
+
 // findActiveLogs returns all active JSONL log files for a project directory.
-// If runningCount > 0, returns at least that many files (the most recently modified),
-// plus any additional files modified within the last 5 minutes.
+// If runningCount > 0, returns at least that many files (the most recently
+// modified), plus any additional files modified within activeLogFreshnessWindow.
 // If runningCount == 0, returns only the single most recent file.
 func findActiveLogs(dir string, runningCount int) ([]string, error) {
 	entries, err := os.ReadDir(dir)
@@ -503,7 +559,7 @@ func findActiveLogs(dir string, runningCount int) ([]string, error) {
 	}
 
 	// Running processes: collect active logs
-	recentThreshold := time.Now().Add(-5 * time.Minute)
+	recentThreshold := time.Now().Add(-activeLogFreshnessWindow)
 	seen := make(map[string]bool)
 	var result []string
 
@@ -621,7 +677,7 @@ func parseLogFile(logFile string, keep int) (parsedLog, error) {
 }
 
 // parseSession parses a session from its log file
-func parseSession(projectName, logFile string, pids []int) (Session, error) {
+func parseSession(projectName, logFile string, isRunning bool, pid int) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
 		LogFile:     logFile,
@@ -630,12 +686,6 @@ func parseSession(projectName, logFile string, pids []int) (Session, error) {
 		SessionID:   sessionIDFromLogFile(logFile),
 	}
 
-	// Check if Claude is running in this project directory
-	isRunning := len(pids) > 0
-	pid := 0
-	if isRunning {
-		pid = pids[0]
-	}
 
 	// Resolve the session's origin (terminal / IDE / Claude Desktop).
 	// Historical sessions can only be classified if we previously cached them
