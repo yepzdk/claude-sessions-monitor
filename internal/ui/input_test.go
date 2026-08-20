@@ -24,14 +24,20 @@ func TestDecodeKeys(t *testing.T) {
 			want: []rune{KeyDown, KeyDown, KeyEnter},
 		},
 		{"letters around an arrow", []byte{'h', 0x1b, '[', 'A', 'u'}, []rune{'h', KeyUp, 'u'}},
+		{"SS3 arrow up (application cursor mode)", []byte{0x1b, 'O', 'A'}, []rune{KeyUp}},
+		{"SS3 arrow down", []byte{0x1b, 'O', 'B'}, []rune{KeyDown}},
 		{
-			// An unrecognised CSI sequence must not be swallowed silently, or a
-			// key we don't handle would vanish instead of being ignored upstream.
-			name: "unknown CSI passes through as bytes",
-			in:   []byte{0x1b, '[', 'Z'},
-			want: []rune{0x1b, '[', 'Z'},
+			// Consumed whole, not re-emitted: the trailing letter would
+			// otherwise reach the key switch and act as a command. Home is
+			// ESC O H, and 'H' switches to the history view.
+			name: "home key is dropped, not read as 'H'",
+			in:   []byte{0x1b, 'O', 'H'},
+			want: nil,
 		},
-		{"truncated escape", []byte{0x1b, '['}, []rune{0x1b, '['}},
+		{"unknown CSI is dropped whole", []byte{0x1b, '[', 'Z'}, nil},
+		{"CSI with parameters is dropped whole", []byte{0x1b, '[', '1', ';', '5', 'C'}, []rune{KeyRight}},
+		{"escape then a real key", []byte{0x1b, '[', 'Z', 'u'}, []rune{'u'}},
+		{"truncated escape is consumed", []byte{0x1b, '['}, nil},
 		{"bare escape", []byte{0x1b}, []rune{0x1b}},
 		{"empty read", []byte{}, nil},
 	}

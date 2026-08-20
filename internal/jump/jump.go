@@ -16,7 +16,6 @@ var ErrUnsupported = errors.New("no way to focus this terminal")
 type Result struct {
 	Matches int    // number of candidate terminals that matched
 	Name    string // title of the terminal we focused
-	Exact   bool   // true when matched by tty (unambiguous), false when by working directory
 }
 
 // Message renders the result as a single line of user-facing feedback.

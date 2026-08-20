@@ -62,24 +62,45 @@ func ReadKey(keyCh chan<- rune, done <-chan struct{}) {
 	}
 }
 
-// decodeKeys turns a chunk of raw terminal input into keys, translating CSI
-// arrow sequences into their private-use runes. A paste or a fast keypress can
+// decodeKeys turns a chunk of raw terminal input into keys, translating arrow
+// sequences into their private-use runes. A paste or a fast keypress can
 // deliver several keys in one read, so it returns a slice.
+//
+// Arrows arrive two ways: as CSI (ESC [ A) normally, and as SS3 (ESC O A) when
+// the terminal is in application-cursor-key mode, which csm can inherit from
+// whatever ran before it. Both are handled. Any other escape sequence is
+// dropped rather than re-emitted byte by byte — otherwise its trailing letter
+// lands in the key switch as a command, so e.g. Home (ESC O H) would silently
+// switch to the history view.
 func decodeKeys(b []byte) []rune {
 	var keys []rune
 	for i := 0; i < len(b); {
-		// ESC [ <final byte>
-		if b[i] == 0x1b && i+2 < len(b) && b[i+1] == '[' {
-			if key, ok := arrowKey(b[i+2]); ok {
+		if b[i] == 0x1b && i+1 < len(b) && (b[i+1] == '[' || b[i+1] == 'O') {
+			n, key, ok := escapeSequence(b[i:])
+			if ok {
 				keys = append(keys, key)
-				i += 3
-				continue
 			}
+			i += n
+			continue
 		}
 		keys = append(keys, rune(b[i]))
 		i++
 	}
 	return keys
+}
+
+// escapeSequence consumes one ESC-introduced sequence from the front of b,
+// returning its length and, when it's a key we act on, the key. A sequence runs
+// to its first final byte (@ through ~), so unknown ones are consumed whole
+// instead of leaking their bytes into the key stream.
+func escapeSequence(b []byte) (n int, key rune, ok bool) {
+	for i := 2; i < len(b); i++ {
+		if b[i] >= '@' && b[i] <= '~' {
+			key, ok = arrowKey(b[i])
+			return i + 1, key, ok
+		}
+	}
+	return len(b), 0, false // truncated; consume what we have
 }
 
 // arrowKey maps the final byte of a CSI sequence to an arrow key.

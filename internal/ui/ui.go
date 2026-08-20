@@ -42,34 +42,37 @@ func RenderList(sessions []session.Session) {
 	l := calcSessionLayout(getTerminalWidth())
 
 	var buf strings.Builder
-	buf.WriteString(sessionHeader(l) + "\n")
+	buf.WriteString(sessionHeader(l, "") + "\n")
 	buf.WriteString(strings.Repeat("─", l.totalWidth) + "\n")
 
 	for _, s := range sessions {
-		renderSessionRow(&buf, s, l, "\n", unselectedMarker)
+		renderSessionRow(&buf, s, l, "\n", "")
 	}
 
 	fmt.Print(buf.String())
 }
 
 // sessionHeader returns the column header row matching the given layout.
-func sessionHeader(l sessionLayout) string {
-	// Leading blanks match the selection gutter the rows reserve.
+// gutter is the same left-edge padding the rows use, so the columns line up:
+// unselectedMarker in the live view, "" for one-shot output that has no
+// selection to show.
+func sessionHeader(l sessionLayout, gutter string) string {
+	activity := l.activity - len([]rune(gutter))
 	if l.origin > 0 {
 		return fmt.Sprintf("%s%-*s %-*s %-*s %-*s %-*s",
-			unselectedMarker,
+			gutter,
 			l.status, "STATUS",
 			l.project, "PROJECT",
 			l.origin, "ORIGIN",
 			l.context, "CONTEXT",
-			l.activity-markerWidth, "LAST ACTIVITY")
+			activity, "LAST ACTIVITY")
 	}
 	return fmt.Sprintf("%s%-*s %-*s %-*s %-*s",
-		unselectedMarker,
+		gutter,
 		l.status, "STATUS",
 		l.project, "PROJECT",
 		l.context, "CONTEXT",
-		l.activity-markerWidth, "LAST ACTIVITY")
+		activity, "LAST ACTIVITY")
 }
 
 // RenderJSON renders sessions as JSON
@@ -92,7 +95,6 @@ const rawNewline = "\033[K\r\n"
 const (
 	selectedMarker   = "\u258c "
 	unselectedMarker = "  "
-	markerWidth      = 2
 )
 
 // ActiveSessions returns the sessions the live view shows: everything that
@@ -150,7 +152,7 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 		l := calcSessionLayout(getTerminalWidth())
 
 		// Column headers
-		fmt.Fprintf(&buf, "%s%s", sessionHeader(l), rawNewline)
+		fmt.Fprintf(&buf, "%s%s", sessionHeader(l, unselectedMarker), rawNewline)
 		fmt.Fprintf(&buf, "%s%s", strings.Repeat("─", l.totalWidth), rawNewline)
 
 		for i, s := range active {
@@ -467,8 +469,8 @@ func formatOrigin(o session.Origin, width int) string {
 // renderSessionRow renders a single session row using the given layout.
 // The main row shows status, project, origin (optional), context, and activity.
 // A second indented line shows the last message using the full width, followed
-// by any subagent rows. marker fills the left gutter and must be markerWidth
-// columns wide — see selectedMarker.
+// by any subagent rows. marker fills the left gutter; its width is carved out
+// of the row, so selected and unselected markers must be the same width.
 func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, nl string, marker string) {
 	activity := formatElapsed(time.Since(s.LastActivity))
 	if s.Status == session.StatusWorking {
@@ -478,7 +480,8 @@ func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, 
 	// The gutter is carved out of the activity column rather than added to the
 	// row: calcSessionLayout already spends the full terminal width, so widening
 	// the row here would wrap every line.
-	activityWidth := l.activity - markerWidth
+	gutter := len([]rune(marker))
+	activityWidth := l.activity - gutter
 	if activityWidth < 1 {
 		activityWidth = 1
 	}
@@ -509,7 +512,7 @@ func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, 
 		desc = sanitizeForTerminal(s.Task)
 	}
 	if desc != "" && desc != "-" {
-		indent := markerWidth + 2 // gutter, then align with status text (after symbol + space)
+		indent := gutter + 2 // gutter, then align with status text (after symbol + space)
 		msgWidth := l.totalWidth - indent
 		if msgWidth > 0 {
 			msg := truncate(desc, msgWidth)
@@ -519,7 +522,7 @@ func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, 
 
 	// Nested subagent rows, indented under their parent session
 	for _, sa := range s.Subagents {
-		renderSubagentRow(buf, sa, l, nl)
+		renderSubagentRow(buf, sa, l, nl, gutter)
 	}
 
 	// Blank line after each session block for visual grouping
@@ -535,7 +538,7 @@ const (
 )
 
 // renderSubagentRow renders one subagent as an indented child of its session.
-func renderSubagentRow(buf *strings.Builder, sa session.Subagent, l sessionLayout, nl string) {
+func renderSubagentRow(buf *strings.Builder, sa session.Subagent, l sessionLayout, nl string, gutter int) {
 	activity := "Now"
 	if elapsed := time.Since(sa.LastActivity); elapsed >= time.Minute {
 		activity = formatElapsed(elapsed)
@@ -549,18 +552,18 @@ func renderSubagentRow(buf *strings.Builder, sa session.Subagent, l sessionLayou
 	// Label column absorbs everything the fixed columns don't use, so the
 	// activity column stays aligned with the parent table. The selection gutter
 	// is part of that fixed cost.
-	activityWidth := l.activity - markerWidth
+	activityWidth := l.activity - gutter
 	if activityWidth < 1 {
 		activityWidth = 1
 	}
-	labelWidth := l.totalWidth - markerWidth - subagentIndentLen - 2 - activityWidth - 1
+	labelWidth := l.totalWidth - gutter - subagentIndentLen - 2 - activityWidth - 1
 	if labelWidth < 1 {
 		labelWidth = 1
 	}
 	label = truncate(label, labelWidth)
 
 	fmt.Fprintf(buf, "%s%s%s%s%s %s%-*s%s %-*s%s",
-		unselectedMarker,
+		strings.Repeat(" ", gutter),
 		subagentIndent,
 		Green, SymbolWorking, Reset,
 		Dim, labelWidth, label, Reset,
@@ -572,7 +575,7 @@ func renderSubagentRow(buf *strings.Builder, sa session.Subagent, l sessionLayou
 		desc = task
 	}
 	if desc != "" && desc != "-" {
-		indent := markerWidth + subagentDescIndent
+		indent := gutter + subagentDescIndent
 		descWidth := l.totalWidth - indent
 		if descWidth > 0 {
 			fmt.Fprintf(buf, "%s%s%s%s",

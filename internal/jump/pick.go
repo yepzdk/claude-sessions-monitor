@@ -29,17 +29,17 @@ type candidate struct {
 //
 // Returns the chosen candidate and how many candidates matched, so the caller
 // can tell the user when the choice was a guess. matches == 0 means no match.
-func pick(cands []candidate, tty, dir string) (chosen candidate, matches int, exact bool) {
+func pick(cands []candidate, tty, dir string) (chosen candidate, matches int) {
 	if tty != "" {
 		for _, c := range cands {
 			if c.TTY != "" && c.TTY == tty {
-				return c, 1, true
+				return c, 1
 			}
 		}
 	}
 
 	if dir == "" {
-		return candidate{}, 0, false
+		return candidate{}, 0
 	}
 
 	var byDir []candidate
@@ -49,15 +49,15 @@ func pick(cands []candidate, tty, dir string) (chosen candidate, matches int, ex
 		}
 	}
 	if len(byDir) == 0 {
-		return candidate{}, 0, false
+		return candidate{}, 0
 	}
 
 	for _, c := range byDir {
 		if !looksLikePath(c.Name) {
-			return c, len(byDir), false
+			return c, len(byDir)
 		}
 	}
-	return byDir[0], len(byDir), false
+	return byDir[0], len(byDir)
 }
 
 // looksLikePath reports whether a tab title is a terminal echoing its working

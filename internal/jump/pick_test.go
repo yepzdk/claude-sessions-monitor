@@ -17,7 +17,6 @@ func TestPick(t *testing.T) {
 		dir         string
 		wantID      string
 		wantMatches int
-		wantExact   bool
 	}{
 		{
 			name:        "tty wins outright",
@@ -26,7 +25,6 @@ func TestPick(t *testing.T) {
 			dir:         "/proj/web",
 			wantID:      "b",
 			wantMatches: 1,
-			wantExact:   true,
 		},
 		{
 			name:        "falls back to directory when tty is unknown",
@@ -84,15 +82,12 @@ func TestPick(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, matches, exact := pick(tt.cands, tt.tty, tt.dir)
+			got, matches := pick(tt.cands, tt.tty, tt.dir)
 			if matches != tt.wantMatches {
 				t.Errorf("pick() matches = %d, want %d", matches, tt.wantMatches)
 			}
 			if got.ID != tt.wantID {
 				t.Errorf("pick() chose %q, want %q", got.ID, tt.wantID)
-			}
-			if exact != tt.wantExact {
-				t.Errorf("pick() exact = %v, want %v", exact, tt.wantExact)
 			}
 		})
 	}
@@ -129,5 +124,30 @@ func TestUnsupportedIsMatchable(t *testing.T) {
 	}
 	if got := err.Error(); got != "can't jump to iTerm yet" {
 		t.Errorf("Error() = %q, want the sentence alone", got)
+	}
+}
+
+// A tty match must only happen when the caller passes one. Focus withholds the
+// tty unless Session.PIDConfident, because GhostPID is otherwise paired to the
+// log file by array position — an "exact" match on a mispaired pid would focus
+// a sibling session's tab while reporting full confidence.
+func TestPickIgnoresTTYWhenCallerWithholdsIt(t *testing.T) {
+	cands := []candidate{
+		{ID: "sibling", TTY: "/dev/ttys001", Dir: "/proj/web", Name: "✳ Other session"},
+		{ID: "shell", TTY: "/dev/ttys002", Dir: "/proj/web", Name: "…/proj/web"},
+	}
+
+	// With a tty, the exact match wins outright and reports a single match.
+	if got, matches := pick(cands, "/dev/ttys001", "/proj/web"); got.ID != "sibling" || matches != 1 {
+		t.Errorf("pick() with tty = %q/%d, want sibling/1", got.ID, matches)
+	}
+
+	// Without one, it falls back to the directory and admits it guessed.
+	got, matches := pick(cands, "", "/proj/web")
+	if got.ID != "sibling" {
+		t.Errorf("pick() without tty chose %q, want the non-path-titled tab", got.ID)
+	}
+	if matches != 2 {
+		t.Errorf("pick() without tty reported %d matches, want 2 so the UI flags the guess", matches)
 	}
 }

@@ -42,6 +42,7 @@ type Session struct {
 	Origin         Origin     `json:"origin,omitempty"`          // Where the session was launched from
 	IsGhost        bool       `json:"is_ghost,omitempty"`        // True if process running but log is stale
 	GhostPID       int        `json:"ghost_pid,omitempty"`       // PID of the ghost process (for killing)
+	PIDConfident   bool       `json:"-"`                         // True when GhostPID is certainly this session's process, not a positional guess
 	GitBranch      string     `json:"git_branch,omitempty"`      // Current git branch
 	HasUnsandboxed bool       `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
 	ContextPercent float64    `json:"context_percent,omitempty"` // Percentage of context window used
@@ -363,11 +364,18 @@ func Discover() ([]Session, error) {
 			if i < len(pids) {
 				pid = pids[i]
 			}
+			// The pairing above is positional, so it only actually identifies a
+			// process when there's exactly one candidate on each side. Anything
+			// that needs to be *right* about which process belongs to this
+			// session (rather than merely "some pid for this directory", which
+			// is all --kill-ghosts needs) must check this first.
+			pidConfident := len(pids) == 1 && len(logFiles) == 1
 
 			session, err := parseSession(entry.Name(), logFile, isRunning, pid)
 			if err != nil {
 				continue
 			}
+			session.PIDConfident = pidConfident && session.GhostPID > 0
 
 			sessions = append(sessions, session)
 		}

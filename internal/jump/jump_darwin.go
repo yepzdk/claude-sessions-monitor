@@ -4,6 +4,7 @@ package jump
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -12,11 +13,15 @@ import (
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
 
-// osascriptTimeout bounds the AppleScript call. Unlike the ps/lsof calls
-// elsewhere in csm, this one can block on a human: the first jump triggers
-// macOS's Automation consent dialog, which waits indefinitely for an answer.
-// It runs on the render loop's goroutine, so a hang would freeze the UI.
-const osascriptTimeout = 3 * time.Second
+// osascriptTimeout bounds each AppleScript call so a wedged osascript can't
+// freeze the render loop, which calls Focus on its own goroutine.
+//
+// It is generous because the first jump shows macOS's Automation consent
+// dialog, and that prompt belongs to the osascript process: killing osascript
+// dismisses the dialog without recording an answer, so a short deadline would
+// leave the user unable to ever grant permission from csm. A jump the user is
+// actively waiting on is also the one moment a visible pause is acceptable.
+const osascriptTimeout = 30 * time.Second
 
 // listGhosttyTerminals asks Ghostty for every open terminal surface.
 //
@@ -82,8 +87,22 @@ func Focus(s session.Session) (Result, error) {
 		return Result{}, fmt.Errorf("couldn't reach Ghostty: %w", err)
 	}
 
-	chosen, matches, exact := pick(parseTerminals(out), ttyForPID(s.GhostPID), s.CWD)
+	// Only match on tty when we actually know which process is this session's.
+	// GhostPID is otherwise paired to the log file by array position, which the
+	// discovery code itself documents as having no real correspondence — and an
+	// exact match on the wrong pid focuses a sibling session's tab while
+	// reporting full confidence. The directory fallback is less precise but
+	// honest about it.
+	tty := ""
+	if s.PIDConfident {
+		tty = ttyForPID(s.GhostPID)
+	}
+
+	chosen, matches := pick(parseTerminals(out), tty, s.CWD)
 	if matches == 0 {
+		if s.CWD == "" {
+			return Result{}, fmt.Errorf("don't know this session's directory")
+		}
 		return Result{}, fmt.Errorf("no Ghostty tab open in %s", s.CWD)
 	}
 
@@ -95,7 +114,7 @@ func Focus(s session.Session) (Result, error) {
 		return Result{}, fmt.Errorf("that tab just closed")
 	}
 
-	return Result{Matches: matches, Name: chosen.Name, Exact: exact}, nil
+	return Result{Matches: matches, Name: chosen.Name}, nil
 }
 
 // parseTerminals reads the tab-separated listing produced by
@@ -146,10 +165,30 @@ func runOsascript(script string, args ...string) (string, error) {
 	cmd.Stdin = strings.NewReader(script)
 	out, err := cmd.Output()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("Ghostty didn't respond (permission dialog still open?)")
+		return "", fmt.Errorf("Ghostty didn't respond in time")
 	}
 	if err != nil {
-		return "", err
+		return "", osascriptError(err)
 	}
 	return string(out), nil
+}
+
+// osascriptError turns osascript's exit status into something actionable.
+// cmd.Output() captures stderr on failure but Error() only reports the exit
+// code, so the real reason — a permission refusal, a missing dictionary term —
+// would otherwise never reach the user.
+func osascriptError(err error) error {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || len(exit.Stderr) == 0 {
+		return err
+	}
+	msg := strings.TrimSpace(string(exit.Stderr))
+	if i := strings.IndexByte(msg, '\n'); i > 0 {
+		msg = msg[:i]
+	}
+	// -1743 is macOS refusing the Apple event outright.
+	if strings.Contains(msg, "-1743") || strings.Contains(msg, "Not authorized") {
+		return fmt.Errorf("csm isn't allowed to control Ghostty — enable it under System Settings > Privacy & Security > Automation")
+	}
+	return fmt.Errorf("%s", msg)
 }
