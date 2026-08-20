@@ -482,7 +482,7 @@ func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, 
 
 	// Nested subagent rows, indented under their parent session
 	for _, sa := range s.Subagents {
-		renderSubagentRow(sa, l, nl)
+		renderSubagentRow(buf, sa, l, nl)
 	}
 
 	// Blank line after each session block for visual grouping
@@ -498,7 +498,7 @@ const (
 )
 
 // renderSubagentRow renders one subagent as an indented child of its session.
-func renderSubagentRow(sa session.Subagent, l sessionLayout, nl string) {
+func renderSubagentRow(buf *strings.Builder, sa session.Subagent, l sessionLayout, nl string) {
 	activity := "Now"
 	if elapsed := time.Since(sa.LastActivity); elapsed >= time.Minute {
 		activity = formatElapsed(elapsed)
@@ -517,7 +517,7 @@ func renderSubagentRow(sa session.Subagent, l sessionLayout, nl string) {
 	}
 	label = truncate(label, labelWidth)
 
-	fmt.Printf("%s%s%s%s %s%-*s%s %-*s%s",
+	fmt.Fprintf(buf, "%s%s%s%s %s%-*s%s %-*s%s",
 		subagentIndent,
 		Green, SymbolWorking, Reset,
 		Dim, labelWidth, label, Reset,
@@ -531,7 +531,7 @@ func renderSubagentRow(sa session.Subagent, l sessionLayout, nl string) {
 	if desc != "" && desc != "-" {
 		descWidth := l.totalWidth - subagentDescIndent
 		if descWidth > 0 {
-			fmt.Printf("%s%s%s%s",
+			fmt.Fprintf(buf, "%s%s%s%s",
 				strings.Repeat(" ", subagentDescIndent),
 				Dim, truncate(desc, descWidth), Reset+nl)
 		}
