@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Releases are now cut by pushing a tag rather than by every merge to `main`, so the version reflects a deliberate decision instead of counting merges. Fixed the tag-triggered workflow's Homebrew step, which had been firing a no-op `repository_dispatch` at the tap since the release consolidation.
 - CI and release workflows now run on Node 24 actions (`checkout@v7`, `setup-go@v7`, `action-gh-release@v3`); the release job's Go version now matches `go.mod` instead of claiming 1.21.
 - Release automation now updates the Homebrew formula directly from the release workflow instead of via a second workflow in the tap repo, so only one token needs to be kept current.
 

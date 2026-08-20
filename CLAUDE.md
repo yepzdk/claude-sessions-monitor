@@ -55,35 +55,32 @@ The `main` branch is protected:
 
 ## Release Workflow
 
-### Automatic Releases (Recommended)
+### Cutting a release
 
-Releases are fully automated. When a PR is merged to `main`:
+Releases are triggered by pushing a tag — merging to `main` does not release
+anything. This is deliberate: merges are cheap and frequent, releases are a
+decision, and letting every merge cut a patch produced runs of versions minutes
+apart that said nothing about what changed.
 
-**Auto Tag and Release** (`.github/workflows/auto-tag.yaml`) does everything in one job:
-   - Triggers on push to `main` branch
-   - Gets the latest tag and increments the patch version (e.g., v0.3.8 → v0.3.9)
-   - Creates and pushes the new tag
+```bash
+git checkout main && git pull
+git tag v0.4.0        # pick the bump: patch, minor, or major
+git push origin v0.4.0
+```
+
+That triggers `.github/workflows/release.yaml`, which does everything in one job:
    - Builds binaries for darwin/linux × amd64/arm64 (plus `.deb`/`.rpm` packages)
-   - Creates GitHub release with binaries attached
+   - Creates the GitHub release with binaries attached and generated notes
    - Hashes the built binaries, rewrites `Formula/csm.rb`, and commits it to
      `yepzdk/homebrew-tools` using `HOMEBREW_TAP_PAT`
 
+Pick the version from what actually changed since the last tag — `CHANGELOG.md`'s
+`[Unreleased]` section is the place to look. Nothing computes it for you.
+
 Only **one** secret is involved: `HOMEBREW_TAP_PAT` in *this* repo, a token with
-`contents: write` on `yepzdk/homebrew-tools`. The tap repo no longer runs its own
+`contents: write` on `yepzdk/homebrew-tools`. The tap repo does not run its own
 workflow, so there is no second copy of the token to keep in sync. When rotating
 the PAT, update it here (`gh secret set HOMEBREW_TAP_PAT -R yepzdk/claude-sessions-monitor`).
-
-### Manual Version Bumps
-
-For major or minor version changes, manually push a tag:
-
-```bash
-git tag v1.0.0  # or v0.4.0 for minor bump
-git push origin v1.0.0
-```
-
-This triggers `.github/workflows/release.yaml` which builds and releases.
-The auto-tag workflow will continue from that version for subsequent patch releases.
 
 ### Troubleshooting releases
 
