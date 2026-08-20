@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Community health files: MIT `LICENSE`, code of conduct, contributing guide, security policy, and issue/PR templates.
+
 ### Changed
 
 - Release automation now updates the Homebrew formula directly from the release workflow instead of via a second workflow in the tap repo, so only one token needs to be kept current.

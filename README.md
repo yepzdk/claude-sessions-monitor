@@ -188,6 +188,12 @@ make clean
 
 The tool monitors `~/.claude/projects/` where Claude Code stores session logs. It parses the JSONL log files to determine each session's current state based on the most recent entries.
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for
+the development workflow, and [SECURITY.md](.github/SECURITY.md) for reporting
+vulnerabilities.
+
 ## License
 
-MIT
+[MIT](LICENSE)
