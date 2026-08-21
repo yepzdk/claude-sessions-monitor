@@ -7,18 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-21
+
 ### Added
 
 - Community health files: MIT `LICENSE`, code of conduct, contributing guide, security policy, and issue/PR templates.
 - CI workflow checking formatting, vet, build and tests on every pull request, plus `make fmt` / `make check` and an `.editorconfig` so style stays consistent and formatting churn stays out of feature diffs.
 - Live subagents are now shown as nested rows under their parent session in both dashboards, and a parent with a running subagent no longer reports as idle. (#54)
 - Jump to a session's terminal from the live view: select a row with `↑`/`↓` and press `Enter` to bring its Ghostty tab to the front. macOS and Ghostty only for now. (#48)
+- Web dashboard: clicking the "User Prompts" metric card in the session detail modal now jumps to the Timeline tab with the `User` filter applied, scrolled to the first prompt
+- Web dashboard: timeline "Load more" escalates after the second click — the third click loads all remaining entries in one go (chunked server-side at 500 per request) instead of forcing repeated clicks
+- Active model id is now exposed on the session JSON/SSE API and indicated in both dashboards: the terminal shows a dim `(1M)` suffix on the context cell when the session is using an extended context window, and the web dashboard shows a small `1M` badge with the full model id on hover
+- Native `.deb` and `.rpm` Linux packages published with each release (amd64 and arm64)
+- Origin column showing where each session was launched from — terminal emulator (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or IDE (Zed, VS Code, Cursor, VSCodium, JetBrains). Detection walks the Claude process's parent chain and inspects its environment; results are snapshotted to `~/.claude-monitor/origins/<sessionId>.json` so the badge persists after the session ends. The column is shown in both the terminal dashboard (drops out gracefully below 90 columns) and the web dashboard, and is also included in the JSON/SSE API responses.
+- Linux process detection via `/proc/<pid>/cwd` — live session status now works correctly on Linux without requiring `lsof`
+- Project naming from `cwd` field in JSONL logs — accurate, lossless project names on all platforms (replaces heuristic decoding of encoded directory names)
+- Session title display — custom titles set by Claude Code are shown in both TUI and web dashboard
+- Parse `cwd` and `customTitle` fields from Claude Code JSONL log entries
+- Linux manual install instructions in README
+- Path markers for project naming: `/repos/`, `/src/`, `/code/`, `/workspace/` in addition to `/Projects/`
+- Parse `stop_reason` field from Claude Code JSONL logs for more accurate status detection
+- Track `progress`, `hook_progress`, and `agent_progress` log entries as activity heartbeats
+- Detect multiple concurrent Claude sessions in the same project directory (each shown as a separate row/card)
+- Show Claude service status from status.claude.com in terminal live view and web dashboard
+- `--web-only` flag for headless web server mode (no terminal UI required)
 
 ### Changed
 
 - Releases are now cut by pushing a tag rather than by every merge to `main`, so the version reflects a deliberate decision instead of counting merges. Fixed the tag-triggered workflow's Homebrew step, which had been firing a no-op `repository_dispatch` at the tap since the release consolidation.
 - CI and release workflows now run on Node 24 actions (`checkout@v7`, `setup-go@v7`, `action-gh-release@v3`); the release job's Go version now matches `go.mod` instead of claiming 1.21.
 - Release automation now updates the Homebrew formula directly from the release workflow instead of via a second workflow in the tap repo, so only one token needs to be kept current.
+- Terminal: Claude service status is fetched on-demand (startup + key press) instead of every ticker cycle
+- Web: Claude service status polling pauses when the browser tab is hidden and resumes on visibility
+- Make usage/quota fetching fully on-demand instead of periodic polling
+- Terminal: usage data fetched only on view entry (`u`) or manual refresh (`r`)
+- Web: usage data fetched via REST on tab switch or refresh button click, no longer broadcast via SSE
+- Increase API quota cache TTL from 30s to 60s to reduce Anthropic API request frequency
 
 ### Fixed
 
@@ -31,27 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Context usage is no longer overstated ~5x for Claude 5 family models (`claude-fable-5`, `claude-sonnet-5`): their two-part model ids now parse correctly and map to the 1M context window. (#51)
 - Sessions no longer stay stuck on "Working" after Claude has yielded back to the user; idle sessions now age out to "Waiting" with the real last message.
 - Sharply reduced CPU usage of the live view (previously ~40-50% at idle) by caching session log parsing.
-
-### Removed
-
-- macOS menu bar app (`CSMMenuBar.app`) — the SwiftUI menu bar app, its build targets, release workflow, and Homebrew cask have been removed. Use the web dashboard (`csm --web`) for at-a-glance session monitoring instead. The `--web-only` headless mode remains available for running csm as a background server.
-
-### Added
-
-- Web dashboard: clicking the "User Prompts" metric card in the session detail modal now jumps to the Timeline tab with the `User` filter applied, scrolled to the first prompt
-- Web dashboard: timeline "Load more" escalates after the second click — the third click loads all remaining entries in one go (chunked server-side at 500 per request) instead of forcing repeated clicks
-- Active model id is now exposed on the session JSON/SSE API and indicated in both dashboards: the terminal shows a dim `(1M)` suffix on the context cell when the session is using an extended context window, and the web dashboard shows a small `1M` badge with the full model id on hover
-- Native `.deb` and `.rpm` Linux packages published with each release (amd64 and arm64)
-- Origin column showing where each session was launched from — terminal emulator (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or IDE (Zed, VS Code, Cursor, VSCodium, JetBrains). Detection walks the Claude process's parent chain and inspects its environment; results are snapshotted to `~/.claude-monitor/origins/<sessionId>.json` so the badge persists after the session ends. The column is shown in both the terminal dashboard (drops out gracefully below 90 columns) and the web dashboard, and is also included in the JSON/SSE API responses.
-- Linux process detection via `/proc/<pid>/cwd` — live session status now works correctly on Linux without requiring `lsof`
-- Project naming from `cwd` field in JSONL logs — accurate, lossless project names on all platforms (replaces heuristic decoding of encoded directory names)
-- Session title display — custom titles set by Claude Code are shown in both TUI and web dashboard
-- Parse `cwd` and `customTitle` fields from Claude Code JSONL log entries
-- Linux manual install instructions in README
-- Path markers for project naming: `/repos/`, `/src/`, `/code/`, `/workspace/` in addition to `/Projects/`
-
-### Fixed
-
 - Sessions no longer show false "Working" status after a turn completes — turn-completed detection (`turn_duration` and `stop_reason: "end_turn"`) now takes priority over file modification time and progress heartbeat checks
 - Session title and cwd now extracted via full-file scan (`QuickSessionStats`) for both active and history views, ensuring consistency and finding titles set early in long sessions
 - Project names on Linux `/home/<user>/` paths now skip the home prefix for cleaner display (e.g., `repos/myproject` instead of `home/user/repos/myproject`)
@@ -64,26 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Extended assistant "Working" window from 30 seconds to 2 minutes to reduce false "Waiting" during brief log gaps
 - Use log file modification time to detect active streaming writes, preventing "Waiting" during early response generation
 - Context percentage now correctly recognises 1M-context models from Opus/Sonnet generation 4.6 onward (e.g. `claude-opus-4-7`, `claude-sonnet-4-7`, future generations); previously only `opus-4-6` and `sonnet-4-6` were detected, so newer models were treated as 200K and reported up to 5× too high
-
-### Added
-
-- Parse `stop_reason` field from Claude Code JSONL logs for more accurate status detection
-- Track `progress`, `hook_progress`, and `agent_progress` log entries as activity heartbeats
-- Detect multiple concurrent Claude sessions in the same project directory (each shown as a separate row/card)
-- Show Claude service status from status.claude.com in terminal live view and web dashboard
-- `--web-only` flag for headless web server mode (no terminal UI required)
-
-### Changed
-
-- Terminal: Claude service status is fetched on-demand (startup + key press) instead of every ticker cycle
-- Web: Claude service status polling pauses when the browser tab is hidden and resumes on visibility
-- Make usage/quota fetching fully on-demand instead of periodic polling
-- Terminal: usage data fetched only on view entry (`u`) or manual refresh (`r`)
-- Web: usage data fetched via REST on tab switch or refresh button click, no longer broadcast via SSE
-- Increase API quota cache TTL from 30s to 60s to reduce Anthropic API request frequency
-
-### Fixed
-
 - Unhelpful error when starting csm while another instance is already running on the same port
 - Include output tokens in context window calculation to match Claude Code's reported usage
 - `--web` and `--web-only` flags now report an error when used together instead of silently ignoring `--web`
+
+### Removed
+
+- macOS menu bar app (`CSMMenuBar.app`) — the SwiftUI menu bar app, its build targets, release workflow, and Homebrew cask have been removed. Use the web dashboard (`csm --web`) for at-a-glance session monitoring instead. The `--web-only` headless mode remains available for running csm as a background server.
