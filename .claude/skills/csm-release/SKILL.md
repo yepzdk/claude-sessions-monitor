@@ -1,11 +1,14 @@
 ---
-name: release
+name: csm-release
 description: >
   Cut a csm release: roll CHANGELOG.md's [Unreleased] into a dated version
   section, PR it, then tag main so the release workflow builds binaries and
-  updates the Homebrew formula. Use when the user says "release", "cut a
-  release", "ship it", "tag a release", or invokes /release. Takes an optional
-  version (e.g. /release 0.4.0, /release minor).
+  updates the Homebrew formula. Use for ANY release of this repo — when the
+  user says "release", "cut a release", "ship it", "tag a release", or invokes
+  /csm-release or /release. Takes an optional version (e.g. /csm-release 0.4.0,
+  /csm-release minor). Prefer this over the generic `release` skill here: this
+  repo has no package.json, and its release is triggered by pushing a tag, not
+  by calling `gh release create`.
 user-invocable: true
 ---
 
@@ -24,9 +27,14 @@ The only file this skill changes is `CHANGELOG.md`.
 
 ## Usage
 
-- `/release` — infer the bump from what's in `[Unreleased]`, then confirm
-- `/release 0.4.0` — use this exact version
-- `/release minor` / `/release patch` / `/release major` — bump accordingly
+- `/csm-release` — infer the bump from what's in `[Unreleased]`, then confirm
+- `/csm-release 0.4.0` — use this exact version
+- `/csm-release minor` / `patch` / `major` — bump accordingly
+
+Named `csm-release` rather than `release` because a global `release` skill
+exists and wins the name. That one bumps `package.json` and finishes with
+`gh release create`, both of which are wrong here — see the note above about
+racing the workflow.
 
 ## Phase 1: Preflight
 

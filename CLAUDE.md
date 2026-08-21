@@ -57,7 +57,7 @@ The `main` branch is protected:
 
 ### Cutting a release
 
-`/release` drives this end to end (`.claude/skills/release/SKILL.md`): it rolls
+`/csm-release` drives this end to end (`.claude/skills/csm-release/SKILL.md`): it rolls
 the changelog, opens the PR, tags `main` after you merge, and verifies the
 release, artifacts and Homebrew formula all landed. The manual steps below are
 what it does, and what to fall back on.
