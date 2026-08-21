@@ -26,6 +26,99 @@
     const claudeStatusEl = document.getElementById('claude-status');
     const headerQuotaEl = document.getElementById('header-quota');
 
+    // --- Header API quota ---
+    // /api/oauth/usage is an undocumented Anthropic endpoint reported to get
+    // stuck returning 429 for the rest of the session once rate-limited (no
+    // documented safe interval, no recovery). Poll conservatively -- well
+    // above the ~30-60s interval reported to trigger it, and above the
+    // server's own 60s cache TTL so most polls just hit that cache -- but
+    // circuit-break the moment a fetch fails for any reason other than "no
+    // OAuth token configured": stop polling and say so, rather than either
+    // hammering an already-broken endpoint or silently going stale forever
+    // (which a tab left open on a second monitor would otherwise do, since
+    // visibilitychange never fires for a tab that's visible but unfocused).
+    //
+    // HEADER_QUOTA_POLL_MS is both the poll interval and the staleness
+    // threshold every path that can refresh early (tab switch, tab regaining
+    // visibility) checks against, so no sequence of user actions can drive
+    // the widget faster than the interval.
+    const HEADER_QUOTA_POLL_MS = 5 * 60 * 1000;
+    let headerQuotaInterval = null;
+    let headerQuotaFetchedAt = 0;
+    let headerQuotaBroken = false;
+
+    async function loadHeaderQuota() {
+        if (headerQuotaBroken) return;
+        // Stamp the attempt rather than the completion. The guards exist to
+        // limit how often a request goes out, and a request in flight has
+        // already gone out -- stamping on completion leaves a window where
+        // init and a #history/#usage deep link both see a stale 0 and fire.
+        headerQuotaFetchedAt = Date.now();
+        try {
+            const resp = await fetch('/api/quota');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            renderHeaderQuota(await resp.json());
+        } catch (err) {
+            breakHeaderQuota(err.message || 'fetch failed');
+        }
+    }
+
+    // breakHeaderQuota trips the circuit breaker: stop polling and replace the
+    // widget with a visible "unavailable" marker until the page is reloaded.
+    function breakHeaderQuota(reason) {
+        headerQuotaBroken = true;
+        stopHeaderQuotaPolling();
+        if (!headerQuotaEl) return;
+        headerQuotaEl.innerHTML = `<span class="header-quota-item header-quota-error" title="${esc(reason)}">quota unavailable</span>`;
+    }
+
+    function renderHeaderQuota(apiQuota) {
+        if (!headerQuotaEl) return;
+        if (!apiQuota || !apiQuota.available) {
+            // No OAuth token is a normal local configuration state, not a
+            // broken endpoint -- show nothing and keep polling, in case one
+            // shows up later.
+            if (apiQuota && apiQuota.error === 'OAuth token not found') {
+                headerQuotaEl.innerHTML = '';
+                return;
+            }
+            breakHeaderQuota((apiQuota && apiQuota.error) || 'unknown error');
+            return;
+        }
+        let html = '';
+        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour);
+        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day);
+        headerQuotaEl.innerHTML = html;
+    }
+
+    function renderHeaderQuotaBar(shortLabel, fullLabel, bucket) {
+        const pct = Math.min(bucket.utilization || 0, 100);
+        const cls = pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
+        let title = `${fullLabel} quota: ${Math.round(pct)}%`;
+        if (bucket.resets_at) {
+            const remaining = new Date(bucket.resets_at) - Date.now();
+            if (remaining > 0) title += `, resets in ${formatDurationHuman(remaining * 1e6)}`;
+        }
+        return `<span class="header-quota-item" title="${esc(title)}">
+            <span class="header-quota-label">${esc(shortLabel)}</span>
+            <span class="header-quota-bar"><span class="header-quota-fill ${cls}" style="width:${pct}%"></span></span>
+            <span class="header-quota-pct">${Math.round(pct)}%</span>
+        </span>`;
+    }
+
+    function startHeaderQuotaPolling() {
+        stopHeaderQuotaPolling();
+        if (headerQuotaBroken) return;
+        headerQuotaInterval = setInterval(loadHeaderQuota, HEADER_QUOTA_POLL_MS);
+    }
+
+    function stopHeaderQuotaPolling() {
+        if (headerQuotaInterval) { clearInterval(headerQuotaInterval); headerQuotaInterval = null; }
+    }
+
+    loadHeaderQuota();
+    startHeaderQuotaPolling();
+
     // --- Tab navigation ---
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', e => {
@@ -41,7 +134,7 @@
         statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
         if (view === 'usage') loadUsage();
-        loadHeaderQuota();
+        if (Date.now() - headerQuotaFetchedAt > HEADER_QUOTA_POLL_MS) loadHeaderQuota();
         window.location.hash = view;
     }
 
@@ -80,7 +173,7 @@
         } else {
             if (Date.now() - claudeStatusFetchedAt > 60000) loadClaudeStatus();
             startClaudeStatusPolling();
-            if (Date.now() - headerQuotaFetchedAt > 60000) loadHeaderQuota();
+            if (Date.now() - headerQuotaFetchedAt > HEADER_QUOTA_POLL_MS) loadHeaderQuota();
             startHeaderQuotaPolling();
         }
     });
@@ -122,82 +215,6 @@
 
     loadClaudeStatus();
     startClaudeStatusPolling();
-
-    // --- Header API quota ---
-    // /api/oauth/usage is an undocumented Anthropic endpoint reported to get
-    // stuck returning 429 for the rest of the session once rate-limited (no
-    // documented safe interval, no recovery). Poll conservatively -- well
-    // above the ~30-60s interval reported to trigger it, and above the
-    // server's own 60s cache TTL so most polls just hit that cache -- but
-    // circuit-break the moment a fetch fails for any reason other than "no
-    // OAuth token configured": stop polling and say so, rather than either
-    // hammering an already-broken endpoint or silently going stale forever
-    // (which a tab left open on a second monitor would otherwise do, since
-    // visibilitychange never fires for a tab that's visible but unfocused).
-    let headerQuotaInterval = null;
-    let headerQuotaFetchedAt = 0;
-    let headerQuotaBroken = false;
-
-    async function loadHeaderQuota() {
-        if (headerQuotaBroken) return;
-        try {
-            const resp = await fetch('/api/quota');
-            renderHeaderQuota(await resp.json());
-            headerQuotaFetchedAt = Date.now();
-        } catch (err) {
-            renderHeaderQuota(null);
-        }
-    }
-
-    function renderHeaderQuota(apiQuota) {
-        if (!headerQuotaEl) return;
-        if (!apiQuota) {
-            headerQuotaEl.innerHTML = '';
-            return;
-        }
-        if (!apiQuota.available) {
-            if (apiQuota.error === 'OAuth token not found') {
-                headerQuotaEl.innerHTML = '';
-                return;
-            }
-            headerQuotaBroken = true;
-            stopHeaderQuotaPolling();
-            headerQuotaEl.innerHTML = `<span class="header-quota-item header-quota-error" title="${esc(apiQuota.error || 'unknown error')}">quota unavailable</span>`;
-            return;
-        }
-        let html = '';
-        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour);
-        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day);
-        headerQuotaEl.innerHTML = html;
-    }
-
-    function renderHeaderQuotaBar(shortLabel, fullLabel, bucket) {
-        const pct = Math.min(bucket.utilization || 0, 100);
-        const cls = pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
-        let title = `${fullLabel} quota: ${Math.round(pct)}%`;
-        if (bucket.resets_at) {
-            const remaining = new Date(bucket.resets_at) - Date.now();
-            if (remaining > 0) title += `, resets in ${formatDurationHuman(remaining * 1e6)}`;
-        }
-        return `<span class="header-quota-item" title="${esc(title)}">
-            <span class="header-quota-label">${esc(shortLabel)}</span>
-            <span class="header-quota-bar"><span class="header-quota-fill ${cls}" style="width:${pct}%"></span></span>
-            <span class="header-quota-pct">${Math.round(pct)}%</span>
-        </span>`;
-    }
-
-    function startHeaderQuotaPolling() {
-        stopHeaderQuotaPolling();
-        if (headerQuotaBroken) return;
-        headerQuotaInterval = setInterval(loadHeaderQuota, 5 * 60 * 1000);
-    }
-
-    function stopHeaderQuotaPolling() {
-        if (headerQuotaInterval) { clearInterval(headerQuotaInterval); headerQuotaInterval = null; }
-    }
-
-    loadHeaderQuota();
-    startHeaderQuotaPolling();
 
     // --- SSE ---
     function connectSSE() {

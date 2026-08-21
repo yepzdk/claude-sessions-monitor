@@ -125,6 +125,25 @@ var apiQuotaCache struct {
 
 const apiQuotaCacheTTL = 60 * time.Second
 
+// version identifies this build in outgoing requests. Set from main's version
+// variable via SetVersion at startup; the default matches main's own so a
+// caller that never sets it still sends something well-formed.
+var version = "dev"
+
+// SetVersion records the build version used in the outgoing User-Agent. Called
+// once from main, which is where the -ldflags-injected version lives.
+func SetVersion(v string) {
+	version = strings.TrimPrefix(v, "v")
+}
+
+// userAgent identifies csm honestly to the Anthropic usage API: what the client
+// is, what version, and where to find it. Requests reach an undocumented
+// endpoint, so being greppable in a server log is the point -- there is no
+// upside to imitating another client.
+func userAgent() string {
+	return "csm/" + version + " (+https://github.com/yepzdk/claude-sessions-monitor)"
+}
+
 // FetchAPIQuota queries the Anthropic usage API for real quota utilization.
 // Results are cached for 60 seconds to avoid excessive API calls.
 func FetchAPIQuota() *APIQuota {
@@ -155,11 +174,7 @@ func fetchAPIQuotaUncached() *APIQuota {
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
-	// This undocumented endpoint puts requests without a claude-cli-shaped
-	// User-Agent into a far more aggressive rate-limit bucket (reports of
-	// requests getting stuck returning 429 for an entire session); the exact
-	// version doesn't appear to matter, just that it looks like a real client.
-	req.Header.Set("User-Agent", "claude-cli/2.1.237 (external, cli)")
+	req.Header.Set("User-Agent", userAgent())
 
 	resp, err := client.Do(req)
 	if err != nil {

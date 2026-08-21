@@ -20,6 +20,10 @@ import (
 var version = "dev"
 
 func main() {
+	// internal/session can't reach main's -ldflags-injected version on its own,
+	// and it needs it to identify csm in outgoing API requests.
+	session.SetVersion(version)
+
 	// Parse flags
 	listOnce := flag.Bool("l", false, "List sessions once and exit")
 	jsonOutput := flag.Bool("json", false, "Output as JSON (requires -l)")
