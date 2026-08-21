@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- History prompt previews no longer end in a broken character when the prompt contains non-ASCII text. The 120-character preview limit now counts characters rather than bytes, so previews are the same length in every language instead of being cut short in Danish, German, CJK and similar. (#68)
 - Sessions in a home directory containing characters other than letters, digits or dashes (e.g. an `@`) no longer all report as Inactive. (#53)
 - A genuinely active session that goes quiet for a while (extended thinking, a long tool call) no longer vanishes from the dashboard or reports as Inactive. (#58)
 - A single unreadable log line no longer discards everything already parsed from that session's log. (#57)

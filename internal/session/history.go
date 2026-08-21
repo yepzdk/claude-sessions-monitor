@@ -365,12 +365,23 @@ func extractQuotedValue(line string, start int) string {
 	return line[start:i]
 }
 
-// truncateString truncates s to maxLen, appending "..." if truncated.
+// truncateString truncates s to a maximum visible length (in runes, not bytes),
+// appending "..." if truncated. Counting runes keeps multi-byte UTF-8 characters
+// from being split mid-character, which would leave a replacement character at
+// the end of the preview. Mirrors ui.truncate, which does the same for display
+// columns.
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // extractTimestampFromLine extracts a timestamp from a JSONL line using fast
