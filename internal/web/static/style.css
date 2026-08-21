@@ -5,7 +5,11 @@
     --bg-card: #1f2335;
     --border: #3b4261;
     --text: #c0caf5;
-    --text-dim: #8993c0;
+    /* Contrast floor is WCAG AA 4.5:1, measured against --bg-hover
+       (#2f3347) -- the lightest surface these land on, since rows and
+       subagents use it while hovered. --text-dim is 4.51:1 there and
+       5.63:1 on a card; --text-muted 5.50:1 and 6.87:1. */
+    --text-dim: #909ac4;
     --text-muted: #a3abce;
     --green: #9ece6a;
     --yellow: #e0af68;
@@ -51,7 +55,10 @@ nav {
 
 .tab {
     padding: 0.375rem 0.75rem;
-    color: var(--text-dim);
+    /* The header is the smallest type in the UI (11-13px) on the lightest
+       chrome, so it sits one tier up from --text-dim: 6.43:1 rather than
+       5.28:1, and an inactive tab stays legible next to the active one. */
+    color: var(--text-muted);
     text-decoration: none;
     font-size: 0.8125rem;
     border-radius: 4px;
@@ -75,7 +82,7 @@ nav {
     align-items: center;
     gap: 0.375rem;
     font-size: 0.6875rem;
-    color: var(--text-dim);
+    color: var(--text-muted);
 }
 
 .header-quota-label {
@@ -122,7 +129,7 @@ nav {
     align-items: center;
     gap: 0.375rem;
     font-size: 0.6875rem;
-    color: var(--text-dim);
+    color: var(--text-muted);
     text-decoration: none;
     transition: color 0.15s;
 }
@@ -605,14 +612,20 @@ main {
     white-space: nowrap;
 }
 
-/* Stopped session cards */
+/* Stopped session cards.
+   A stopped card recedes by sitting flat against the page instead of raised
+   off it like a live one, and says so outright with .stopped-badge. It used
+   to do this with opacity: 0.55, which composites every descendant against
+   the page -- putting --text-dim at 2.67:1 inside these cards, below even the
+   2.76:1 this palette set out to fix, and invisible to any check that reads
+   the colour tokens alone. Recede the surface, not the text. */
 .session-card.stopped {
-    opacity: 0.55;
+    background: var(--bg);
     border-color: var(--border);
 }
 
 .session-card.stopped:hover {
-    opacity: 0.75;
+    background: var(--bg-card);
     border-color: var(--text-dim);
 }
 
