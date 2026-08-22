@@ -84,16 +84,23 @@ func ValidateLogFilePath(filePath string) error {
 }
 
 // ParseTimeline reads a JSONL log file and returns paginated timeline entries.
-// offset is 0-based, limit controls how many entries to return.
+// offset is 0-based, limit controls how many entries to return. entryType keeps
+// only entries of that type; an empty string keeps every type.
 // Returns (entries, totalCount, error).
-func ParseTimeline(logFile string, offset, limit int) ([]TimelineEntry, int, error) {
+//
+// The type filter is applied before paging, so offset and total both count
+// matching entries rather than raw ones. Filtering after paging instead leaves
+// a caller paging through a set it cannot see the size of: user turns are a few
+// percent of a session, so whole pages of raw entries hold none of them and the
+// page a caller asked for comes back empty.
+func ParseTimeline(logFile string, offset, limit int, entryType string) ([]TimelineEntry, int, error) {
 	if err := ValidateLogFilePath(logFile); err != nil {
 		return nil, 0, err
 	}
-	return parseTimelineInternal(logFile, offset, limit)
+	return parseTimelineInternal(logFile, offset, limit, entryType)
 }
 
-func parseTimelineInternal(logFile string, offset, limit int) ([]TimelineEntry, int, error) {
+func parseTimelineInternal(logFile string, offset, limit int, entryType string) ([]TimelineEntry, int, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
 		return nil, 0, err
@@ -117,7 +124,7 @@ func parseTimelineInternal(logFile string, offset, limit int) ([]TimelineEntry, 
 		}
 
 		te := logEntryToTimeline(entry)
-		if te != nil {
+		if te != nil && (entryType == "" || te.Type == entryType) {
 			all = append(all, *te)
 		}
 	}

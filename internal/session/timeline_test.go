@@ -138,7 +138,7 @@ func TestParseTimeline(t *testing.T) {
 	writeLines(t, logFile, lines)
 
 	// Test full fetch (newest first)
-	entries, total, err := parseTimelineFromFile(logFile, 0, 100)
+	entries, total, err := parseTimelineFromFile(logFile, 0, 100, "")
 	if err != nil {
 		t.Fatalf("ParseTimeline failed: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestParseTimeline(t *testing.T) {
 	}
 
 	// Test pagination (offset=1 should be the assistant entry)
-	entries, total, err = parseTimelineFromFile(logFile, 1, 1)
+	entries, total, err = parseTimelineFromFile(logFile, 1, 1, "")
 	if err != nil {
 		t.Fatalf("ParseTimeline paginated failed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestParseTimeline(t *testing.T) {
 	}
 
 	// Test offset beyond range
-	entries, total, err = parseTimelineFromFile(logFile, 100, 10)
+	entries, total, err = parseTimelineFromFile(logFile, 100, 10, "")
 	if err != nil {
 		t.Fatalf("ParseTimeline offset beyond failed: %v", err)
 	}
@@ -250,8 +250,8 @@ func TestLogEntryToTimeline(t *testing.T) {
 }
 
 // parseTimelineFromFile is a helper that bypasses path validation for testing
-func parseTimelineFromFile(logFile string, offset, limit int) ([]TimelineEntry, int, error) {
-	return parseTimelineInternal(logFile, offset, limit)
+func parseTimelineFromFile(logFile string, offset, limit int, entryType string) ([]TimelineEntry, int, error) {
+	return parseTimelineInternal(logFile, offset, limit, entryType)
 }
 
 // parseMetricsFromFile is a helper that bypasses path validation for testing
@@ -278,5 +278,85 @@ func writeLines(t *testing.T, path string, lines []string) {
 		if _, err := f.WriteString(line + "\n"); err != nil {
 			t.Fatalf("write line: %v", err)
 		}
+	}
+}
+
+func TestParseTimelineFiltersByType(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// A session shaped like a real one: user turns are a small fraction of the
+	// entries, and they cluster at the ends rather than spreading evenly. Paging
+	// over raw entries lands on whole pages that hold none of them.
+	var lines []string
+	base := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 60; i++ {
+		typ := "assistant"
+		if i == 0 || i == 59 {
+			typ = "user"
+		}
+		lines = append(lines, mustJSON(LogEntry{
+			Type:      typ,
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Message:   &Message{Role: typ, Content: []ContentItem{{Type: "text", Text: "x"}}},
+		}))
+	}
+
+	logFile := filepath.Join(tmpDir, "filtered.jsonl")
+	writeLines(t, logFile, lines)
+
+	// Unfiltered, a page taken from the middle is where the bug shows: entries
+	// come back newest-first, the two user turns sit at either end, and a page
+	// of 50 between them is all assistant entries -- so a caller filtering
+	// client-side clicks "load more" and sees nothing appear.
+	entries, total, err := parseTimelineFromFile(logFile, 5, 50, "")
+	if err != nil {
+		t.Fatalf("unfiltered parse failed: %v", err)
+	}
+	if total != 60 {
+		t.Errorf("unfiltered total = %d, want 60", total)
+	}
+	for _, e := range entries {
+		if e.Type == "user" {
+			t.Fatalf("expected no user entries on the second raw page, got %q", e.Type)
+		}
+	}
+
+	// Filtered, total counts matching entries and the first page holds them all.
+	entries, total, err = parseTimelineFromFile(logFile, 0, 50, "user")
+	if err != nil {
+		t.Fatalf("filtered parse failed: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("filtered total = %d, want 2", total)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	for _, e := range entries {
+		if e.Type != "user" {
+			t.Errorf("entry type = %q, want %q", e.Type, "user")
+		}
+	}
+
+	// And paging stays inside the filtered set rather than the raw one.
+	entries, total, err = parseTimelineFromFile(logFile, 2, 50, "user")
+	if err != nil {
+		t.Fatalf("filtered page-beyond parse failed: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("filtered total = %d, want 2", total)
+	}
+	if len(entries) != 0 {
+		t.Errorf("len(entries) = %d, want 0 past the end of the filtered set", len(entries))
+	}
+
+	// An unknown type is the handler's job to reject; the parser takes it
+	// literally and matches nothing.
+	_, total, err = parseTimelineFromFile(logFile, 0, 50, "nonesuch")
+	if err != nil {
+		t.Fatalf("unknown-type parse failed: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("unknown-type total = %d, want 0", total)
 	}
 }

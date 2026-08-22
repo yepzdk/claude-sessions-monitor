@@ -583,6 +583,15 @@
     let timelineEntries = [];
     let currentLogFile = '';
     let timelineFilter = 'all'; // all, assistant, user
+    // Changing the filter starts a new fetch, and 'all' mode fetches in a loop,
+    // so a load can still be running when the next one starts. Only the newest
+    // one is allowed to write to the timeline state.
+    let timelineLoadToken = 0;
+    let timelineError = '';
+    // The same guard for the metrics panel, which openDetail loads alongside
+    // the timeline: opening session A and switching to B before A's request
+    // lands would otherwise render A's metrics under B's title.
+    let metricsLoadToken = 0;
     let timelineLoadMoreClicks = 0;
 
     function openDetail(logFile, project) {
@@ -620,102 +629,213 @@
     });
 
     async function loadMetrics(logFile) {
+        const token = ++metricsLoadToken;
         detailMetrics.innerHTML = '<div class="loading">Loading metrics...</div>';
         try {
             const resp = await fetch(`/api/sessions/metrics?file=${encodeURIComponent(logFile)}`);
             if (!resp.ok) throw new Error(await resp.text());
             const m = await resp.json();
+            if (token !== metricsLoadToken) return;
             renderMetrics(m);
         } catch (err) {
+            if (token !== metricsLoadToken) return;
             detailMetrics.innerHTML = `<div class="empty-state">Failed to load metrics</div>`;
         }
+    }
+
+    // The four kinds of token a session spends. Fixed order, fixed colour --
+    // a slot never changes hue because a value is zero or the list is filtered.
+    // Colours are the Tokyo Night hues stepped down into the band that reads on
+    // the panel surface; yellow is deliberately absent, because yellow against
+    // green is the pair a deuteranopic reader cannot separate.
+    const TOKEN_KINDS = [
+        { key: 'total_cache_read_tokens', label: 'Cache read', color: '#9f7ed8' },
+        { key: 'total_cache_creation_tokens', label: 'Cache create', color: '#d3763b' },
+        { key: 'total_output_tokens', label: 'Output', color: '#698fe3' },
+        { key: 'total_input_tokens', label: 'Input', color: '#75a33e' },
+    ];
+
+    // splitToolName separates an MCP tool id into the tool and the server that
+    // provides it: mcp__claude-in-chrome__navigate -> navigate, claude-in-chrome.
+    // A built-in tool (Bash, Write) has no server part.
+    //
+    // The id is mcp__<server>__<tool>, and neither half is forbidden from
+    // containing __ itself, so with more than two separators the split is a
+    // guess. It splits on the last one, which keeps a server id containing __
+    // whole: server ids are user-chosen configuration keys, while tool names
+    // come from the server's own API and have not been seen to contain __.
+    function splitToolName(name) {
+        const m = /^mcp__(.+)__(.+)$/.exec(name);
+        return m ? { tool: m[2], server: m[1] } : { tool: name, server: '' };
+    }
+
+    // formatShare renders a part of a whole as a percentage that never overstates
+    // it. Shares are floored rather than rounded, so a 99.96% cache read does not
+    // print as 100.0% beside three siblings that are visibly non-zero. Every row
+    // is then a lower bound -- the claim "<0.1" already makes -- and the column
+    // cannot sum past the whole.
+    function formatShare(value, total) {
+        const share = (value / total) * 100;
+        if (value > 0 && share < 0.1) return '<0.1%';
+        return (Math.floor(share * 10) / 10).toFixed(1) + '%';
     }
 
     function renderMetrics(m) {
         const duration = m.last_timestamp && m.first_timestamp
             ? formatDuration((new Date(m.last_timestamp) - new Date(m.first_timestamp)) * 1000000)
             : '-';
-        const totalTokens = m.total_input_tokens + m.total_output_tokens + m.total_cache_creation_tokens + m.total_cache_read_tokens;
+        const totalTokens = TOKEN_KINDS.reduce((sum, k) => sum + (m[k.key] || 0), 0);
 
-        let html = `<div class="metrics-grid">
-            <div class="metric-card"><div class="metric-label">Turns</div><div class="metric-value blue">${m.turn_count}</div></div>
-            <div class="metric-card metric-clickable" data-action="show-user-prompts" title="Show user prompts in timeline"><div class="metric-label">User Prompts</div><div class="metric-value green">${m.user_prompt_count}</div></div>
-            <div class="metric-card"><div class="metric-label">Tool Results</div><div class="metric-value">${m.tool_result_count}</div></div>
-            <div class="metric-card"><div class="metric-label">Assistant Messages</div><div class="metric-value purple">${m.assistant_message_count}</div></div>
-            <div class="metric-card"><div class="metric-label">Duration</div><div class="metric-value">${duration}</div></div>
-            <div class="metric-card"><div class="metric-label">Total Tokens</div><div class="metric-value yellow">${fmtNum(totalTokens)}</div></div>
-            <div class="metric-card"><div class="metric-label">Context Usage</div><div class="metric-value ${m.context_percent > 90 ? 'yellow' : 'green'}">${Math.round(m.context_percent)}%</div></div>
-            ${m.compact_count > 0 ? `<div class="metric-card"><div class="metric-label">Compactions</div><div class="metric-value">${m.compact_count}</div></div>` : ''}
-        </div>`;
+        // Context usage is the one metric here with a consequence -- the session
+        // compacts as it approaches the limit -- so it leads, as a figure with a
+        // meter. Everything else is volume, and reads as supporting detail.
+        const pct = Math.min(Math.max(m.context_percent || 0, 0), 100);
+        const severity = pct > 90 ? 'danger' : pct > 75 ? 'warning' : 'ok';
 
-        html += `<div class="token-breakdown"><h3>Token Breakdown</h3>`;
-        const bars = [
-            { label: 'Input', value: m.total_input_tokens, color: 'var(--blue)' },
-            { label: 'Output', value: m.total_output_tokens, color: 'var(--green)' },
-            { label: 'Cache Create', value: m.total_cache_creation_tokens, color: 'var(--yellow)' },
-            { label: 'Cache Read', value: m.total_cache_read_tokens, color: 'var(--purple)' },
-        ];
-        bars.forEach(b => {
-            const pct = totalTokens > 0 ? (b.value / totalTokens) * 100 : 0;
-            // A proportional width alone can round a real but tiny share (e.g. input
-            // tokens next to cache reads) down to sub-pixel -- indistinguishable from
-            // zero. Floor it so any nonzero value stays visible.
-            const width = b.value > 0 ? `max(3px, ${pct}%)` : '0';
-            html += `<div class="token-bar-row">
-                <span class="token-bar-label">${b.label}</span>
-                <div class="token-bar-track"><div class="token-bar-fill" style="width:${width};background:${b.color}"></div></div>
-                <span class="token-bar-value">${fmtNum(b.value)}</span>
-            </div>`;
-        });
-        html += '</div>';
+        // Colour is the only thing separating ok from warning from danger, so the
+        // state has to be said in words somewhere too. The meter says it: it is
+        // the one element reporting both the value and what the value means. The
+        // figure beside it is that same number again, so it stays out of the
+        // accessibility tree rather than being announced twice.
+        const severityText = { ok: 'normal', warning: 'high', danger: 'critical' }[severity];
+        const shownPct = Math.round(pct);
+        let html = `<section class="metrics-lead">
+            <div class="lead-figure" aria-hidden="true">
+                <div class="lead-label">Context used</div>
+                <div class="lead-value ${severity}">${shownPct}<span class="lead-unit">%</span></div>
+            </div>
+            <div class="lead-meter">
+                <div class="meter-track" role="progressbar" aria-label="Context used"
+                     aria-valuemin="0" aria-valuemax="100" aria-valuenow="${shownPct}"
+                     aria-valuetext="${shownPct}% of context used, ${severityText}">
+                    <div class="meter-fill ${severity}" style="width:${pct}%"></div>
+                </div>
+                <div class="lead-support">
+                    <span><b>${esc(duration)}</b> elapsed</span>
+                    <span><b>${fmtNum(totalTokens)}</b> tokens</span>
+                    ${m.compact_count > 0 ? `<span><b>${m.compact_count}</b> compaction${m.compact_count === 1 ? '' : 's'}</span>` : ''}
+                </div>
+            </div>
+        </section>`;
 
-        // Tool usage
+        // Counts describe volume, not state, so they carry no colour and no card
+        // of their own -- one line, in the order a turn actually happens.
+        //
+        // A count is a button when the timeline can filter to what it counts,
+        // and plain text otherwise. Turns and tool results have no matching
+        // filter, so nothing about them is clickable.
+        html += `<section class="metrics-counts">
+            <span class="count"><b>${m.turn_count}</b> turns</span>
+            ${countButton(m.user_prompt_count, 'prompts', 'user')}
+            ${countButton(m.assistant_message_count, 'replies', 'assistant')}
+            <span class="count"><b>${m.tool_result_count}</b> tool results</span>
+        </section>`;
+
+        // Part-to-whole, so one stacked bar rather than four independent bars.
+        // A session is routinely 99% cache reads, so the small kinds render as
+        // slivers or as nothing at all. That is the true shape, and padding them
+        // to a minimum width would misstate the total -- the legend below carries
+        // the exact value and share for every kind, including the invisible ones.
+        if (totalTokens > 0) {
+            html += `<section class="token-composition">
+                <h3>Token composition</h3>
+                <div class="token-stack">`;
+            TOKEN_KINDS.forEach(k => {
+                const v = m[k.key] || 0;
+                if (v <= 0) return;
+                html += `<span class="token-seg" style="flex-basis:${(v / totalTokens) * 100}%;background:${k.color}"></span>`;
+            });
+            html += `</div><ul class="token-legend">`;
+            TOKEN_KINDS.forEach(k => {
+                const v = m[k.key] || 0;
+                html += `<li>
+                    <span class="token-key" style="background:${k.color}"></span>
+                    <span class="token-name">${esc(k.label)}</span>
+                    <span class="token-value">${fmtNum(v)}</span>
+                    <span class="token-share">${formatShare(v, totalTokens)}</span>
+                </li>`;
+            });
+            html += `</ul></section>`;
+        }
+
+        // Tools are listed by the name a person recognises. The MCP server that
+        // provides the tool is a separate, quieter label -- it groups the rows
+        // without taking the width the tool name needs.
         const tools = Object.entries(m.tool_usage_counts || {}).sort((a, b) => b[1] - a[1]);
         if (tools.length > 0) {
-            html += `<div class="tool-usage"><h3>Tool Usage</h3><div class="tool-list">`;
+            const max = tools[0][1];
+            html += `<section class="tool-usage"><h3>Tools</h3><ul class="tool-list">`;
             tools.forEach(([name, count]) => {
-                html += `<span class="tool-chip"><span class="tool-name">${esc(name)}</span><span class="tool-count">${count}</span></span>`;
+                const { tool, server } = splitToolName(name);
+                // Every row emits the server cell, empty or not. The list is one
+                // grid, so a row that skipped a cell would slide its bar out of
+                // the shared column.
+                html += `<li class="tool-row">
+                    <span class="tool-name">${esc(tool)}</span>
+                    <span class="tool-count">${count}</span>
+                    <span class="tool-server">${server ? esc(server) : ''}</span>
+                    <span class="tool-bar"><span class="tool-bar-fill" style="width:${(count / max) * 100}%"></span></span>
+                </li>`;
             });
-            html += '</div></div>';
+            html += '</ul></section>';
         }
 
         detailMetrics.innerHTML = html;
 
-        const userPromptsCard = detailMetrics.querySelector('[data-action="show-user-prompts"]');
-        if (userPromptsCard) {
-            userPromptsCard.addEventListener('click', showUserPromptsTimeline);
-        }
+        detailMetrics.querySelectorAll('[data-timeline-filter]').forEach(btn => {
+            btn.addEventListener('click', () => showFilteredTimeline(btn.dataset.timelineFilter));
+        });
     }
 
-    function showUserPromptsTimeline() {
+    // countButton renders a count that opens the timeline filtered to the
+    // entries it counts. label is what the count is called; filter is the
+    // timeline type that holds those entries.
+    function countButton(value, label, filter) {
+        return `<button type="button" class="count count-action" data-timeline-filter="${filter}" title="Show ${label} in timeline">
+                <b>${value}</b> ${label}
+            </button>`;
+    }
+
+    function showFilteredTimeline(filter) {
         document.querySelectorAll('.detail-tab').forEach(t => {
             t.classList.toggle('active', t.dataset.detail === 'timeline');
         });
         detailMetrics.classList.remove('active');
         detailTimeline.classList.add('active');
 
-        timelineFilter = 'user';
+        timelineFilter = filter;
         loadTimeline(currentLogFile, true, 'page').then(() => {
             detailTimeline.scrollTop = 0;
         });
     }
 
     async function loadTimeline(logFile, reset, mode = 'page') {
+        const token = ++timelineLoadToken;
         if (reset) {
             timelineOffset = 0;
+            timelineTotal = 0;
             timelineEntries = [];
             timelineLoadMoreClicks = 0;
             detailTimeline.innerHTML = '<div class="loading">Loading timeline...</div>';
         }
 
+        // The server pages in filtered space, so the filter travels with every
+        // request. Asking it for one type and paging over all of them is what
+        // made "Load more" land on stretches with nothing to show.
+        const typeParam = timelineFilter === 'all' ? '' : `&type=${encodeURIComponent(timelineFilter)}`;
+
         const SERVER_MAX = 500;
+        timelineError = '';
         try {
             do {
-                const remaining = Math.max(1, timelineTotal - timelineOffset);
+                // Before the first response the total is unknown, so ask for a
+                // full page rather than deriving a size from a total of zero.
+                const remaining = timelineTotal > 0 ? Math.max(1, timelineTotal - timelineOffset) : SERVER_MAX;
                 const limit = mode === 'all' ? Math.min(SERVER_MAX, remaining) : 50;
-                const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}`);
+                const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`);
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
+                if (token !== timelineLoadToken) return;
                 timelineTotal = data.total;
                 const batch = data.entries || [];
                 timelineEntries = timelineEntries.concat(batch);
@@ -724,16 +844,13 @@
             } while (mode === 'all' && timelineOffset < timelineTotal);
             renderTimeline();
         } catch (err) {
-            detailTimeline.innerHTML = `<div class="empty-state">Failed to load timeline</div>`;
+            if (token !== timelineLoadToken) return;
+            timelineError = 'Failed to load timeline';
+            renderTimeline();
         }
     }
 
     function renderTimeline() {
-        if (timelineEntries.length === 0) {
-            detailTimeline.innerHTML = '<div class="empty-state">No entries</div>';
-            return;
-        }
-
         const filters = ['all', 'assistant', 'user'];
         let html = '<div class="timeline-filters">';
         filters.forEach(f => {
@@ -742,16 +859,23 @@
         });
         html += '</div>';
 
-        const filtered = timelineFilter === 'all'
-            ? timelineEntries
-            : timelineEntries.filter(e => e.type === timelineFilter);
-
-        if (filtered.length === 0) {
-            html += '<div class="empty-state">No matching entries</div>';
+        // The filter bar renders even when there is nothing to list under it.
+        // timelineEntries now holds only what the active filter matched, so an
+        // empty set usually means "none of this type" rather than "empty
+        // session" -- and taking the panel away would remove the only control
+        // that can pick a different type. Same for a failed load: a filter click
+        // sends a request now, so it can fail, and wiping the bar would leave
+        // nothing to retry with.
+        if (timelineError) {
+            html += `<div class="empty-state">${esc(timelineError)}</div>`;
+        } else if (timelineEntries.length === 0) {
+            html += timelineFilter === 'all'
+                ? '<div class="empty-state">No entries</div>'
+                : '<div class="empty-state">No matching entries</div>';
         }
 
         html += '<div class="timeline">';
-        filtered.forEach(e => {
+        timelineEntries.forEach(e => {
             const cls = e.type;
             const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
 
@@ -808,8 +932,12 @@
 
         detailTimeline.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                if (btn.dataset.filter === timelineFilter) return;
                 timelineFilter = btn.dataset.filter;
-                renderTimeline();
+                // offset and total are counts of matching entries, so they mean
+                // something different under a different filter. Page from the
+                // start rather than carrying a position across.
+                loadTimeline(currentLogFile, true);
             });
         });
 
