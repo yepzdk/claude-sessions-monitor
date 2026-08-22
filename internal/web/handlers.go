@@ -157,7 +157,17 @@ func handleTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entries, total, err := session.ParseTimeline(filePath, offset, limit)
+	// Only the types the timeline actually renders are honoured. An unrecognised
+	// value would otherwise filter every entry out and report an empty session,
+	// which reads as a broken log rather than a bad query.
+	entryType := r.URL.Query().Get("type")
+	switch entryType {
+	case "user", "assistant", "system", "summary":
+	default:
+		entryType = ""
+	}
+
+	entries, total, err := session.ParseTimeline(filePath, offset, limit, entryType)
 	if err != nil {
 		writeError(w, "failed to parse timeline", http.StatusBadRequest)
 		return
@@ -168,6 +178,7 @@ func handleTimeline(w http.ResponseWriter, r *http.Request) {
 		"total":   total,
 		"offset":  offset,
 		"limit":   limit,
+		"type":    entryType,
 	})
 }
 

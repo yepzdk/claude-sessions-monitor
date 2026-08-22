@@ -923,119 +923,226 @@ main {
 .detail-content.active { display: block; }
 
 /* Metrics */
-.metrics-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 0.75rem;
-    margin-bottom: 1.25rem;
-}
-
-.metric-card {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.75rem;
-}
-
-.metric-card.metric-clickable {
-    cursor: pointer;
-    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-}
-
-.metric-card.metric-clickable:hover {
-    background: var(--bg-hover);
-    border-color: var(--green);
-    transform: translateY(-1px);
-}
-
-.metric-label {
-    font-size: 0.6875rem;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.25rem;
-}
-
-.metric-value {
-    font-size: 1.25rem;
-    font-weight: 700;
-}
-
-.metric-value.green { color: var(--green); }
-.metric-value.blue { color: var(--blue); }
-.metric-value.yellow { color: var(--yellow); }
-.metric-value.purple { color: var(--purple); }
-
-.token-breakdown {
-    margin-top: 1.25rem;
-}
-
-.token-breakdown h3 {
-    font-size: 0.8125rem;
-    margin-bottom: 0.75rem;
-}
-
-.token-bar-row {
+/* --- Metrics panel ---------------------------------------------------------
+   Context usage leads as a figure with a meter: it is the only metric here that
+   carries a consequence, because the session compacts as it nears the limit.
+   Colour is reserved for that state. Every other number is volume, and wears
+   text ink so the one coloured figure keeps its meaning. */
+.metrics-lead {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: 1.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.lead-label {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.125rem;
+}
+
+/* Proportional figures, not tabular: this is a standalone display number, and
+   tabular digits set it loose at this size. */
+.lead-value {
+    font-size: 3rem;
+    line-height: 1;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.lead-unit {
+    font-size: 1.25rem;
+    font-weight: 400;
+    margin-left: 0.125rem;
+    color: var(--text-muted);
+}
+
+.lead-value.ok { color: var(--green); }
+.lead-value.warning { color: var(--yellow); }
+.lead-value.danger { color: var(--red); }
+
+.lead-meter { flex: 1; min-width: 0; }
+
+/* The unfilled track is a step of the same ramp, so the state reads across the
+   whole bar and not only across the filled part. */
+.meter-track {
+    height: 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.625rem;
+}
+
+.meter-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.meter-fill.ok { background: var(--green); }
+.meter-fill.warning { background: var(--yellow); }
+.meter-fill.danger { background: var(--red); }
+
+.lead-support {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+}
+
+.lead-support b { color: var(--text); font-weight: 700; }
+
+.metrics-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    padding: 0.875rem 0 1.25rem;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+}
+
+.count b {
+    color: var(--text);
+    font-weight: 700;
+    margin-right: 0.25rem;
+}
+
+.count-action {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 1px dashed var(--text-dim);
+}
+
+.count-action:hover { color: var(--text); border-bottom-color: var(--green); }
+
+.token-composition, .tool-usage { margin-bottom: 1.5rem; }
+
+.token-composition h3, .tool-usage h3 {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.625rem;
+}
+
+/* One stacked bar, because the four kinds are parts of one total. The 2px gap
+   is the surface showing through -- it is what separates touching segments, so
+   no segment needs a border. */
+.token-stack {
+    display: flex;
+    gap: 2px;
+    height: 14px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--bg);
+}
+
+.token-seg { flex-grow: 0; flex-shrink: 1; }
+
+/* The legend is the precision channel. A session is routinely almost all cache
+   reads, so the smaller kinds are slivers or nothing in the bar; their exact
+   value and share live here instead. */
+/* One row per kind, and one grid for the whole legend rather than a grid per
+   row -- the values and shares have to line up as columns to be comparable.
+   Every column is sized to its content and the set is packed left, so a kind's
+   name, value and share stay together as one reading unit. A 1fr name column
+   pushed the numbers to the far edge of the panel, leaving the eye to travel
+   the width of the panel to pair a label with its value. */
+.token-legend {
+    display: grid;
+    grid-template-columns: 10px auto auto auto;
+    justify-content: start;
+    align-items: center;
+    gap: 0.375rem 0.5rem;
+    list-style: none;
+    margin-top: 0.75rem;
     font-size: 0.75rem;
 }
 
-.token-bar-label {
-    width: 8rem;
-    color: var(--text-muted);
-    text-align: right;
+.token-legend li { display: contents; }
+
+.token-key {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
     flex-shrink: 0;
 }
 
-.token-bar-track {
-    flex: 1;
-    height: 8px;
-    background: var(--border);
-    border-radius: 4px;
+.token-name { color: var(--text-muted); }
+.token-value { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; padding-left: 0.75rem; }
+.token-share { color: var(--text-dim); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Tools are ranked, so they are rows with a magnitude bar rather than chips of
+   equal weight. One hue: the bar carries how much, not which. */
+/* The count sits with the name rather than at the far edge, for the reason the
+   token legend packs left: a row whose label and value are a panel apart makes
+   the eye travel to pair them. The bar cannot do that pairing -- a count of 1
+   renders a sliver, so the smallest rows are exactly the ones it strands.
+   The server chip follows the count rather than sitting between it and the
+   name: it is provenance, not a second value, and in the middle it was the
+   widest thing separating a tool from its number. The bar takes the remaining
+   width, which leaves it the pure magnitude channel, and every bar still
+   starts at the same x because the columns before it are shared across rows
+   -- lengths stay comparable. */
+.tool-list {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) 2.5em auto 1fr;
+    align-items: center;
+    gap: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+}
+
+.tool-row { display: contents; }
+
+.tool-row .tool-name {
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tool-server {
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    justify-self: start;
+}
+
+.tool-server:not(:empty) {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 0.3rem;
+}
+
+.tool-bar {
+    min-width: 2rem;
+    height: 6px;
+    background: var(--bg);
+    border-radius: 3px;
     overflow: hidden;
 }
 
-.token-bar-fill {
+.tool-bar-fill {
     display: block;
     height: 100%;
-    border-radius: 4px;
+    background: var(--blue);
+    border-radius: 3px;
 }
 
-.token-bar-value {
-    width: 5rem;
-    color: var(--text-dim);
-    font-size: 0.6875rem;
-    flex-shrink: 0;
+.tool-count {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
 }
-
-.tool-usage {
-    margin-top: 1.25rem;
-}
-
-.tool-usage h3 {
-    font-size: 0.8125rem;
-    margin-bottom: 0.75rem;
-}
-
-.tool-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.375rem;
-}
-
-.tool-chip {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-}
-
-.tool-chip .tool-name { color: var(--cyan); }
-.tool-chip .tool-count { color: var(--text-dim); margin-left: 0.25rem; }
 
 /* Timeline filters */
 .timeline-filters {
@@ -1178,5 +1285,5 @@ main {
     .session-context { display: none; }
     .detail-panel { margin: 0; max-height: 100vh; border-radius: 0; }
     .detail-overlay { padding: 0; }
-    .metrics-grid { grid-template-columns: 1fr 1fr; }
+    .metrics-lead { flex-direction: column; align-items: stretch; gap: 0.875rem; }
 }

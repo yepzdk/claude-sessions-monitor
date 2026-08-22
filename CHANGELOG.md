@@ -15,13 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `/api/quota` endpoint returning just the API quota, for callers that don't need the full local-usage log scan `/api/usage` also does
 - API quota requests now identify csm with a `User-Agent` of `csm/<version> (+<repo url>)`, instead of going out unlabelled
 
+### Changed
+
+- Web dashboard: the session Metrics panel now leads with context usage as a figure and a meter, because it is the only metric there with a consequence. The volume counts follow as one line, where prompts and replies open the timeline filtered to those entries, and colour is reserved for state instead of marking card categories
+- Web dashboard: the token breakdown is now one stacked bar of the session total, with a legend carrying each exact value and share, instead of four independent bars — which were log-scaled, so a negligible value could render with a bar nearly as long as one orders of magnitude larger. Its colours were re-picked: the previous green and yellow were indistinguishable to a reader with deuteranopia
+- Web dashboard: the tool list is now ranked rows sharing one bar baseline, so the counts are comparable by length. The count sits beside the tool name rather than at the far edge of the panel, and MCP tool ids are split so the tool name leads and the server follows as a separate label
+
 ### Fixed
 
+- Web dashboard: opening a session and switching to another before the first one's metrics arrive no longer renders the first session's numbers under the second one's title
+- Web dashboard: the timeline's type filter is now applied server-side, so `Load more` pages through matching entries instead of raw ones. Filtering to User and clicking `Load more` often did nothing visible: user turns are a few percent of a session, so whole pages of raw entries contained none of them, and the button counted raw entries either way
 - History prompt previews no longer show raw `<local-command-caveat>`/`<command-name>` scaffolding or literal `\n` escapes for sessions started via a slash or local command; the preview now shows the command itself, and JSON string escapes are properly decoded
 - Web dashboard: undefined `--muted` CSS variable (three spots) now correctly resolves to `--text-muted`, so quoted session titles and the extended-context model badge render at their intended dimmed color instead of full brightness
 - Web dashboard: dimmed text now meets WCAG AA (4.5:1) on every surface it actually renders on, not just the card background. `--text-dim`/`--text-muted` were as low as 2.76:1; the header's small type moved up a tier so an inactive tab reads at 6.43:1 instead of 5.28:1
 - Web dashboard: stopped session cards no longer use a blanket `opacity`, which composited every row inside them against the page and left their text at 2.67:1 — below the contrast the rest of the palette guarantees. They now recede by sitting flat against the page background instead, and the text keeps its normal contrast
-- Web dashboard: the per-session Token Breakdown chart is no longer silently log-scaled, which could make a negligible value (e.g. input tokens) render with a bar nearly as long as a value orders of magnitude larger (e.g. cache reads); it's now proportional to the session total, with a minimum-width floor so small nonzero values stay visible
 - Web dashboard: the embedded HTML/CSS/JS assets are now served with `Cache-Control: no-cache`; previously `embed.FS`'s zero mod-time could make browsers cache them indefinitely across `csm` upgrades
 - Web dashboard: a subagent row with only a spawn label (no status message yet) no longer renders with an empty title line and the label stranded on its own second line
 
