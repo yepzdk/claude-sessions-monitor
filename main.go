@@ -352,7 +352,7 @@ func handleKillGhosts() {
 	}
 	fmt.Println()
 
-	killed, err := session.KillGhostProcesses()
+	killed, failed, err := session.KillGhostProcesses()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error killing ghost processes: %v\n", err)
 		os.Exit(1)
@@ -362,6 +362,14 @@ func handleKillGhosts() {
 		fmt.Println("No processes were terminated (they may have already exited).")
 	} else {
 		fmt.Printf("Terminated %d ghost process(es).\n", len(killed))
+	}
+
+	for _, f := range failed {
+		fmt.Fprintf(os.Stderr, "  could not signal PID %d (%s): %v\n",
+			f.Ghost.PID, f.Ghost.Project, f.Err)
+	}
+	if len(failed) > 0 {
+		os.Exit(1)
 	}
 }
 

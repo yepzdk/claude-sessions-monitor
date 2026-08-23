@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -937,9 +938,15 @@ func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 	return family, maj, min, true
 }
 
-// GhostThreshold is the duration after which a running process with no log activity
-// is considered a ghost (orphaned) process
-const GhostThreshold = 10 * time.Minute
+// GhostThreshold is how long a running process's log must be silent before
+// --kill-ghosts will offer to terminate it.
+//
+// An hour is deliberately far beyond any normal pause. The cost of the two
+// mistakes is not symmetric: waiting longer to reap an orphan costs some idle
+// memory, while reaping too early kills a session someone is using. A model
+// can sit on a single long tool call, and a user can leave a session open over
+// lunch, without either being abandoned.
+const GhostThreshold = time.Hour
 
 // recentActivityWindow bounds every "Working" inference in determineStatus: a
 // tool result, user prompt, assistant message, or progress heartbeat only counts
@@ -1193,29 +1200,43 @@ type GhostProcess struct {
 	Age     time.Duration
 }
 
-// FindGhostProcesses returns a list of potentially orphaned Claude processes
-// Uses a 1-hour threshold to identify processes with no recent log activity
+// FindGhostProcesses returns Claude processes that are running but whose log
+// has been silent for longer than GhostThreshold.
 func FindGhostProcesses() ([]GhostProcess, error) {
 	sessions, err := Discover()
 	if err != nil {
 		return nil, err
 	}
+	return ghostsFrom(sessions), nil
+}
 
+// ghostsFrom selects the stale sessions whose pid is certainly their own.
+//
+// Staleness is a property of the log, but the pid is paired to that log by
+// position: logs arrive sorted newest-first while pids arrive in ps order, and
+// the two orderings have no relationship. In a directory running one Claude the
+// pairing is the only one available and therefore correct; with several, the
+// stale log can carry the busy process's pid. Since the caller sends SIGTERM to
+// whatever this returns, an unconfident pairing is not "some pid for this
+// directory" -- it is a coin flip over which session dies.
+func ghostsFrom(sessions []Session) []GhostProcess {
 	var ghosts []GhostProcess
 	seenPIDs := make(map[int]bool)
 	for _, s := range sessions {
-		// Only consider sessions with a running process
 		if s.GhostPID == 0 {
 			continue
 		}
-		// Deduplicate PIDs (multiple sessions in same project may reference same PID)
+		if !s.PIDConfident {
+			continue
+		}
+		// Several sessions in one project can resolve to the same process.
 		if seenPIDs[s.GhostPID] {
 			continue
 		}
 		seenPIDs[s.GhostPID] = true
-		// Check if log is stale (> 1 hour since last activity)
+
 		age := time.Since(s.LastActivity)
-		if age > time.Hour {
+		if age > GhostThreshold {
 			ghosts = append(ghosts, GhostProcess{
 				PID:     s.GhostPID,
 				Project: s.Project,
@@ -1223,8 +1244,7 @@ func FindGhostProcesses() ([]GhostProcess, error) {
 			})
 		}
 	}
-
-	return ghosts, nil
+	return ghosts
 }
 
 // isClaudeProcess checks whether the given PID belongs to a process named "claude".
@@ -1238,37 +1258,51 @@ func isClaudeProcess(pid int) bool {
 	return strings.HasSuffix(comm, "claude")
 }
 
-// KillGhostProcesses terminates all ghost Claude processes
-// Returns the number of processes killed and any errors
-func KillGhostProcesses() ([]GhostProcess, error) {
+// KillGhostProcesses sends SIGTERM to every ghost process.
+//
+// It returns the processes it terminated and, separately, the ones it could
+// not. A process that refuses the signal (it belongs to another user, or it is
+// protected) is not the same as one that had already exited, and a command
+// whose whole job is killing things should not report a shortfall it declines
+// to explain.
+func KillGhostProcesses() (killed []GhostProcess, failed []GhostKillFailure, err error) {
 	ghosts, err := FindGhostProcesses()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	var killed []GhostProcess
 	for _, ghost := range ghosts {
-		// Verify the PID still belongs to a claude process (guards against PID reuse)
+		// The pid may have been recycled by an unrelated process since Discover.
 		if !isClaudeProcess(ghost.PID) {
 			continue
 		}
 
-		// Send SIGTERM to gracefully terminate the process
-		process, err := os.FindProcess(ghost.PID)
-		if err != nil {
+		process, findErr := os.FindProcess(ghost.PID)
+		if findErr != nil {
+			failed = append(failed, GhostKillFailure{Ghost: ghost, Err: findErr})
 			continue
 		}
 
-		err = process.Signal(syscall.SIGTERM)
-		if err != nil {
-			// Process might already be gone
+		if sigErr := process.Signal(syscall.SIGTERM); sigErr != nil {
+			// ESRCH means it exited on its own between listing and signalling,
+			// which is the one failure that needs no explanation.
+			if !errors.Is(sigErr, os.ErrProcessDone) && !errors.Is(sigErr, syscall.ESRCH) {
+				failed = append(failed, GhostKillFailure{Ghost: ghost, Err: sigErr})
+			}
 			continue
 		}
 
 		killed = append(killed, ghost)
 	}
 
-	return killed, nil
+	return killed, failed, nil
+}
+
+// GhostKillFailure is a ghost process that would not accept SIGTERM, paired
+// with the reason.
+type GhostKillFailure struct {
+	Ghost GhostProcess
+	Err   error
 }
 
 // FormatAge formats a duration as a human-readable age string
