@@ -43,6 +43,10 @@ type Session struct {
 	IsGhost      bool      `json:"is_ghost,omitempty"`   // True if process running but log is stale
 	GhostPID     int       `json:"ghost_pid,omitempty"`  // PID of the ghost process (for killing)
 	PIDConfident bool      `json:"-"`                    // True when GhostPID is certainly this session's process, not a positional guess
+	// ContextWindow is the model's context size in tokens. The dashboard needs
+	// the decision, not the model id: reimplementing the id parsing in
+	// JavaScript let the two disagree about the same session.
+	ContextWindow int `json:"context_window,omitempty"`
 	// Degraded names the reason this session's log could not be read in full.
 	// Empty means the data below is complete. Anything else means some of it
 	// is missing, and the UI marks the row so the numbers are not read as
@@ -720,6 +724,9 @@ func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fil
 	session.ContextPercent = pl.contextPercent
 	session.ContextTokens = pl.contextTokens
 	session.Model = pl.model
+	if pl.model != "" {
+		session.ContextWindow = contextWindowForModel(pl.model)
+	}
 
 	// Time-relative + running-dependent: must be recomputed each call.
 	session.Status, session.Task = determineStatus(pl.entries, isRunning, fileModTime)

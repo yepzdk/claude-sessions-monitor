@@ -470,20 +470,34 @@ func extractTimestampFromLine(line string) time.Time {
 	return ts
 }
 
-// GetDateGroup returns a human-readable date group for a session
+// GetDateGroup returns a human-readable date group for a session.
 func GetDateGroup(t time.Time) string {
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	sessionDate := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	return getDateGroupAt(time.Now(), t)
+}
 
-	days := int(today.Sub(sessionDate).Hours() / 24)
+// getDateGroupAt is GetDateGroup with the clock passed in, so the boundaries
+// can be tested.
+//
+// Both times are moved into the reader's location before anything is compared.
+// Claude writes RFC3339 timestamps in UTC, so taking the calendar date of each
+// in its own location subtracted two different midnights and shifted every
+// heading by a day for anyone east of UTC. Counting whole days out of an hour
+// difference has its own failure: a spring-forward day is 23 hours long, and
+// 23/24 truncates to zero, which labels yesterday "Today". Comparing calendar
+// dates avoids both.
+func getDateGroupAt(now, t time.Time) string {
+	loc := now.Location()
+	local := t.In(loc)
 
-	switch days {
-	case 0:
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	sessionDate := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+
+	switch {
+	case sessionDate.Equal(today):
 		return "Today"
-	case 1:
+	case sessionDate.Equal(today.AddDate(0, 0, -1)):
 		return "Yesterday"
 	default:
-		return t.Format("Jan 2")
+		return local.Format("Jan 2")
 	}
 }

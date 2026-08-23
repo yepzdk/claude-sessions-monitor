@@ -339,6 +339,9 @@ func TestContextWindowForModel(t *testing.T) {
 		{"claude-sonnet-10-0", 1_000_000},
 		{"claude-fable-5", 1_000_000},
 		{"claude-sonnet-5", 1_000_000},
+		// No minor segment. The dashboard's own regex required one, so these
+		// showed a 200K denominator in the browser and 1M in the TUI.
+		{"claude-opus-5", 1_000_000},
 		{"claude-haiku-5", 200_000},
 		{"claude-opus-4", 200_000},
 		{"opus", 200_000},
@@ -1012,5 +1015,21 @@ func TestDetermineStatus(t *testing.T) {
 				t.Errorf("task = %q, want %q", task, tt.wantTask)
 			}
 		})
+	}
+}
+
+// The window has to reach the dashboard as data. Re-deriving it from the model
+// id in JavaScript is what let the two views disagree.
+func TestApplyParsedLogSetsContextWindow(t *testing.T) {
+	var s Session
+	applyParsedLog(&s, parsedLog{model: "claude-opus-5"}, true, 0, time.Now())
+	if s.ContextWindow != ExtendedContextWindow {
+		t.Errorf("ContextWindow = %d, want %d", s.ContextWindow, ExtendedContextWindow)
+	}
+
+	var s2 Session
+	applyParsedLog(&s2, parsedLog{model: "claude-haiku-4-5"}, true, 0, time.Now())
+	if s2.ContextWindow != DefaultContextWindow {
+		t.Errorf("ContextWindow = %d, want %d", s2.ContextWindow, DefaultContextWindow)
 	}
 }

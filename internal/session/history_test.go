@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -165,5 +166,77 @@ func TestUnescapeJSONStringFallsBackToRaw(t *testing.T) {
 	const malformed = `unterminated \u00`
 	if got := unescapeJSONString(malformed); got != malformed {
 		t.Errorf("unescapeJSONString() = %q, want the raw input %q back", got, malformed)
+	}
+}
+
+// Claude writes RFC3339 timestamps in UTC. Taking each time's calendar date in
+// its own location subtracted two different midnights, so every heading in the
+// history view was a day out for readers east of UTC.
+func TestGetDateGroupAtAcrossZonesAndDST(t *testing.T) {
+	cph, err := time.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	kolkata, err := time.LoadLocation("Asia/Kolkata") // UTC+5:30
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		now  time.Time
+		when time.Time
+		want string
+	}{
+		{
+			name: "UTC session late yesterday, reader just past local midnight",
+			now:  time.Date(2026, 8, 23, 1, 0, 0, 0, cph),
+			when: time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC), // 22:00 local, yesterday
+			want: "Yesterday",
+		},
+		{
+			name: "UTC session that is already today in local time",
+			now:  time.Date(2026, 8, 23, 3, 0, 0, 0, cph),
+			when: time.Date(2026, 8, 23, 0, 30, 0, 0, time.UTC), // 02:30 local, today
+			want: "Today",
+		},
+		{
+			name: "spring forward makes yesterday 23 hours ago",
+			now:  time.Date(2026, 3, 30, 12, 0, 0, 0, cph),
+			when: time.Date(2026, 3, 29, 12, 0, 0, 0, cph),
+			want: "Yesterday",
+		},
+		{
+			name: "autumn back makes yesterday 25 hours ago",
+			now:  time.Date(2026, 10, 26, 12, 0, 0, 0, cph),
+			when: time.Date(2026, 10, 25, 12, 0, 0, 0, cph),
+			want: "Yesterday",
+		},
+		{
+			name: "half-hour offset zone",
+			now:  time.Date(2026, 8, 23, 2, 0, 0, 0, kolkata),
+			when: time.Date(2026, 8, 22, 19, 0, 0, 0, time.UTC), // 00:30 local, today
+			want: "Today",
+		},
+		{
+			name: "older session falls through to a date",
+			now:  time.Date(2026, 8, 23, 12, 0, 0, 0, cph),
+			when: time.Date(2026, 8, 20, 12, 0, 0, 0, cph),
+			want: "Aug 20",
+		},
+		{
+			name: "same instant is today",
+			now:  time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC),
+			when: time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC),
+			want: "Today",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getDateGroupAt(tt.now, tt.when); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
