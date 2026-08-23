@@ -62,7 +62,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error discovering history: %v\n", err)
 			os.Exit(1)
 		}
-		ui.RenderHistory(sessions, *historyDays, false)
+		ui.RenderHistory(sessions, *historyDays, false, "")
 		return
 	}
 
@@ -186,22 +186,33 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		switch viewMode {
 		case ViewModeHistory:
 			ui.MoveCursorHome()
-			sessions, _ := session.DiscoverHistory(historyDays)
-			ui.RenderHistory(sessions, historyDays, true)
+			sessions, err := session.DiscoverHistory(historyDays)
+			errMsg := ""
+			if err != nil {
+				errMsg = err.Error()
+			}
+			ui.RenderHistory(sessions, historyDays, true, errMsg)
 		case ViewModeUsage:
 			ui.MoveCursorHome()
 			usage := session.ComputeUsage()
 			apiQuota := session.FetchAPIQuota()
 			ui.RenderUsage(usage, apiQuota, true)
 		default:
-			sessions, _ := session.Discover()
+			sessions, err := session.Discover()
+			// An empty dashboard and a failed scan look identical once the
+			// error is dropped, so the reason goes into the frame rather than
+			// leaving csm to report "No active Claude sessions." either way.
+			msg := jumpMsg
+			if err != nil {
+				msg = "Cannot read sessions: " + err.Error()
+			}
 			// Sessions come and go between frames, so the selection is clamped
 			// on every render rather than only when a key moves it.
 			visible = ui.ActiveSessions(sessions)
 			if selected >= len(visible) {
 				selected = len(visible) - 1
 			}
-			ui.RenderLive(sessions, webURL, lastClaudeStatus, selected, jumpMsg)
+			ui.RenderLive(sessions, webURL, lastClaudeStatus, selected, msg)
 		}
 		// Erase anything left over below this frame from a previous, longer
 		// one, once per render cycle rather than each view remembering to.

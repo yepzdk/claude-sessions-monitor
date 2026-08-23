@@ -10,8 +10,19 @@ import (
 
 // RenderHistory renders the session history view with date grouping
 // When showFooter is true, uses \r\n for raw terminal mode
-func RenderHistory(sessions []session.HistorySession, days int, showFooter bool) {
+// errMsg, when non-empty, explains why the list below may be incomplete.
+// "No sessions found" is a claim about the past; it must not be printed when
+// the reason for the empty list is that the search itself failed.
+func RenderHistory(sessions []session.HistorySession, days int, showFooter bool, errMsg string) {
 	nl := newlineFor(showFooter)
+
+	if errMsg != "" {
+		fmt.Printf("%sCannot read session history: %s%s%s",
+			Red, sanitizeForTerminal(errMsg), Reset, nl)
+		if len(sessions) == 0 {
+			return
+		}
+	}
 
 	if len(sessions) == 0 {
 		fmt.Printf("No sessions found in the past %d days.%s", days, nl)

@@ -102,17 +102,25 @@ var (
 
 // cachedRunningClaudeDirs wraps getRunningClaudeDirs with a short TTL so the
 // expensive `ps`/`lsof` subprocess spawns don't run on every refresh.
-func cachedRunningClaudeDirs() map[string][]int {
+func cachedRunningClaudeDirs() (map[string][]int, error) {
 	processScanMu.Lock()
 	defer processScanMu.Unlock()
 
 	if processScanDirs != nil && processScanTTL > 0 && time.Since(processScanAt) < processScanTTL {
-		return processScanDirs
+		return processScanDirs, nil
 	}
 
-	processScanDirs = getRunningClaudeDirs()
+	dirs, err := getRunningClaudeDirs()
+	if err != nil {
+		// Leave any previous result in place but do not extend its lifetime;
+		// a caller asking again should retry the scan rather than be handed
+		// a stale map as though it were fresh.
+		return nil, err
+	}
+
+	processScanDirs = dirs
 	processScanAt = time.Now()
-	return processScanDirs
+	return processScanDirs, nil
 }
 
 // --- 3. Discover result cache ------------------------------------------------

@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"syscall"
 
 	"golang.org/x/term"
 )
@@ -30,7 +33,11 @@ func SetupRawInput() error {
 // CleanupRawInput restores the terminal to its original state
 func CleanupRawInput() {
 	if originalState != nil {
-		term.Restore(int(os.Stdin.Fd()), originalState)
+		if err := term.Restore(int(os.Stdin.Fd()), originalState); err != nil {
+			// The shell is now left with echo off and no line discipline, which
+			// looks like a hang. Naming the fix turns that into a one-liner.
+			fmt.Fprintf(os.Stderr, "csm: could not restore the terminal (%v); run 'stty sane'\n", err)
+		}
 	}
 }
 
@@ -48,7 +55,17 @@ func ReadKey(keyCh chan<- rune, done <-chan struct{}) {
 			return
 		default:
 			n, err := os.Stdin.Read(buf)
-			if err != nil || n == 0 {
+			if err != nil {
+				// EINTR is worth retrying. EOF is not: stdin is gone for good
+				// when csm is started detached or its pty is destroyed, and
+				// retrying it spins this goroutine at full speed forever while
+				// the display keeps refreshing and looks perfectly healthy.
+				if errors.Is(err, syscall.EINTR) {
+					continue
+				}
+				return
+			}
+			if n == 0 {
 				continue
 			}
 			for _, key := range decodeKeys(buf[:n]) {

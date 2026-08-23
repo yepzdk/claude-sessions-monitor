@@ -204,17 +204,23 @@ func ClaudeProjectsDir() (string, error) {
 	return filepath.Join(home, ".claude", "projects"), nil
 }
 
-// getRunningClaudeDirs returns a map of encoded directory names to PIDs where Claude processes are running
+// getRunningClaudeDirs returns a map of encoded directory names to PIDs where
+// Claude processes are running.
+//
+// It reports the error rather than an empty map: "nothing is running" and "the
+// process scan failed" produce identical results downstream, and every session
+// would be reported Inactive and filtered out of the dashboard. csm would say
+// "No active Claude sessions." with total confidence while sessions ran.
 // The keys are in the same format as the project directory names (e.g., -Users-username-Projects-...)
 // Multiple Claude processes in the same directory are tracked as separate PIDs.
-func getRunningClaudeDirs() map[string][]int {
+func getRunningClaudeDirs() (map[string][]int, error) {
 	dirs := make(map[string][]int)
 
 	// Use ps directly without a shell pipeline to avoid shell injection risks
 	cmd := exec.Command("ps", "ax", "-o", "pid=,comm=")
 	output, err := cmd.Output()
 	if err != nil {
-		return dirs
+		return nil, fmt.Errorf("listing processes with ps: %w", err)
 	}
 
 	// Parse ps output to find claude processes
@@ -245,7 +251,7 @@ func getRunningClaudeDirs() map[string][]int {
 		dirs[encoded] = append(dirs[encoded], pid)
 	}
 
-	return dirs
+	return dirs, nil
 }
 
 // getProcessCwd returns the current working directory of a process by PID.
@@ -325,7 +331,10 @@ func Discover() ([]Session, error) {
 
 	// Get directories where Claude is currently running (TTL-cached to avoid
 	// spawning ps/lsof on every refresh).
-	runningDirs := cachedRunningClaudeDirs()
+	runningDirs, err := cachedRunningClaudeDirs()
+	if err != nil {
+		return nil, err
+	}
 
 	var sessions []Session
 	// Track the log files we actually parse this sweep so stale entries can be
