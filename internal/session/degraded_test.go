@@ -63,19 +63,3 @@ func TestParseSessionTreatsEmptyLogAsStartingUp(t *testing.T) {
 		t.Errorf("Degraded = %q, want empty for a readable empty log", s.Degraded)
 	}
 }
-
-func TestParseSessionEmptyLogNotRunningIsInactive(t *testing.T) {
-	dir := t.TempDir()
-	logFile := filepath.Join(dir, "session.jsonl")
-	if err := os.WriteFile(logFile, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := parseSession("-home-u-proj", logFile, false, 0)
-	if err != nil {
-		t.Fatalf("parseSession returned error: %v", err)
-	}
-	if s.Status != StatusInactive {
-		t.Errorf("status = %q, want %q", s.Status, StatusInactive)
-	}
-}

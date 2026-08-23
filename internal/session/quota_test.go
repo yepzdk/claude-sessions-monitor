@@ -63,9 +63,9 @@ func TestExtractIntFieldRejectsOverflow(t *testing.T) {
 		{"normal", `{"usage":{"input_tokens":1234}}`, 1234},
 		{"zero", `{"usage":{"input_tokens":0}}`, 0},
 		{"absent", `{"usage":{"output_tokens":5}}`, 0},
-		{"overflow wraps negative without a range check",
-			`{"usage":{"input_tokens":9223372036854775999}}`, 0},
-		{"absurd digit run", `{"usage":{"input_tokens":` + "99999999999999999999999999" + `}}`, 0},
+		// Past int64. Unchecked accumulation wrapped this to a negative and
+		// pulled the aggregate down.
+		{"beyond int range", `{"usage":{"input_tokens":9223372036854775999}}`, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

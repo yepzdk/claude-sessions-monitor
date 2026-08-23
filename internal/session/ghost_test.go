@@ -1,6 +1,8 @@
 package session
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -70,4 +72,69 @@ func TestGhostsFromDeduplicatesPIDs(t *testing.T) {
 	if ghosts := ghostsFrom(sessions); len(ghosts) != 1 {
 		t.Fatalf("got %d ghosts for one pid, want 1", len(ghosts))
 	}
+}
+
+// The badge is only reachable if something sets the flag. determineStatus
+// returned a hardcoded false for it on every path, so the derivation is worth
+// pinning separately from the filter that decides whether the row is shown.
+func TestApplyParsedLogDerivesIsGhost(t *testing.T) {
+	tests := []struct {
+		name      string
+		isRunning bool
+		lastEntry time.Time
+		want      bool
+	}{
+		{"running with a long-silent log", true, time.Now().Add(-3 * time.Hour), true},
+		{"running and recently active", true, time.Now().Add(-time.Minute), false},
+		{"just inside the threshold", true, time.Now().Add(-GhostThreshold + time.Minute), false},
+		{"stale but no process", false, time.Now().Add(-3 * time.Hour), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var s Session
+			applyParsedLog(&s, parsedLog{lastEntryTime: tt.lastEntry}, tt.isRunning, 0, tt.lastEntry)
+			if s.IsGhost != tt.want {
+				t.Errorf("IsGhost = %v, want %v", s.IsGhost, tt.want)
+			}
+		})
+	}
+}
+
+// An empty process list and a failed process scan used to be the same value.
+// Every session was then marked Inactive and filtered out, so csm printed
+// "No active Claude sessions." with total confidence while sessions ran.
+func TestDiscoverReportsProcessScanFailure(t *testing.T) {
+	original := listProcesses
+	t.Cleanup(func() {
+		listProcesses = original
+		clearScanCaches()
+	})
+	listProcesses = func() ([]byte, error) {
+		return nil, errors.New("ps: operation not permitted")
+	}
+	// Both caches would otherwise serve a result from before the swap.
+	clearScanCaches()
+
+	_, err := Discover()
+	if err == nil {
+		t.Fatal("Discover succeeded while the process scan failed; " +
+			"the dashboard would report no active sessions")
+	}
+	if !strings.Contains(err.Error(), "operation not permitted") {
+		t.Errorf("error does not carry the cause: %v", err)
+	}
+}
+
+// clearScanCaches drops the process-scan and whole-result caches so a test
+// sees a fresh Discover rather than a value cached before it changed anything.
+func clearScanCaches() {
+	processScanMu.Lock()
+	processScanDirs = nil
+	processScanAt = time.Time{}
+	processScanMu.Unlock()
+
+	resultMu.Lock()
+	result = nil
+	resultAt = time.Time{}
+	resultMu.Unlock()
 }

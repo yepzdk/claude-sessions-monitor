@@ -12,8 +12,9 @@ import (
 // Clamping only the upper end let a negative value produce a negative repeat
 // count, which panics and takes the dashboard down with it.
 func TestRenderUsageSurvivesOutOfRangeUtilization(t *testing.T) {
-	for _, u := range []float64{0, 50, 100, 100.1, 1e9, -0.5, -1, -5, -20, -1e9,
-		math.NaN(), math.Inf(1), math.Inf(-1)} {
+	// One value per branch of the clamp, plus -5: the smallest input that
+	// actually produced a negative repeat count and panicked.
+	for _, u := range []float64{50, 100, 1e9, -5, math.Inf(-1), math.NaN()} {
 		t.Run(fmt.Sprintf("%v", u), func(t *testing.T) {
 			defer func() {
 				if r := recover(); r != nil {

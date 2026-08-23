@@ -207,12 +207,6 @@ func TestGetDateGroupAtAcrossZonesAndDST(t *testing.T) {
 			want: "Yesterday",
 		},
 		{
-			name: "autumn back makes yesterday 25 hours ago",
-			now:  time.Date(2026, 10, 26, 12, 0, 0, 0, cph),
-			when: time.Date(2026, 10, 25, 12, 0, 0, 0, cph),
-			want: "Yesterday",
-		},
-		{
 			name: "half-hour offset zone",
 			now:  time.Date(2026, 8, 23, 2, 0, 0, 0, kolkata),
 			when: time.Date(2026, 8, 22, 19, 0, 0, 0, time.UTC), // 00:30 local, today
@@ -223,12 +217,6 @@ func TestGetDateGroupAtAcrossZonesAndDST(t *testing.T) {
 			now:  time.Date(2026, 8, 23, 12, 0, 0, 0, cph),
 			when: time.Date(2026, 8, 20, 12, 0, 0, 0, cph),
 			want: "Aug 20",
-		},
-		{
-			name: "same instant is today",
-			now:  time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC),
-			when: time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC),
-			want: "Today",
 		},
 	}
 

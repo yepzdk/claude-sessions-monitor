@@ -204,6 +204,14 @@ func ClaudeProjectsDir() (string, error) {
 	return filepath.Join(home, ".claude", "projects"), nil
 }
 
+// listProcesses shells out to ps. It is a variable so a test can make the
+// process scan fail, which is the case that used to be indistinguishable from
+// "nothing is running".
+var listProcesses = func() ([]byte, error) {
+	// ps directly, with no shell pipeline, to avoid shell injection risks.
+	return exec.Command("ps", "ax", "-o", "pid=,comm=").Output()
+}
+
 // getRunningClaudeDirs returns a map of encoded directory names to PIDs where
 // Claude processes are running.
 //
@@ -216,9 +224,7 @@ func ClaudeProjectsDir() (string, error) {
 func getRunningClaudeDirs() (map[string][]int, error) {
 	dirs := make(map[string][]int)
 
-	// Use ps directly without a shell pipeline to avoid shell injection risks
-	cmd := exec.Command("ps", "ax", "-o", "pid=,comm=")
-	output, err := cmd.Output()
+	output, err := listProcesses()
 	if err != nil {
 		return nil, fmt.Errorf("listing processes with ps: %w", err)
 	}
