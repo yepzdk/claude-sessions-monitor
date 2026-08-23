@@ -1004,7 +1004,7 @@ func TestDetermineStatus(t *testing.T) {
 				// Default to old modtime so the file modtime check doesn't fire
 				modTime = now.Add(-1 * time.Hour)
 			}
-			status, task, _ := determineStatus(tt.entries, tt.isRunning, modTime)
+			status, task := determineStatus(tt.entries, tt.isRunning, modTime)
 			if status != tt.wantStatus {
 				t.Errorf("status = %q, want %q", status, tt.wantStatus)
 			}

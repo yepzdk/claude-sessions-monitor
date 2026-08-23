@@ -97,12 +97,16 @@ const (
 )
 
 // ActiveSessions returns the sessions the live view shows: everything that
-// isn't finished or orphaned. Callers that need to address a row by index must
-// use this, so the selection and the rendered table can't disagree.
+// isn't finished. Callers that need to address a row by index must use this,
+// so the selection and the rendered table can't disagree.
+//
+// Orphaned sessions stay in the list. They are the ones a user most needs to
+// act on, and they carry a [ghost] badge that nothing could display while they
+// were filtered out here.
 func ActiveSessions(sessions []session.Session) []session.Session {
 	var active []session.Session
 	for _, s := range sessions {
-		if s.IsGhost || s.Status == session.StatusInactive {
+		if s.Status == session.StatusInactive {
 			continue
 		}
 		active = append(active, s)
@@ -445,10 +449,14 @@ func formatOrigin(o session.Origin, width int) string {
 	if text == "" {
 		text = "-"
 	}
-	if len(text) > width {
-		text = text[:width]
+	// Runes, not bytes: slicing by byte can split a multi-byte character in
+	// half and mis-measures the padding.
+	runes := []rune(text)
+	if len(runes) > width {
+		runes = runes[:width]
+		text = string(runes)
 	}
-	padding := strings.Repeat(" ", width-len(text))
+	padding := strings.Repeat(" ", width-len(runes))
 	var color string
 	switch o.Category {
 	case session.OriginTerminal:
@@ -619,6 +627,13 @@ func formatProject(s session.Session, maxLen int) string {
 		suffixLens = append(suffixLens, 7) // [ghost]
 	}
 
+	// Incomplete data warning: this row's numbers are partly missing, so they
+	// must not read as measurements.
+	if s.Degraded != "" {
+		suffixes = append(suffixes, Red+"[?]"+Reset)
+		suffixLens = append(suffixLens, 3) // [?]
+	}
+
 	// Unsandboxed indicator (security warning)
 	if s.HasUnsandboxed {
 		suffixes = append(suffixes, Yellow+"[!S]"+Reset)
@@ -644,7 +659,9 @@ func formatProject(s session.Session, maxLen int) string {
 		nameWidth = 1
 	}
 	truncated := truncate(name, nameWidth)
-	visibleLen := len(truncated)
+	// Runes, not bytes: truncate cut by rune, and padding to a byte count makes
+	// every column right of a non-ASCII project name shift left.
+	visibleLen := len([]rune(truncated))
 
 	// Build result
 	result := truncated

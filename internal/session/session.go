@@ -29,20 +29,25 @@ const (
 
 // Session represents a Claude Code session
 type Session struct {
-	Project        string     `json:"project"`
-	Status         Status     `json:"status"`
-	LastActivity   time.Time  `json:"last_activity"`
-	Task           string     `json:"task"`
-	Summary        string     `json:"summary,omitempty"`
-	LastMessage    string     `json:"last_message,omitempty"`
-	LogFile        string     `json:"log_file"`
-	ProjectPath    string     `json:"-"`                         // Encoded project directory name (as used under ~/.claude/projects)
-	CWD            string     `json:"-"`                         // Absolute working directory recorded in the log
-	SessionID      string     `json:"session_id,omitempty"`      // Claude session UUID (log filename stem)
-	Origin         Origin     `json:"origin,omitempty"`          // Where the session was launched from
-	IsGhost        bool       `json:"is_ghost,omitempty"`        // True if process running but log is stale
-	GhostPID       int        `json:"ghost_pid,omitempty"`       // PID of the ghost process (for killing)
-	PIDConfident   bool       `json:"-"`                         // True when GhostPID is certainly this session's process, not a positional guess
+	Project      string    `json:"project"`
+	Status       Status    `json:"status"`
+	LastActivity time.Time `json:"last_activity"`
+	Task         string    `json:"task"`
+	Summary      string    `json:"summary,omitempty"`
+	LastMessage  string    `json:"last_message,omitempty"`
+	LogFile      string    `json:"log_file"`
+	ProjectPath  string    `json:"-"`                    // Encoded project directory name (as used under ~/.claude/projects)
+	CWD          string    `json:"-"`                    // Absolute working directory recorded in the log
+	SessionID    string    `json:"session_id,omitempty"` // Claude session UUID (log filename stem)
+	Origin       Origin    `json:"origin,omitempty"`     // Where the session was launched from
+	IsGhost      bool      `json:"is_ghost,omitempty"`   // True if process running but log is stale
+	GhostPID     int       `json:"ghost_pid,omitempty"`  // PID of the ghost process (for killing)
+	PIDConfident bool      `json:"-"`                    // True when GhostPID is certainly this session's process, not a positional guess
+	// Degraded names the reason this session's log could not be read in full.
+	// Empty means the data below is complete. Anything else means some of it
+	// is missing, and the UI marks the row so the numbers are not read as
+	// measurements.
+	Degraded       string     `json:"degraded,omitempty"`
 	GitBranch      string     `json:"git_branch,omitempty"`      // Current git branch
 	HasUnsandboxed bool       `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
 	ContextPercent float64    `json:"context_percent,omitempty"` // Percentage of context window used
@@ -681,13 +686,15 @@ func parseSession(projectName, logFile string, isRunning bool, pid int) (Session
 
 	// Fetch the parsed log (single full-file pass), reusing the cache when the
 	// file is unchanged since it was last parsed.
+	// A read failure here is not the same as an idle session. isRunning and pid
+	// are already known and correct, and determineStatus turns "running process,
+	// no readable entries" into Waiting. Returning early skipped that and left
+	// the Inactive default, which ActiveSessions then filtered out entirely --
+	// so a session that was working, possibly sitting on an approval prompt,
+	// vanished from the dashboard and from the counts.
 	pl, err := cachedParseLogFile(logFile, info.ModTime(), info.Size(), 100)
 	if err != nil {
-		return session, nil // Return with defaults
-	}
-
-	if len(pl.entries) == 0 {
-		return session, nil
+		session.Degraded = err.Error()
 	}
 
 	applyParsedLog(&session, pl, isRunning, pid, info.ModTime())
@@ -715,7 +722,7 @@ func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fil
 	session.Model = pl.model
 
 	// Time-relative + running-dependent: must be recomputed each call.
-	session.Status, session.Task, session.IsGhost = determineStatus(pl.entries, isRunning, fileModTime)
+	session.Status, session.Task = determineStatus(pl.entries, isRunning, fileModTime)
 
 	// A session that dispatched a subagent writes nothing to its own log until
 	// the result comes back, so determineStatus sees a stale file and reports
@@ -735,6 +742,11 @@ func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fil
 	if !pl.lastEntryTime.IsZero() {
 		session.LastActivity = pl.lastEntryTime
 	}
+
+	// Derived last, once LastActivity has settled: a ghost is a live process
+	// whose log stopped moving long ago. determineStatus cannot decide this
+	// because it runs before lastEntryTime is applied.
+	session.IsGhost = isRunning && time.Since(session.LastActivity) > GhostThreshold
 }
 
 // extractLastAssistantMessage extracts the last text message from an assistant entry
@@ -958,14 +970,14 @@ const recentActivityWindow = 2 * time.Minute
 // determineStatus analyzes log entries to determine session status.
 // fileModTime is the log file's modification time, used to detect recent writes
 // that may not yet appear as parsed entries (e.g., during streaming).
-// Returns: status, task description, and whether this is a ghost process.
-func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) (Status, string, bool) {
+// Returns the status and a short task description.
+func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) (Status, string) {
 	if len(entries) == 0 {
 		if isRunning {
 			// Process running but no log entries - new session starting up
-			return StatusWaiting, "-", false
+			return StatusWaiting, "-"
 		}
-		return StatusInactive, "-", false
+		return StatusInactive, "-"
 	}
 
 	var lastAssistant *LogEntry
@@ -1009,7 +1021,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 
 	// If Claude is not running, session is inactive
 	if !isRunning {
-		return StatusInactive, "-", false
+		return StatusInactive, "-"
 	}
 
 	// Check if assistant ended with tool_use (needs approval) - BEFORE ghost check
@@ -1045,7 +1057,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 				} else if time.Since(lastUser.Timestamp) < recentActivityWindow {
 					// No turn_duration marker yet, but the tool result is recent —
 					// Claude is very likely still working (about to continue the turn).
-					return StatusWorking, "Processing...", false
+					return StatusWorking, "Processing..."
 				}
 				// All tools resolved but the last result is stale and no
 				// turn_duration/end_turn followed. Claude commonly ends a turn here
@@ -1066,9 +1078,9 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// the tool is currently executing, not waiting for approval.
 	if hasPendingToolUse {
 		if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < recentActivityWindow {
-			return StatusWorking, "Using: " + pendingToolName, false
+			return StatusWorking, "Using: " + pendingToolName
 		}
-		return StatusNeedsInput, "Using: " + pendingToolName, false
+		return StatusNeedsInput, "Using: " + pendingToolName
 	}
 
 	// Check if turn completed (system message with turn_duration).
@@ -1084,10 +1096,10 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 			// checks below, which resolve it to Waiting.
 			if lastUser != nil && lastUser.Timestamp.After(lastSystem.Timestamp) &&
 				time.Since(lastUser.Timestamp) < recentActivityWindow {
-				return StatusWorking, "Processing...", false
+				return StatusWorking, "Processing..."
 			}
 			if lastUser == nil || !lastUser.Timestamp.After(lastSystem.Timestamp) {
-				return StatusWaiting, "-", false
+				return StatusWaiting, "-"
 			}
 		}
 	}
@@ -1098,7 +1110,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 		lastAssistant.Message.StopReason == "end_turn" {
 		// Only if no newer user message (which would mean a new turn started)
 		if lastUser == nil || !lastUser.Timestamp.After(lastAssistant.Timestamp) {
-			return StatusWaiting, "-", false
+			return StatusWaiting, "-"
 		}
 	}
 
@@ -1107,21 +1119,21 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// A recent heartbeat is a strong signal that the session is working.
 	if lastProgress != nil && time.Since(lastProgress.Timestamp) < recentActivityWindow {
 		task := extractTask(lastAssistant)
-		return StatusWorking, task, false
+		return StatusWorking, task
 	}
 
 	// If the log file was recently modified (within 30s), the session is actively
 	// writing — even if parsed entries are stale (e.g., streaming writes in progress).
 	if !fileModTime.IsZero() && time.Since(fileModTime) < 30*time.Second {
 		task := extractTask(lastAssistant)
-		return StatusWorking, task, false
+		return StatusWorking, task
 	}
 
 	// If process is running but log is stale, it's Waiting (not ghost)
 	// The user may be away or thinking - this is a valid active session
 	// Ghost detection is only for --kill-ghosts to find truly orphaned processes
 	if time.Since(lastTimestamp) > 5*time.Minute {
-		return StatusWaiting, "-", false
+		return StatusWaiting, "-"
 	}
 
 	// If assistant is recent, it's working. Use 2-minute window to avoid
@@ -1129,7 +1141,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	if lastAssistant != nil {
 		task := extractTask(lastAssistant)
 		if time.Since(lastAssistant.Timestamp) < recentActivityWindow {
-			return StatusWorking, task, false
+			return StatusWorking, task
 		}
 	}
 
@@ -1143,11 +1155,11 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// Waiting instead of staying pinned on "Working".
 	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) {
 		if isUserPrompt(lastUser) && time.Since(lastUser.Timestamp) < recentActivityWindow {
-			return StatusWorking, "Processing...", false
+			return StatusWorking, "Processing..."
 		}
 	}
 
-	return StatusWaiting, "-", false
+	return StatusWaiting, "-"
 }
 
 // isUserPrompt reports whether a user log entry is a genuine user prompt
