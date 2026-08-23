@@ -163,6 +163,11 @@ nav {
    though the stream is healthy. */
 #connection-status.stale { background: var(--yellow); }
 
+/* This row's log could not be read in full, so its numbers are not a
+   measurement. */
+.session-degraded-badge { background: var(--red); color: var(--bg); }
+.usage-partial { color: var(--yellow); font-size: 0.85em; margin-top: 8px; }
+
 /* Status bar */
 .status-bar {
     display: flex;

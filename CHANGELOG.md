@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A running session whose log could not be read vanished from the dashboard and from the summary counts, because the read failure left it marked Inactive and inactive sessions are filtered out. Such rows now stay visible, marked `[?]` to show their numbers are incomplete
 - `csm` reported "No active Claude sessions." with complete confidence when the `ps` scan itself failed, and the live view discarded discovery errors on every frame. Both now say what went wrong
 - Token totals silently understated usage when a log contained a line past the scanner's size cap: the partial sum was returned as though the scan had reached the end of the file. The usage view now marks such totals as a lower bound
-- "No token usage in the past 5 hours." is no longer printed when the search for that usage failed
+- "No token usage in the past 5 hours." is no longer printed when the search for that usage failed, in the web dashboard as well as the terminal
+- The web dashboard marks a session whose log could not be read in full, matching the `[?]` the terminal shows, rather than presenting partial numbers as a reading
 - A corrupt token count no longer wraps to a negative number and pulls the 5-hour total down
 - A negative utilization value from the quota API no longer panics the usage view
 - History date headings were a day out for everyone east of UTC, and labelled yesterday "Today" on the spring-forward day

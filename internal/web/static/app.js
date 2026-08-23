@@ -295,6 +295,7 @@
                     ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
                     ${s.origin && s.origin.category ? `<span class="badge session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
                     ${(s.context_window || 0) > 200000 ? `<span class="badge session-model-badge" title="${esc(s.model)}">1M</span>` : ''}
+                    ${s.degraded ? `<span class="badge session-degraded-badge" title="${esc(s.degraded)}">?</span>` : ''}
                     <span class="session-context" title="${esc(s.model || '')}">
                         <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
                         <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>
@@ -558,8 +559,15 @@
                 });
                 html += '</div>';
             }
+        } else if (local && local.error) {
+            // Saying "no usage" here would be a positive claim invented from a
+            // failure to look.
+            html += `<div class="usage-unavailable">Local usage unavailable (${esc(local.error)})</div>`;
         } else {
             html += '<div class="usage-unavailable">No token usage in the past 5 hours.</div>';
+        }
+        if (local && local.partial && local.partial.length > 0) {
+            html += `<div class="usage-partial">${local.partial.length} log(s) could not be read in full; totals are a lower bound.</div>`;
         }
         html += '</div>';
 
