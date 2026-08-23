@@ -7,7 +7,7 @@ Claude Sessions Monitor (csm) is a CLI tool that monitors Claude Code sessions a
 ## Tech Stack
 
 - Go 1.25+
-- No external dependencies (stdlib only)
+- Standard library, plus `golang.org/x/term` for raw terminal input. No other third-party dependencies.
 
 ## Project Structure
 
@@ -15,7 +15,7 @@ Claude Sessions Monitor (csm) is a CLI tool that monitors Claude Code sessions a
 internal/
   session/  - Session discovery, log parsing, status detection, timeline/metrics
   ui/       - Terminal rendering (ANSI colors, formatting)
-  watcher/  - File watching for live updates
+  jump/     - Bring a session's terminal tab to the front (macOS + Ghostty)
   web/      - Web dashboard (HTTP server, REST API, SSE, embedded frontend)
     static/ - Frontend assets (HTML, CSS, JS) embedded via go:embed
 main.go     - CLI entry point and flag handling

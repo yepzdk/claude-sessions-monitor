@@ -96,7 +96,9 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Enrich with stats from the JSONL file
-			msgCount, start, end, extractedBranch, firstPrompt, _, _ := session.QuickSessionStats(s.LogFile)
+			st, _ := session.QuickSessionStats(s.LogFile)
+			msgCount, start, end := st.MessageCount, st.StartTime, st.EndTime
+			extractedBranch, firstPrompt := st.GitBranch, st.FirstPrompt
 			if start.IsZero() {
 				start = s.LastActivity
 			}

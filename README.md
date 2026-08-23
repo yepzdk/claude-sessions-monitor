@@ -16,7 +16,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal tab to the front (macOS + Ghostty)
 - **Origin column** showing whether each session was launched from a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the Claude process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end
 - **Session badges**: Unsandboxed [!S], Ghost [ghost]
-- **Zero dependencies** - single binary, easy to install
+- **Single static binary** - no runtime dependencies, easy to install
 - **Cross-platform** - macOS and Linux
 
 ## Installation
@@ -144,7 +144,7 @@ disappears — no configuration needed.
 
 Press `u` in the live dashboard to see token usage. The view has two sections:
 
-- **API Quota** — Shows your Anthropic plan's utilization (5-hour and 7-day windows, plus per-model breakdowns when available). Uses color-coded progress bars: green (<75%), yellow (75-90%), red (>90%). Reads the OAuth token from the macOS Keychain or `~/.claude/.credentials.json` on Linux.
+- **API Quota** — Shows your Anthropic plan's utilization (5-hour and 7-day windows, plus per-model breakdowns when available). Uses color-coded progress bars: green (<75%), yellow (75-89%), red (≥90%). Reads the OAuth token from the macOS Keychain or `~/.claude/.credentials.json` on Linux.
 - **Local Usage** — Aggregates token counts (input, output, cache) from session log files within a 5-hour rolling window, broken down per session.
 
 ### Web dashboard
@@ -157,7 +157,7 @@ Features:
 - **History view** with search/filter and date grouping
 - **Session detail panels** with metrics (token usage, tool breakdown, turn count) and full message timeline
 - **Timeline filters** to show All, Assistant, or User messages
-- REST API: `/api/sessions`, `/api/history`, `/api/usage`, `/api/sessions/timeline`, `/api/sessions/metrics`
+- REST API: `/api/sessions`, `/api/history`, `/api/usage`, `/api/quota`, `/api/claude-status`, `/api/sessions/timeline`, `/api/sessions/metrics`, and `/api/events` (SSE stream)
 - Embedded in the binary via `go:embed` — no external files or build step needed
 
 ## Status Types

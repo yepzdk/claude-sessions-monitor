@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- The web dashboard rejects requests whose `Host` header is not a loopback name. Binding to `localhost` kept the dashboard off the network but did not stop DNS rebinding: a page the user merely visited could point its own domain at `127.0.0.1`, and the browser would then treat a fetch to the dashboard as same-origin. Nothing checked `Host`, so `/api/history` and every session timeline behind it — prompt text, file paths, anything pasted into a session — were readable
+- The HTTP server now sets read, header and idle timeouts, so a connection trickling in one header byte at a time can no longer hold a goroutine and a file descriptor indefinitely
+
+### Fixed
+
+- `--kill-ghosts` could terminate a session that was actively working. Logs are sorted newest-first and pids arrive in `ps` order, and the two were paired by index, so in a project running several Claude processes the stale log could carry the busy process's pid. Ghost reporting now honours the same `PIDConfident` check that jump already used, and reports which processes refused the signal rather than only counting the ones that accepted it
+- A running session whose log could not be read vanished from the dashboard and from the summary counts, because the read failure left it marked Inactive and inactive sessions are filtered out. Such rows now stay visible, marked `[?]` to show their numbers are incomplete
+- `csm` reported "No active Claude sessions." with complete confidence when the `ps` scan itself failed, and the live view discarded discovery errors on every frame. Both now say what went wrong
+- Token totals silently understated usage when a log contained a line past the scanner's size cap: the partial sum was returned as though the scan had reached the end of the file. The usage view now marks such totals as a lower bound
+- "No token usage in the past 5 hours." is no longer printed when the search for that usage failed
+- A corrupt token count no longer wraps to a negative number and pulls the 5-hour total down
+- A negative utilization value from the quota API no longer panics the usage view
+- History date headings were a day out for everyone east of UTC, and labelled yesterday "Today" on the spring-forward day
+- The web dashboard showed the context percentage against a 200K window for `claude-opus-5`, `claude-sonnet-5` and `claude-fable-5` while the terminal used 1M, because it re-derived the window from the model id with a regex that required a minor version segment. The window is now sent by the server
+- The `[ghost]` badge could never appear: the flag behind it was always false, and orphaned sessions were filtered out of the live view before the badge could render
+- A non-ASCII project name shifted every column to the right of it, because the column was padded by byte count after being truncated by rune
+- `ReadKey` spun at 100% CPU forever when stdin closed, which happens when csm is started detached or loses its pty
+- SSE connections leaked a goroutine each at shutdown, and the hub scanned the filesystem every two seconds even with no dashboard open. A failed scan now tells the dashboard its data is stale instead of leaving it showing frozen state under a "connected" indicator
+- A panic in the background session scanner no longer takes down the whole process, including the terminal UI
+- `-days` and `-port` printed their default twice in `--help`
+
+### Changed
+
+- `QuickSessionStats` returns a struct and an error instead of seven positional values, four of them adjacent strings that could be swapped without the compiler noticing
+
+### Removed
+
+- `internal/watcher`, `findMostRecentLog`, `GetGhostPIDs` and the `StatusIdle` constant, none of which had callers
+
 ## [0.5.0] - 2026-08-23
 
 ### Added

@@ -30,11 +30,11 @@ func main() {
 	showVersion := flag.Bool("v", false, "Show version")
 	interval := flag.Duration("interval", 2*time.Second, "Refresh interval for live view")
 	historyMode := flag.Bool("history", false, "Show session history")
-	historyDays := flag.Int("days", 7, "Number of days for history (default 7)")
+	historyDays := flag.Int("days", 7, "Number of days for history")
 	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
-	webPort := flag.Int("port", 9847, "Port for web dashboard (default 9847)")
+	webPort := flag.Int("port", 9847, "Port for web dashboard")
 	flag.Parse()
 
 	// Check for conflicting flags
