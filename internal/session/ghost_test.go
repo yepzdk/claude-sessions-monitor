@@ -2,6 +2,8 @@ package session
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +106,15 @@ func TestApplyParsedLogDerivesIsGhost(t *testing.T) {
 // Every session was then marked Inactive and filtered out, so csm printed
 // "No active Claude sessions." with total confidence while sessions ran.
 func TestDiscoverReportsProcessScanFailure(t *testing.T) {
+	// Discover reads the projects directory before it scans processes, so the
+	// scan is only reached when that directory exists. Without this the test
+	// passes or fails on whether the machine running it happens to use Claude.
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
 	original := listProcesses
 	t.Cleanup(func() {
 		listProcesses = original
