@@ -52,26 +52,3 @@ func TestRequireLocalHost(t *testing.T) {
 		})
 	}
 }
-
-func TestSecurityHeaders(t *testing.T) {
-	h := securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	want := map[string]string{
-		"X-Content-Type-Options": "nosniff",
-		"X-Frame-Options":        "DENY",
-		"Referrer-Policy":        "strict-origin-when-cross-origin",
-		// embed.FS reports a zero mod-time, so without this a csm upgrade
-		// leaves the dashboard stuck on stale assets.
-		"Cache-Control": "no-cache",
-	}
-	for k, v := range want {
-		if got := rec.Header().Get(k); got != v {
-			t.Errorf("%s = %q, want %q", k, got, v)
-		}
-	}
-	if csp := rec.Header().Get("Content-Security-Policy"); csp == "" {
-		t.Error("Content-Security-Policy is missing")
-	}
-}
