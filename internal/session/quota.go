@@ -3,9 +3,11 @@ package session
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,12 @@ type UsageStats struct {
 	CacheTokens  int            `json:"cache_tokens"`
 	TotalTokens  int            `json:"total_tokens"`
 	Sessions     []SessionUsage `json:"sessions"`
+	// Err explains why these numbers could not be produced. When it is set the
+	// counts are meaningless and must not be rendered as a reading of zero.
+	Err string `json:"error,omitempty"`
+	// Partial lists logs that were only read in part, so a total can say it is
+	// an undercount rather than presenting itself as complete.
+	Partial []string `json:"partial,omitempty"`
 }
 
 // SessionUsage holds token usage for a single session.
@@ -65,9 +73,12 @@ func ComputeUsage() *UsageStats {
 	// Discover history covering the window (1 day is enough for 5h)
 	sessions, err := DiscoverHistory(1)
 	if err != nil {
+		// A zeroed struct here renders as "No token usage in the past 5 hours",
+		// which is a positive claim invented from a failure.
 		return &UsageStats{
 			WindowStart: windowStart,
 			WindowEnd:   now,
+			Err:         err.Error(),
 		}
 	}
 
@@ -76,6 +87,7 @@ func ComputeUsage() *UsageStats {
 		totalOutput  int
 		totalCache   int
 		sessionUsage []SessionUsage
+		partial      []string
 	)
 
 	for _, s := range sessions {
@@ -84,7 +96,11 @@ func ComputeUsage() *UsageStats {
 			continue
 		}
 
-		input, output, cache, hasTokens := scanLogTokens(s.LogFile, windowStart)
+		input, output, cache, hasTokens, scanErr := scanLogTokens(s.LogFile, windowStart)
+		if scanErr != nil {
+			// Keep whatever was counted, but record that the total is a floor.
+			partial = append(partial, s.LogFile)
+		}
 		if !hasTokens {
 			continue
 		}
@@ -113,6 +129,7 @@ func ComputeUsage() *UsageStats {
 		CacheTokens:  totalCache,
 		TotalTokens:  totalInput + totalOutput + totalCache,
 		Sessions:     sessionUsage,
+		Partial:      partial,
 	}
 }
 
@@ -266,10 +283,10 @@ func parseAPIQuotaResponse(body []byte) *APIQuota {
 
 // scanLogTokens scans a JSONL log file for usage entries with timestamps
 // within the window and returns aggregated token counts.
-func scanLogTokens(logFile string, windowStart time.Time) (input, output, cache int, hasTokens bool) {
+func scanLogTokens(logFile string, windowStart time.Time) (input, output, cache int, hasTokens bool, err error) {
 	file, err := os.Open(logFile)
 	if err != nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, false, err
 	}
 	defer file.Close()
 
@@ -308,7 +325,13 @@ func scanLogTokens(logFile string, windowStart time.Time) (input, output, cache 
 		}
 	}
 
-	return input, output, cache, hasTokens
+	// bufio.Scanner stops silently on a read error or a line over the size cap.
+	// Without this the partial sum would be returned as if the scan had run to
+	// the end of the file, quietly understating the user's quota.
+	if scanErr := scanner.Err(); scanErr != nil {
+		return input, output, cache, hasTokens, fmt.Errorf("scan %s: %w", logFile, scanErr)
+	}
+	return input, output, cache, hasTokens, nil
 }
 
 // extractIntField extracts an integer value from a JSON line using fast string matching.
@@ -336,10 +359,12 @@ func extractIntField(line, prefix string) int {
 		return 0
 	}
 
-	// Manual int parsing (avoids strconv import)
-	n := 0
-	for i := start; i < end; i++ {
-		n = n*10 + int(line[i]-'0')
+	// A corrupt or truncated line can carry a digit run far beyond int range.
+	// Unchecked accumulation wraps negative and drags the aggregate down, so
+	// an unparseable value is reported as absent instead.
+	n, err := strconv.Atoi(line[start:end])
+	if err != nil {
+		return 0
 	}
 	return n
 }

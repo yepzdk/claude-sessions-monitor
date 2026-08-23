@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -92,8 +93,18 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 				l.total, formatTokenCount(su.TotalTokens))
 			buf.WriteString(row + nl)
 		}
+	} else if usage != nil && usage.Err != "" {
+		// Saying "no usage" here would be a positive claim invented from a
+		// failure to look.
+		fmt.Fprintf(&buf, "  %sLocal usage unavailable (%s)%s%s",
+			Dim, sanitizeForTerminal(usage.Err), Reset, nl)
 	} else {
 		fmt.Fprintf(&buf, "  %sNo token usage in the past 5 hours.%s%s", Dim, Reset, nl)
+	}
+
+	if usage != nil && len(usage.Partial) > 0 {
+		fmt.Fprintf(&buf, "  %s! %d log(s) could not be read in full; totals are a lower bound.%s%s",
+			Yellow, len(usage.Partial), Reset, nl)
 	}
 
 	// Footer
@@ -110,9 +121,15 @@ func renderQuotaBucket(buf *strings.Builder, label string, bucket *session.Quota
 		return
 	}
 
+	// Utilization arrives straight from the API with no validation. Clamping
+	// only the top left a negative value to produce a negative repeat count,
+	// which panics and takes the whole dashboard down.
 	pct := bucket.Utilization
 	if pct > 100 {
 		pct = 100
+	}
+	if pct < 0 || math.IsNaN(pct) {
+		pct = 0
 	}
 
 	filled := int(pct / 100 * float64(usageBarWidth))
