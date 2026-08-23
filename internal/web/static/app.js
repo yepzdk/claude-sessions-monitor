@@ -225,7 +225,17 @@
             try {
                 currentSessions = JSON.parse(e.data);
                 if (currentView === 'live') renderSessions();
+                connStatus.className = 'connected';
+                connStatus.title = 'SSE connected';
             } catch (err) { /* ignore parse errors */ }
+        });
+
+        // The connection stays up and the heartbeat keeps arriving when a scan
+        // fails, so without this the page would keep showing the last good
+        // state under a "connected" indicator, with the ages frozen.
+        sseSource.addEventListener('scan_error', () => {
+            connStatus.className = 'stale';
+            connStatus.title = 'Connected, but the last session scan failed - data may be out of date';
         });
 
         sseSource.addEventListener('heartbeat', () => {});

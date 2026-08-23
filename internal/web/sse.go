@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -17,6 +19,10 @@ type SSEHub struct {
 	register   chan chan []byte
 	unregister chan chan []byte
 	mu         sync.Mutex
+	// done is closed when Run returns. register and unregister are unbuffered,
+	// so without a way to observe that Run has stopped receiving, every handler
+	// still in flight parks on its deferred unregister forever.
+	done chan struct{}
 }
 
 // NewSSEHub creates a new SSE hub
@@ -25,11 +31,25 @@ func NewSSEHub() *SSEHub {
 		clients:    make(map[chan []byte]struct{}),
 		register:   make(chan chan []byte),
 		unregister: make(chan chan []byte),
+		done:       make(chan struct{}),
 	}
 }
 
-// Run starts the SSE hub, broadcasting session updates every 2s
+// Run starts the SSE hub, broadcasting session updates every 2s.
+//
+// It owns the hub's client set until it returns, at which point it closes done
+// so that handlers blocked on register or unregister can give up.
 func (h *SSEHub) Run(ctx context.Context) {
+	// This goroutine walks every log file on the machine on a timer. net/http
+	// recovers panics per connection, but nothing covers a bare goroutine, so
+	// one malformed file would otherwise take down the terminal UI too.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "csm: session scanner recovered from panic: %v\n", r)
+		}
+	}()
+	defer close(h.done)
+
 	ticker := time.NewTicker(2 * time.Second)
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -60,8 +80,18 @@ func (h *SSEHub) Run(ctx context.Context) {
 			h.mu.Unlock()
 
 		case <-ticker.C:
+			// Discover walks ~/.claude/projects and parses JSONL. With no
+			// dashboard open there is nobody to send the result to, and doing
+			// it anyway burns disk and CPU for as long as csm is running.
+			if !h.hasClients() {
+				continue
+			}
 			allSessions, err := session.Discover()
 			if err != nil {
+				// The browser stays connected and the heartbeat keeps firing,
+				// so without saying anything the page would show stale state
+				// under a "connected" indicator.
+				h.broadcast(formatSSE("scan_error", []byte(`{"message":"session scan failed"}`)))
 				continue
 			}
 			live := filterLiveSessions(allSessions)
@@ -94,6 +124,13 @@ func formatSSE(event string, data []byte) []byte {
 	return buf.Bytes()
 }
 
+// hasClients reports whether any dashboard is currently connected.
+func (h *SSEHub) hasClients() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.clients) > 0
+}
+
 func (h *SSEHub) broadcast(msg []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -121,7 +158,14 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	client := make(chan []byte, 16)
-	h.register <- client
+	select {
+	case h.register <- client:
+	case <-h.done:
+		// The hub stopped before we joined; nothing will ever be sent.
+		return
+	case <-r.Context().Done():
+		return
+	}
 
 	// Send initial session data immediately (active + recently stopped sessions)
 	allSessions, err := session.Discover()
@@ -135,7 +179,11 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer func() {
-		h.unregister <- client
+		select {
+		case h.unregister <- client:
+		case <-h.done:
+			// Run already closed every client channel on its way out.
+		}
 	}()
 
 	for {

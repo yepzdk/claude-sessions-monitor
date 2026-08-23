@@ -159,6 +159,9 @@ nav {
 }
 #connection-status.connected { background: var(--green); }
 #connection-status.disconnected { background: var(--red); }
+/* Connected, but the newest scan failed: the data on screen is stale even
+   though the stream is healthy. */
+#connection-status.stale { background: var(--yellow); }
 
 /* Status bar */
 .status-bar {
