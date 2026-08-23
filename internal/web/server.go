@@ -55,7 +55,15 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	addr := fmt.Sprintf("localhost:%d", s.port)
 	s.server = &http.Server{
 		Addr:    addr,
-		Handler: securityHeaders(mux),
+		Handler: requireLocalHost(securityHeaders(mux)),
+		// A request that dribbles in one header byte at a time otherwise holds
+		// a goroutine and an fd for as long as it likes.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16,
+		// WriteTimeout is deliberately unset: it applies to the whole response,
+		// so any value would cut every SSE stream off at the deadline.
 	}
 
 	// Start SSE hub
@@ -86,6 +94,33 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	}()
 
 	return errCh, nil
+}
+
+// requireLocalHost rejects requests whose Host header is not a loopback name.
+//
+// Listening on localhost keeps the dashboard off the network, but it does not
+// stop DNS rebinding: an attacker points their own domain at 127.0.0.1, and the
+// browser then considers a fetch to this server same-origin and sends it. The
+// Host header still carries the attacker's domain, and it is the only part of
+// such a request that gives it away. Without this check a page the user merely
+// visits can read /api/history and every session timeline behind it -- prompt
+// text, file paths, and anything pasted into a session.
+func requireLocalHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		// Host carries a port for every request the dashboard actually serves,
+		// but it is optional, and SplitHostPort fails rather than passing the
+		// bare name through.
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		switch host {
+		case "localhost", "127.0.0.1", "::1":
+			next.ServeHTTP(w, r)
+		default:
+			http.Error(w, "forbidden host", http.StatusForbidden)
+		}
+	})
 }
 
 // securityHeaders wraps an http.Handler to set standard security headers
