@@ -1,0 +1,27 @@
+# Normalise all text files to LF in the repository and in the working tree.
+# Without this, an editor that writes CRLF rewrites every line of a file and
+# turns a one-line change into a whole-file diff.
+* text=auto eol=lf
+
+# Shell scripts and Go tooling break if they are checked out with CRLF.
+*.sh   text eol=lf
+*.go   text eol=lf
+*.mod  text eol=lf
+*.sum  text eol=lf
+
+# Files that must keep CRLF to work on Windows.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Never touch these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary

@@ -162,7 +162,7 @@ func readSubagentMeta(dir, id string) subagentMeta {
 // prompt, and burying that behind "Working" would leave the user waiting on a
 // session that is really waiting on them. Working needs no change.
 func rollUpSubagentStatus(status Status) bool {
-	return status == StatusWaiting || status == StatusIdle
+	return status == StatusWaiting
 }
 
 // subagentTask describes what a parent's subagents are doing, used when the

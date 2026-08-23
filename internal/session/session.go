@@ -23,7 +23,6 @@ const (
 	StatusWorking    Status = "Working"
 	StatusNeedsInput Status = "Needs Input"
 	StatusWaiting    Status = "Waiting"
-	StatusIdle       Status = "Idle"
 	StatusInactive   Status = "Inactive"
 )
 
@@ -426,68 +425,11 @@ func statusPriority(s Status) int {
 		return 1
 	case StatusWaiting:
 		return 2
-	case StatusIdle:
-		return 3
 	case StatusInactive:
-		return 4
+		return 3
 	default:
-		return 5
+		return 4
 	}
-}
-
-// findMostRecentLog finds the most recently modified .jsonl file in a directory
-func findMostRecentLog(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-
-	// Track both most recent non-empty and most recent overall
-	var mostRecent string
-	var mostRecentTime time.Time
-	var newestOverall string
-	var newestOverallTime time.Time
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		if !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
-		}
-
-		// Skip agent files (subagents) - only track main sessions
-		if strings.HasPrefix(entry.Name(), "agent-") {
-			continue
-		}
-
-		filePath := filepath.Join(dir, entry.Name())
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-
-		// Track newest file regardless of size (for detecting fresh sessions)
-		if info.ModTime().After(newestOverallTime) {
-			newestOverallTime = info.ModTime()
-			newestOverall = filePath
-		}
-
-		// Track newest non-empty file
-		if info.Size() > 0 && info.ModTime().After(mostRecentTime) {
-			mostRecentTime = info.ModTime()
-			mostRecent = filePath
-		}
-	}
-
-	// If there's a newer empty file, a fresh session just started;
-	// return it so parseSession sees 0 entries and shows "-" context
-	if newestOverall != mostRecent && newestOverallTime.After(mostRecentTime) {
-		return newestOverall, nil
-	}
-
-	return mostRecent, nil
 }
 
 // activeLogFreshnessWindow is the second-chance window for a log file that
@@ -1341,18 +1283,4 @@ func FormatAge(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
-
-// GetGhostPIDs returns just the PIDs of ghost processes (for simple listing)
-func GetGhostPIDs() ([]int, error) {
-	ghosts, err := FindGhostProcesses()
-	if err != nil {
-		return nil, err
-	}
-
-	pids := make([]int, len(ghosts))
-	for i, g := range ghosts {
-		pids[i] = g.PID
-	}
-	return pids, nil
 }

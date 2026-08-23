@@ -28,7 +28,6 @@ const (
 	SymbolWorking    = "●"
 	SymbolNeedsInput = "▲"
 	SymbolWaiting    = "◉"
-	SymbolIdle       = "○"
 	SymbolInactive   = "◌"
 )
 
@@ -309,8 +308,6 @@ func getStatusDisplay(status session.Status) (string, string) {
 		return SymbolNeedsInput, Yellow
 	case session.StatusWaiting:
 		return SymbolWaiting, Blue
-	case session.StatusIdle:
-		return SymbolIdle, Gray
 	case session.StatusInactive:
 		return SymbolInactive, Dim
 	default:

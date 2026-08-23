@@ -957,7 +957,6 @@
             case 'Working': return 'working';
             case 'Needs Input': return 'needs-input';
             case 'Waiting': return 'waiting';
-            case 'Idle': return 'idle';
             case 'Inactive': return 'inactive';
             default: return 'inactive';
         }
@@ -968,7 +967,6 @@
             case 'Working': return '\u25CF';     // ●
             case 'Needs Input': return '\u25B2';  // ▲
             case 'Waiting': return '\u25C9';      // ◉
-            case 'Idle': return '\u25CB';          // ○
             case 'Inactive': return '\u25CC';      // ◌
             default: return '\u25CC';
         }
