@@ -2,6 +2,8 @@
 
 A lightweight CLI tool to monitor your Claude Code sessions across multiple projects.
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/yepzdk)
+
 ## Features
 
 - **Live dashboard** showing all active Claude Code sessions
@@ -209,6 +211,10 @@ The tool monitors `~/.claude/projects/` where Claude Code stores session logs. I
 Contributions are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for
 the development workflow, and [SECURITY.md](.github/SECURITY.md) for reporting
 vulnerabilities.
+
+## Support
+
+If csm saves you time, you can [buy me a coffee](https://buymeacoffee.com/yepzdk).
 
 ## License
 
