@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -40,14 +38,6 @@ func NewSSEHub() *SSEHub {
 // It owns the hub's client set until it returns, at which point it closes done
 // so that handlers blocked on register or unregister can give up.
 func (h *SSEHub) Run(ctx context.Context) {
-	// This goroutine walks every log file on the machine on a timer. net/http
-	// recovers panics per connection, but nothing covers a bare goroutine, so
-	// one malformed file would otherwise take down the terminal UI too.
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "csm: session scanner recovered from panic: %v\n", r)
-		}
-	}()
 	defer close(h.done)
 
 	ticker := time.NewTicker(2 * time.Second)
