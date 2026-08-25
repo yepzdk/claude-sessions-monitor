@@ -296,19 +296,19 @@ func QuickSessionStats(logFile string) (stats SessionStats, err error) {
 		}
 
 		// Extract git branch (keep last non-empty value, branch can change mid-session)
-		if b := extractStringField(line, `"stats.GitBranch":"`); b != "" {
+		if b := extractStringField(line, `"gitBranch":"`); b != "" {
 			stats.GitBranch = b
 		}
 
-		// Extract stats.CWD (use first non-empty value, stays constant within a session)
+		// Extract cwd (use first non-empty value, stays constant within a session)
 		if stats.CWD == "" {
-			if c := extractStringField(line, `"stats.CWD":"`); c != "" {
+			if c := extractStringField(line, `"cwd":"`); c != "" {
 				stats.CWD = c
 			}
 		}
 
 		// Extract custom title (keep last non-empty value, title can change mid-session)
-		if t := extractStringField(line, `"stats.CustomTitle":"`); t != "" {
+		if t := extractStringField(line, `"customTitle":"`); t != "" {
 			stats.CustomTitle = t
 		}
 

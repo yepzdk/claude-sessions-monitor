@@ -2,6 +2,8 @@ package session
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -226,5 +228,44 @@ func TestGetDateGroupAtAcrossZonesAndDST(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// The history view shows a session's branch, working directory and title next
+// to its message count and time range. QuickSessionStats reads all of them out
+// of the raw JSONL, so a wrong field name here empties a column for every
+// session without failing anything.
+func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"user","cwd":"/home/dev/api","gitBranch":"main","customTitle":"draft","timestamp":"2026-08-20T10:00:00Z","message":{"content":"first prompt"}}
+{"type":"user","cwd":"/home/dev/api","gitBranch":"feature/x","customTitle":"renamed","timestamp":"2026-08-20T10:05:00Z","message":{"content":"second prompt"}}
+`
+	if err := os.WriteFile(log, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := QuickSessionStats(log)
+	if err != nil {
+		t.Fatalf("QuickSessionStats: %v", err)
+	}
+
+	// Branch and title come from the last line that carries them, because both
+	// can change part-way through a session. cwd cannot, so the first wins.
+	want := SessionStats{
+		MessageCount: 2,
+		StartTime:    time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		EndTime:      time.Date(2026, 8, 20, 10, 5, 0, 0, time.UTC),
+		GitBranch:    "feature/x",
+		FirstPrompt:  "first prompt",
+		CWD:          "/home/dev/api",
+		CustomTitle:  "renamed",
+	}
+	if !stats.StartTime.Equal(want.StartTime) || !stats.EndTime.Equal(want.EndTime) {
+		t.Errorf("time range = %s..%s, want %s..%s",
+			stats.StartTime, stats.EndTime, want.StartTime, want.EndTime)
+	}
+	stats.StartTime, stats.EndTime = want.StartTime, want.EndTime
+	if stats != want {
+		t.Errorf("QuickSessionStats = %+v, want %+v", stats, want)
 	}
 }
