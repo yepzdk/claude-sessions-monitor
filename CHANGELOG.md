@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- CI, release, license and Buy Me a Coffee badges plus a support section in the README.
+
 ### Security
 
 - The web dashboard rejects requests whose `Host` header is not a loopback name. Binding to `localhost` kept the dashboard off the network but did not stop DNS rebinding: a page the user merely visited could point its own domain at `127.0.0.1`, and the browser would then treat a fetch to the dashboard as same-origin. Nothing checked `Host`, so `/api/history` and every session timeline behind it — prompt text, file paths, anything pasted into a session — were readable
