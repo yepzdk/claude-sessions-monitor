@@ -28,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A non-ASCII project name shifted every column to the right of it, because the column was padded by byte count after being truncated by rune
 - `ReadKey` spun at 100% CPU forever when stdin closed, which happens when csm is started detached or loses its pty
 - SSE connections leaked a goroutine each at shutdown, and the hub scanned the filesystem every two seconds even with no dashboard open. A failed scan now tells the dashboard its data is stale instead of leaving it showing frozen state under a "connected" indicator
-- A panic in the background session scanner no longer takes down the whole process, including the terminal UI
 - `-days` and `-port` printed their default twice in `--help`
 
 ### Changed
