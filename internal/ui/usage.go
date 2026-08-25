@@ -102,9 +102,9 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 		fmt.Fprintf(&buf, "  %sNo token usage in the past 5 hours.%s%s", Dim, Reset, nl)
 	}
 
-	if usage != nil && len(usage.Partial) > 0 {
+	if usage != nil && usage.PartialLogs > 0 {
 		fmt.Fprintf(&buf, "  %s! %d log(s) could not be read in full; totals are a lower bound.%s%s",
-			Yellow, len(usage.Partial), Reset, nl)
+			Yellow, usage.PartialLogs, Reset, nl)
 	}
 
 	// Footer

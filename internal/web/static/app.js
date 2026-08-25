@@ -566,8 +566,8 @@
         } else {
             html += '<div class="usage-unavailable">No token usage in the past 5 hours.</div>';
         }
-        if (local && local.partial && local.partial.length > 0) {
-            html += `<div class="usage-partial">${local.partial.length} log(s) could not be read in full; totals are a lower bound.</div>`;
+        if (local && local.partial_logs > 0) {
+            html += `<div class="usage-partial">${local.partial_logs} log(s) could not be read in full; totals are a lower bound.</div>`;
         }
         html += '</div>';
 

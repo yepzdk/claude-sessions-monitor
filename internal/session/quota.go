@@ -25,9 +25,9 @@ type UsageStats struct {
 	// Err explains why these numbers could not be produced. When it is set the
 	// counts are meaningless and must not be rendered as a reading of zero.
 	Err string `json:"error,omitempty"`
-	// Partial lists logs that were only read in part, so a total can say it is
-	// an undercount rather than presenting itself as complete.
-	Partial []string `json:"partial,omitempty"`
+	// PartialLogs counts the logs that were only read in part, so a total can
+	// say it is an undercount rather than presenting itself as complete.
+	PartialLogs int `json:"partial_logs,omitempty"`
 }
 
 // SessionUsage holds token usage for a single session.
@@ -87,7 +87,7 @@ func ComputeUsage() *UsageStats {
 		totalOutput  int
 		totalCache   int
 		sessionUsage []SessionUsage
-		partial      []string
+		partialLogs  int
 	)
 
 	for _, s := range sessions {
@@ -99,7 +99,7 @@ func ComputeUsage() *UsageStats {
 		input, output, cache, hasTokens, scanErr := scanLogTokens(s.LogFile, windowStart)
 		if scanErr != nil {
 			// Keep whatever was counted, but record that the total is a floor.
-			partial = append(partial, s.LogFile)
+			partialLogs++
 		}
 		if !hasTokens {
 			continue
@@ -129,7 +129,7 @@ func ComputeUsage() *UsageStats {
 		CacheTokens:  totalCache,
 		TotalTokens:  totalInput + totalOutput + totalCache,
 		Sessions:     sessionUsage,
-		Partial:      partial,
+		PartialLogs:  partialLogs,
 	}
 }
 

@@ -38,7 +38,7 @@ func TestRenderUsageDistinguishesFailureFromNoUsage(t *testing.T) {
 		}
 	}()
 	RenderUsage(&session.UsageStats{Err: "permission denied"}, nil, false)
-	RenderUsage(&session.UsageStats{Partial: []string{"a.jsonl"}}, nil, false)
+	RenderUsage(&session.UsageStats{PartialLogs: 1}, nil, false)
 	RenderUsage(&session.UsageStats{}, nil, false)
 	RenderUsage(nil, nil, false)
 }
