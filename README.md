@@ -2,6 +2,9 @@
 
 A lightweight CLI tool to monitor your Claude Code sessions across multiple projects.
 
+[![CI](https://github.com/yepzdk/claude-sessions-monitor/actions/workflows/ci.yaml/badge.svg)](https://github.com/yepzdk/claude-sessions-monitor/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/yepzdk/claude-sessions-monitor?logo=github)](https://github.com/yepzdk/claude-sessions-monitor/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/yepzdk)
 
 ## Features
