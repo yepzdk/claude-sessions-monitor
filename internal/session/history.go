@@ -156,35 +156,33 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 			}
 
 			st, statsErr := QuickSessionStats(logFile)
-			msgCount, startTime, endTime := st.MessageCount, st.StartTime, st.EndTime
-			branch, prompt, sessionCwd := st.GitBranch, st.FirstPrompt, st.CWD
 			_ = statsErr // a partial scan still describes the session better than skipping it
-			if startTime.IsZero() {
-				startTime = info.ModTime()
+			if st.StartTime.IsZero() {
+				st.StartTime = info.ModTime()
 			}
-			if endTime.IsZero() {
-				endTime = info.ModTime()
+			if st.EndTime.IsZero() {
+				st.EndTime = info.ModTime()
 			}
 
 			// Re-check cutoff against actual start time
-			if startTime.Before(cutoff) {
+			if st.StartTime.Before(cutoff) {
 				continue
 			}
 
 			// Use cwd for accurate project naming when available
 			displayName := projectName
-			if sessionCwd != "" {
-				displayName = extractProjectName(sessionCwd)
+			if st.CWD != "" {
+				displayName = extractProjectName(st.CWD)
 			}
 
 			sessions = append(sessions, HistorySession{
 				Project:      displayName,
-				GitBranch:    branch,
-				FirstPrompt:  prompt,
-				StartTime:    startTime,
-				EndTime:      endTime,
-				Duration:     endTime.Sub(startTime),
-				MessageCount: msgCount,
+				GitBranch:    st.GitBranch,
+				FirstPrompt:  st.FirstPrompt,
+				StartTime:    st.StartTime,
+				EndTime:      st.EndTime,
+				Duration:     st.EndTime.Sub(st.StartTime),
+				MessageCount: st.MessageCount,
 				LogFile:      logFile,
 			})
 			seen[logFile] = true
