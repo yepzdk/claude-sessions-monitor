@@ -236,8 +236,8 @@ func TestGetDateGroupAtAcrossZonesAndDST(t *testing.T) {
 // field name here empties a column for every session without failing anything.
 func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "session.jsonl")
-	content := `{"type":"user","cwd":"/home/dev/api","gitBranch":"main","customTitle":"draft","timestamp":"2026-08-20T10:00:00Z","message":{"content":"first prompt"}}
-{"type":"user","cwd":"/home/dev/moved","gitBranch":"feature/x","customTitle":"renamed","timestamp":"2026-08-20T10:05:00Z","message":{"content":"second prompt"}}
+	content := `{"type":"user","cwd":"/home/dev/api","gitBranch":"main","timestamp":"2026-08-20T10:00:00Z","message":{"content":"first prompt"}}
+{"type":"user","cwd":"/home/dev/moved","gitBranch":"feature/x","timestamp":"2026-08-20T10:05:00Z","message":{"content":"second prompt"}}
 `
 	if err := os.WriteFile(log, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -248,9 +248,9 @@ func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
 		t.Fatalf("QuickSessionStats: %v", err)
 	}
 
-	// Branch and title come from the last line that carries them, because both
-	// can change part-way through a session. cwd is taken from the first line,
-	// so a later one cannot move a session to another project mid-history.
+	// The branch comes from the last line that carries one, because it can
+	// change part-way through a session. cwd is taken from the first line, so a
+	// later one cannot move a session to another project mid-history.
 	want := SessionStats{
 		MessageCount: 2,
 		StartTime:    time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
@@ -258,7 +258,6 @@ func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
 		GitBranch:    "feature/x",
 		FirstPrompt:  "first prompt",
 		CWD:          "/home/dev/api",
-		CustomTitle:  "renamed",
 	}
 	if !stats.StartTime.Equal(want.StartTime) || !stats.EndTime.Equal(want.EndTime) {
 		t.Errorf("time range = %s..%s, want %s..%s",

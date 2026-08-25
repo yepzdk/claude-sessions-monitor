@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `QuickSessionStats` returns a struct and an error instead of seven positional values, four of them adjacent strings that could be swapped without the compiler noticing
+- `QuickSessionStats` returns a struct and an error instead of six positional values, three of them adjacent strings that could be swapped without the compiler noticing
 
 ### Removed
 

@@ -256,9 +256,9 @@ func extractProjectName(fullPath string) string {
 // SessionStats is what a fast scan of a JSONL log can tell us about a session
 // without parsing every line as JSON.
 //
-// These used to be seven positional return values, four of them adjacent bare
-// strings, so two of them could be swapped at a call site or inside the scan
-// loop without the compiler noticing.
+// Three of the fields are bare strings, which is why this is a struct rather
+// than positional returns: two of them could otherwise be swapped at a call
+// site or inside the scan loop without the compiler noticing.
 type SessionStats struct {
 	MessageCount int
 	StartTime    time.Time
@@ -266,7 +266,6 @@ type SessionStats struct {
 	GitBranch    string
 	FirstPrompt  string
 	CWD          string
-	CustomTitle  string
 }
 
 // QuickSessionStats scans a JSONL log file for the fields the history view
@@ -313,11 +312,6 @@ func QuickSessionStats(logFile string) (stats SessionStats, err error) {
 			if c := extractStringField(line, `"cwd":"`); c != "" {
 				stats.CWD = c
 			}
-		}
-
-		// Extract custom title (keep last non-empty value, title can change mid-session)
-		if t := extractStringField(line, `"customTitle":"`); t != "" {
-			stats.CustomTitle = t
 		}
 
 		// Extract timestamp via string matching (avoids full JSON parse)
