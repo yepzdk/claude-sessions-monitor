@@ -4,8 +4,3 @@ csm
 # Build artifacts
 dist/
 claude-sessions-monitor
-
-# IDE
-.idea/
-.vscode/
-*.iml
