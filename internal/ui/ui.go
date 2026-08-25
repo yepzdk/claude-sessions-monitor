@@ -630,7 +630,7 @@ func formatProject(s session.Session, maxLen int) string {
 	// Incomplete data warning: this row's numbers are partly missing, so they
 	// must not read as measurements.
 	if s.Degraded != "" {
-		suffixes = append(suffixes, Red+"[?]"+Reset)
+		suffixes = append(suffixes, Yellow+"[?]"+Reset)
 		suffixLens = append(suffixLens, 3) // [?]
 	}
 
