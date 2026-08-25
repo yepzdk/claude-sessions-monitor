@@ -60,9 +60,6 @@ func ReadKey(keyCh chan<- rune, done <-chan struct{}) {
 				// perfectly healthy.
 				return
 			}
-			if n == 0 {
-				continue
-			}
 			for _, key := range decodeKeys(buf[:n]) {
 				select {
 				case keyCh <- key:
