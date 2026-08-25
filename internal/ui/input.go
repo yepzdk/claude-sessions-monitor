@@ -1,10 +1,8 @@
 package ui
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"syscall"
 
 	"golang.org/x/term"
 )
@@ -56,13 +54,10 @@ func ReadKey(keyCh chan<- rune, done <-chan struct{}) {
 		default:
 			n, err := os.Stdin.Read(buf)
 			if err != nil {
-				// EINTR is worth retrying. EOF is not: stdin is gone for good
-				// when csm is started detached or its pty is destroyed, and
-				// retrying it spins this goroutine at full speed forever while
-				// the display keeps refreshing and looks perfectly healthy.
-				if errors.Is(err, syscall.EINTR) {
-					continue
-				}
+				// Stdin is gone for good when csm is started detached or its
+				// pty is destroyed. Retrying spins this goroutine at full speed
+				// forever while the display keeps refreshing and looks
+				// perfectly healthy.
 				return
 			}
 			if n == 0 {
