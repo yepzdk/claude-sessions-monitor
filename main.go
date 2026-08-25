@@ -111,6 +111,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// A failure inside the web server reaches the main loop rather than being
+	// printed here: this goroutine writes onto the alternate screen, where the
+	// next frame overwrites it, and the deferred restore below never runs.
+	webFatal := make(chan error, 1)
+
 	// Start web server in background if requested
 	var webURL string
 	var webBrowseURL string
@@ -128,7 +133,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			}
 			go func() {
 				if err := <-webErrCh; err != nil {
-					fmt.Fprintf(os.Stderr, "\nWeb server error: %v\n", err)
+					webFatal <- err
 				}
 			}()
 			webBrowseURL = "http://" + srv.Addr()
@@ -167,6 +172,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 	}
 
 	// Take over the screen and ensure cleanup on exit
+	var fatalErr error
 	ui.EnterAltScreen()
 	ui.HideCursor()
 	defer func() {
@@ -175,6 +181,12 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 		ui.ShowCursor()
 		ui.ResetTerminalTitle()
 		ui.ExitAltScreen()
+		if fatalErr != nil {
+			// After the restore above, so the message lands on the shell's
+			// screen instead of the one that is about to be discarded.
+			fmt.Fprintf(os.Stderr, "csm: %v\n", fatalErr)
+			os.Exit(1)
+		}
 		fmt.Println("Goodbye!")
 	}()
 
@@ -233,6 +245,9 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) {
 			cancel()
 			return
 		case <-ctx.Done():
+			return
+		case fatalErr = <-webFatal:
+			cancel()
 			return
 		case key := <-keyCh:
 			// Any keypress clears feedback from the previous jump, so a stale

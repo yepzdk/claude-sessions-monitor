@@ -66,9 +66,6 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 		// so any value would cut every SSE stream off at the deadline.
 	}
 
-	// Start SSE hub
-	go s.hub.Run(ctx)
-
 	// Bind listener synchronously so caller knows if port is available
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -79,12 +76,14 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 		return nil, fmt.Errorf("failed to listen on port %d: %w\nUse --port <number> to specify a different port, or check what's using it: %s", s.port, err, hint)
 	}
 
-	errCh := make(chan error, 1)
+	// Buffered for both senders below, each of which reports at most once, so
+	// neither can block on a caller that has stopped listening.
+	errCh := make(chan error, 2)
+	go s.hub.Run(ctx, errCh)
 	go func() {
 		if err := s.server.Serve(ln); err != http.ErrServerClosed {
 			errCh <- err
 		}
-		close(errCh)
 	}()
 
 	// Shut down when context is cancelled

@@ -4,12 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
+
+// discoverSessions is a seam: the scan is the only thing in this package that
+// can panic, and it cannot be driven from a test through the real filesystem.
+var discoverSessions = session.Discover
 
 // SSEHub manages Server-Sent Events connections
 type SSEHub struct {
@@ -38,7 +44,19 @@ func NewSSEHub() *SSEHub {
 //
 // It owns the hub's client set until it returns, at which point it closes done
 // so that handlers blocked on register or unregister can give up.
-func (h *SSEHub) Run(ctx context.Context) {
+//
+// A panic in the scan is still fatal, but it travels to fatal instead of
+// killing the goroutine where it happened: csm shares this process with a
+// terminal held in raw mode on the alternate screen, and only the caller's
+// deferred restore can hand it back. Crashing here would drop the user at an
+// echoless prompt with the trace painted over a screen that is about to be
+// discarded.
+func (h *SSEHub) Run(ctx context.Context, fatal chan<- error) {
+	defer func() {
+		if r := recover(); r != nil {
+			fatal <- fmt.Errorf("session scanner panicked: %v\n\n%s", r, debug.Stack())
+		}
+	}()
 	defer close(h.done)
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -77,7 +95,7 @@ func (h *SSEHub) Run(ctx context.Context) {
 			if !h.hasClients() {
 				continue
 			}
-			allSessions, err := session.Discover()
+			allSessions, err := discoverSessions()
 			if err != nil {
 				// The browser stays connected and the heartbeat keeps firing,
 				// so without saying anything the page would show stale state
@@ -159,7 +177,7 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send initial session data immediately (active + recently stopped sessions)
-	allSessions, err := session.Discover()
+	allSessions, err := discoverSessions()
 	if err == nil {
 		live := filterLiveSessions(allSessions)
 		data, err := json.Marshal(live)

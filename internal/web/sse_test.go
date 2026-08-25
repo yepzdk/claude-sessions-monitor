@@ -4,8 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
 
 // Run closes every client channel and returns when the context is cancelled.
@@ -19,7 +22,7 @@ func TestHandleSSEReturnsAfterHubShutdown(t *testing.T) {
 
 	hub := NewSSEHub()
 	ctx, cancel := context.WithCancel(context.Background())
-	go hub.Run(ctx)
+	go hub.Run(ctx, make(chan error, 1))
 
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleSSE))
 	defer srv.Close()
@@ -57,7 +60,7 @@ func TestHandleSSEReturnsAfterHubShutdown(t *testing.T) {
 func TestHandleSSEDoesNotBlockWhenHubAlreadyStopped(t *testing.T) {
 	hub := NewSSEHub()
 	ctx, cancel := context.WithCancel(context.Background())
-	go hub.Run(ctx)
+	go hub.Run(ctx, make(chan error, 1))
 	cancel()
 	time.Sleep(100 * time.Millisecond) // let Run return
 
@@ -74,5 +77,44 @@ func TestHandleSSEDoesNotBlockWhenHubAlreadyStopped(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("HandleSSE blocked on register after the hub stopped")
+	}
+}
+
+// csm runs this hub in the same process as a terminal held in raw mode on the
+// alternate screen. A panic that kills the goroutine where it happens skips
+// the caller's deferred restore, dropping the user at an echoless prompt with
+// no way to tell csm crashed. The panic must reach the caller instead.
+func TestRunReportsScannerPanicInsteadOfCrashing(t *testing.T) {
+	orig := discoverSessions
+	discoverSessions = func() ([]session.Session, error) {
+		panic("malformed log")
+	}
+	defer func() { discoverSessions = orig }()
+
+	hub := NewSSEHub()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fatal := make(chan error, 1)
+	go hub.Run(ctx, fatal)
+
+	// The scan is skipped while nobody is connected, so the panic needs a
+	// registered client before the tick can reach it.
+	client := make(chan []byte, 1)
+	hub.register <- client
+
+	select {
+	case err := <-fatal:
+		if !strings.Contains(err.Error(), "malformed log") {
+			t.Errorf("report does not name the panic: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic never reached the caller; csm would have crashed with the terminal still in raw mode")
+	}
+
+	select {
+	case <-hub.done:
+	case <-time.After(time.Second):
+		t.Error("done was not closed, so connected handlers park forever")
 	}
 }
