@@ -430,6 +430,7 @@
                 html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
                     <div class="history-row-main">
                         <span class="history-branch">${s.git_branch ? esc(s.git_branch) : '-'}</span>
+                        ${s.degraded ? `<span class="badge session-degraded-badge" title="${esc(s.degraded)}">?</span>` : ''}
                         <span class="history-date">${date}</span>
                         <span class="history-messages">${s.message_count || 0}</span>
                         <span class="history-duration">${dur}</span>

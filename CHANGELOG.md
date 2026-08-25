@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `[ghost]` badge could never appear: the flag behind it was always false, and orphaned sessions were filtered out of the live view before the badge could render
 - A non-ASCII project name shifted every column to the right of it, because the column was padded by byte count after being truncated by rune
 - `ReadKey` spun at 100% CPU forever when stdin closed, which happens when csm is started detached or loses its pty
+- A session whose log could not be read to the end was listed in the history view as "0s, 0 msgs", and that zero was folded into the footer total. Such rows now carry the same `[?]` the live view uses, in the web dashboard as well as the terminal, and the total says it is a lower bound
+- A panic while scanning sessions left the terminal in raw mode on the alternate screen: csm exited with echo off and an invisible shell prompt, and the stack trace was painted onto a screen the terminal then discarded. It still exits, but restores the terminal first and prints the trace where it can be read
 - SSE connections leaked a goroutine each at shutdown, and the hub scanned the filesystem every two seconds even with no dashboard open. A failed scan now tells the dashboard its data is stale instead of leaving it showing frozen state under a "connected" indicator
 - `-days` and `-port` printed their default twice in `--help`
 

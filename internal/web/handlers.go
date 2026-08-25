@@ -96,7 +96,11 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Enrich with stats from the JSONL file
-			st, _ := session.QuickSessionStats(s.LogFile)
+			st, statsErr := session.QuickSessionStats(s.LogFile)
+			degraded := ""
+			if statsErr != nil {
+				degraded = statsErr.Error()
+			}
 			if st.StartTime.IsZero() {
 				st.StartTime = s.LastActivity
 			}
@@ -120,6 +124,7 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 				MessageCount: st.MessageCount,
 				LastMessage:  s.LastMessage,
 				LogFile:      s.LogFile,
+				Degraded:     degraded,
 			})
 		}
 

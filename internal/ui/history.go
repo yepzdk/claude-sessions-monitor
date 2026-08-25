@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itk-dev/claude-sessions-monitor/internal/session"
 )
@@ -63,6 +64,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool,
 	var currentGroup string
 	var totalDuration time.Duration
 	totalSessions := 0
+	degradedRows := 0
 	rowsUsed := 0
 	truncated := 0
 
@@ -98,8 +100,8 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool,
 		// Format duration
 		duration := formatDuration(s.Duration)
 
-		row := fmt.Sprintf("%-*s %s%-*s%s %-*s %-*s %*d",
-			l.project, truncate(s.Project, l.project),
+		row := fmt.Sprintf("%s %s%-*s%s %-*s %-*s %*d",
+			historyProjectCell(s, l.project),
 			Gray, l.branch, truncate(s.GitBranch, l.branch), Reset,
 			l.startTime, startTime,
 			l.duration, duration,
@@ -109,6 +111,9 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool,
 
 		totalDuration += s.Duration
 		totalSessions++
+		if s.Degraded != "" {
+			degradedRows++
+		}
 	}
 
 	// Truncation indicator
@@ -119,6 +124,10 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool,
 	// Footer with totals
 	fmt.Fprintf(&buf, "%s%s%s%s%s", nl, Dim, strings.Repeat("─", l.totalWidth), Reset, nl)
 	fmt.Fprintf(&buf, "%sTotal: %d sessions, %s%s%s", Dim, totalSessions, formatDuration(totalDuration), Reset, nl)
+	if degradedRows > 0 {
+		fmt.Fprintf(&buf, "%s! %d session(s) could not be read in full; the total is a lower bound.%s%s",
+			Yellow, degradedRows, Reset, nl)
+	}
 
 	if showFooter {
 		fmt.Fprintf(&buf, "%s%sl: live view | u: usage | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
@@ -143,4 +152,24 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh", hours)
 	}
 	return fmt.Sprintf("%dh %dm", hours, minutes)
+}
+
+// historyProjectCell renders the project column, marking a row whose log could
+// not be read to the end. Its duration and message count are a floor, and
+// without the marker a session someone spent an afternoon in reads as "0s, 0".
+//
+// The cell is padded here rather than by the caller's %-*s because the marker
+// carries colour codes, which pad as though they were visible characters.
+func historyProjectCell(s session.HistorySession, width int) string {
+	if s.Degraded == "" {
+		return fmt.Sprintf("%-*s", width, truncate(s.Project, width))
+	}
+
+	const marker = " [?]"
+	name := truncate(s.Project, width-len(marker))
+	pad := width - utf8.RuneCountInString(name) - len(marker)
+	if pad < 0 {
+		pad = 0
+	}
+	return name + strings.Repeat(" ", pad) + " " + Yellow + "[?]" + Reset
 }

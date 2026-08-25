@@ -81,3 +81,27 @@ func TestActiveSessionsKeepsGhosts(t *testing.T) {
 		t.Error("ghost session was filtered out; its [ghost] badge can never render")
 	}
 }
+
+// A history row whose log stopped short must say so, or its "0s, 0 msgs" reads
+// as a measurement. The marker also has to fit the project column, or every
+// column to its right shifts.
+func TestHistoryProjectCellMarksUnreadableLog(t *testing.T) {
+	const width = 20
+	good := historyProjectCell(session.HistorySession{Project: "api"}, width)
+	if visibleWidth(good) != width {
+		t.Errorf("plain cell width = %d, want %d", visibleWidth(good), width)
+	}
+
+	// A short name so the cell has to pad around the marker: padding it by
+	// byte count instead measures the marker's colour codes as visible.
+	marked := historyProjectCell(session.HistorySession{
+		Project:  "api",
+		Degraded: "scan stopped early",
+	}, width)
+	if !strings.Contains(marked, "[?]") {
+		t.Errorf("degraded row is not marked: %q", marked)
+	}
+	if visibleWidth(marked) != width {
+		t.Errorf("marked cell width = %d, want %d; the columns after it shift", visibleWidth(marked), width)
+	}
+}

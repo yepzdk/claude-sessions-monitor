@@ -269,3 +269,42 @@ func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
 		t.Errorf("QuickSessionStats = %+v, want %+v", stats, want)
 	}
 }
+
+// A log that cannot be read to the end yields no messages and no time range.
+// Presented as a finished reading, an afternoon's work shows up in the history
+// view as "0s, 0 msgs" and quietly drags the footer total down with it.
+func TestDiscoverHistoryMarksSessionsWithUnreadableLogs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectDir := filepath.Join(home, ".claude", "projects", "-tmp-api")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := time.Now().Format(time.RFC3339Nano)
+	var b strings.Builder
+	b.WriteString(`{"type":"user","cwd":"/tmp/api","timestamp":"` + ts + `","message":{"content":"hello"}}` + "\n")
+	// One line past the 10MB scanner cap: the scan stops here and the two
+	// prompts below it are never counted.
+	b.WriteString(`{"type":"user","pad":"` + strings.Repeat("x", 11*1024*1024) + `"}` + "\n")
+	b.WriteString(`{"type":"user","timestamp":"` + ts + `","message":{"content":"second"}}` + "\n")
+
+	logFile := filepath.Join(projectDir, "session.jsonl")
+	if err := os.WriteFile(logFile, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := DiscoverHistory(7)
+	if err != nil {
+		t.Fatalf("DiscoverHistory: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want the one written above", len(sessions))
+	}
+	if sessions[0].Degraded == "" {
+		t.Error("row is not marked, so its truncated counts read as a measurement")
+	}
+	if !strings.Contains(sessions[0].Degraded, logFile) {
+		t.Errorf("mark does not name the unreadable log: %q", sessions[0].Degraded)
+	}
+}

@@ -22,6 +22,9 @@ type HistorySession struct {
 	FirstPrompt  string        `json:"first_prompt"`
 	LastMessage  string        `json:"last_message,omitempty"`
 	LogFile      string        `json:"log_file"`
+	// Degraded names why this session's log could not be read to the end. Its
+	// message count and duration are a floor when it is set, not a reading.
+	Degraded string `json:"degraded,omitempty"`
 }
 
 // SessionIndex represents the structure of sessions-index.json
@@ -156,7 +159,13 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 			}
 
 			st, statsErr := QuickSessionStats(logFile)
-			_ = statsErr // a partial scan still describes the session better than skipping it
+			degraded := ""
+			if statsErr != nil {
+				// The row still names the session, because a partial scan
+				// describes it better than dropping it does. What it must not do
+				// is show an afternoon's work as "0s, 0 msgs".
+				degraded = statsErr.Error()
+			}
 			if st.StartTime.IsZero() {
 				st.StartTime = info.ModTime()
 			}
@@ -184,6 +193,7 @@ func DiscoverHistory(days int) ([]HistorySession, error) {
 				Duration:     st.EndTime.Sub(st.StartTime),
 				MessageCount: st.MessageCount,
 				LogFile:      logFile,
+				Degraded:     degraded,
 			})
 			seen[logFile] = true
 		}
