@@ -231,14 +231,13 @@ func TestGetDateGroupAtAcrossZonesAndDST(t *testing.T) {
 	}
 }
 
-// The history view shows a session's branch, working directory and title next
-// to its message count and time range. QuickSessionStats reads all of them out
-// of the raw JSONL, so a wrong field name here empties a column for every
-// session without failing anything.
+// Every history row -- its project name, branch, opening prompt, message count
+// and time range -- is read out of the raw JSONL by this one function. A wrong
+// field name here empties a column for every session without failing anything.
 func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "session.jsonl")
 	content := `{"type":"user","cwd":"/home/dev/api","gitBranch":"main","customTitle":"draft","timestamp":"2026-08-20T10:00:00Z","message":{"content":"first prompt"}}
-{"type":"user","cwd":"/home/dev/api","gitBranch":"feature/x","customTitle":"renamed","timestamp":"2026-08-20T10:05:00Z","message":{"content":"second prompt"}}
+{"type":"user","cwd":"/home/dev/moved","gitBranch":"feature/x","customTitle":"renamed","timestamp":"2026-08-20T10:05:00Z","message":{"content":"second prompt"}}
 `
 	if err := os.WriteFile(log, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -250,7 +249,8 @@ func TestQuickSessionStatsExtractsEveryHistoryField(t *testing.T) {
 	}
 
 	// Branch and title come from the last line that carries them, because both
-	// can change part-way through a session. cwd cannot, so the first wins.
+	// can change part-way through a session. cwd is taken from the first line,
+	// so a later one cannot move a session to another project mid-history.
 	want := SessionStats{
 		MessageCount: 2,
 		StartTime:    time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
