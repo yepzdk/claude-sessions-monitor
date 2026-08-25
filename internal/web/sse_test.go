@@ -12,6 +12,11 @@ import (
 // If register/unregister still block after that, each connected handler parks
 // forever on its deferred unregister and never releases its goroutine.
 func TestHandleSSEReturnsAfterHubShutdown(t *testing.T) {
+	// HandleSSE scans for sessions before it streams. Pointed at a real home
+	// directory that scan takes seconds, and the test would measure the
+	// developer's session count instead of the shutdown path.
+	t.Setenv("HOME", t.TempDir())
+
 	hub := NewSSEHub()
 	ctx, cancel := context.WithCancel(context.Background())
 	go hub.Run(ctx)
