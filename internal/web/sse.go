@@ -33,7 +33,8 @@ func NewSSEHub() *SSEHub {
 	}
 }
 
-// Run starts the SSE hub, broadcasting session updates every 2s.
+// Run starts the SSE hub, broadcasting session updates every 2s for as
+// long as a dashboard is connected.
 //
 // It owns the hub's client set until it returns, at which point it closes done
 // so that handlers blocked on register or unregister can give up.
