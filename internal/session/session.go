@@ -351,6 +351,9 @@ func Discover() ([]Session, error) {
 		return nil, err
 	}
 
+	// Claude Code's own pid <-> session registry, when this version writes one.
+	registry, haveRegistry := readSessionRegistry()
+
 	var sessions []Session
 	// Track the log files we actually parse this sweep so stale entries can be
 	// evicted from the parse cache afterwards (see pruneParseCache).
@@ -373,6 +376,21 @@ func Discover() ([]Session, error) {
 		if err != nil || len(logFiles) == 0 {
 			continue
 		}
+		if haveRegistry {
+			// A live session that has been quiet longer than the freshness
+			// window loses its positional slot to any fresher log, including
+			// one from a session that already exited. The registry knows it
+			// is alive, so list it regardless.
+			present := make(map[string]bool, len(logFiles))
+			for _, f := range logFiles {
+				present[f] = true
+			}
+			for _, f := range registryLogsForDir(registry, entry.Name(), projectDir) {
+				if !present[f] {
+					logFiles = append(logFiles, f)
+				}
+			}
+		}
 
 		for i, logFile := range logFiles {
 			liveFiles[logFile] = struct{}{}
@@ -392,17 +410,15 @@ func Discover() ([]Session, error) {
 			// wrongly showing Inactive. Only carry a specific pid through
 			// (for GhostPID / --kill-ghosts) when the pairing is one we're
 			// actually confident in.
-			isRunning := len(pids) > 0
-			pid := 0
-			if i < len(pids) {
-				pid = pids[i]
-			}
-			// The pairing above is positional, so it only actually identifies a
-			// process when there's exactly one candidate on each side. Anything
-			// that needs to be *right* about which process belongs to this
-			// session (rather than merely "some pid for this directory", which
-			// is all --kill-ghosts needs) must check this first.
-			pidConfident := len(pids) == 1 && len(logFiles) == 1
+			// With a registry the pairing is exact and per-session; without
+			// one it is the positional guess described above, and only
+			// identifies a process when there's exactly one candidate on
+			// each side. Anything that needs to be *right* about which
+			// process belongs to this session (rather than merely "some pid
+			// for this directory", which is all --kill-ghosts needs) must
+			// check PIDConfident first.
+			isRunning, pid, pidConfident := pairProcess(
+				sessionIDFromLogFile(logFile), registry, haveRegistry, pids, i, len(logFiles))
 
 			session, err := parseSession(entry.Name(), logFile, isRunning, pid)
 			if err != nil {
