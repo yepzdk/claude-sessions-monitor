@@ -98,6 +98,7 @@ var (
 	processScanMu       sync.Mutex
 	processScanAt       time.Time
 	processScanDirs     map[string][]int
+	processScanOrphaned map[int]bool
 	processScanRegistry map[string]registryEntry
 	processScanHaveReg  bool
 )
@@ -114,27 +115,30 @@ var (
 // blink on every exit. Reading them together also absorbs a torn read: Claude
 // Code rewrites these files in place, so an unlucky read fails to parse and
 // drops an entry, and pinning that to one tick keeps it from recurring.
-func cachedRunningClaudeDirs() (map[string][]int, map[string]registryEntry, bool, error) {
+//
+// The orphaned set (pids whose parent is gone) rides along for the same
+// reason: it is read off the same ps output as dirs.
+func cachedRunningClaudeDirs() (map[string][]int, map[int]bool, map[string]registryEntry, bool, error) {
 	processScanMu.Lock()
 	defer processScanMu.Unlock()
 
 	if processScanDirs != nil && processScanTTL > 0 && time.Since(processScanAt) < processScanTTL {
-		return processScanDirs, processScanRegistry, processScanHaveReg, nil
+		return processScanDirs, processScanOrphaned, processScanRegistry, processScanHaveReg, nil
 	}
 
-	dirs, err := getRunningClaudeDirs()
+	dirs, orphaned, err := getRunningClaudeDirs()
 	if err != nil {
 		// Leave any previous result in place but do not extend its lifetime;
 		// a caller asking again should retry the scan rather than be handed
 		// a stale map as though it were fresh.
-		return nil, nil, false, err
+		return nil, nil, nil, false, err
 	}
 	registry, haveRegistry := readSessionRegistry(claudePIDSet(dirs))
 
-	processScanDirs = dirs
+	processScanDirs, processScanOrphaned = dirs, orphaned
 	processScanRegistry, processScanHaveReg = registry, haveRegistry
 	processScanAt = time.Now()
-	return processScanDirs, processScanRegistry, processScanHaveReg, nil
+	return processScanDirs, processScanOrphaned, processScanRegistry, processScanHaveReg, nil
 }
 
 // --- 3. Discover result cache ------------------------------------------------

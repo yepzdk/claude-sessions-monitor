@@ -26,7 +26,7 @@ func TestParseSessionKeepsRunningSessionWhenLogIsUnreadable(t *testing.T) {
 		t.Skip("filesystem does not enforce permissions; cannot simulate a read failure")
 	}
 
-	s, err := parseSession("-home-u-proj", logFile, true, 4242)
+	s, err := parseSession("-home-u-proj", logFile, true, 4242, false)
 	if err != nil {
 		t.Fatalf("parseSession returned error: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestParseSessionTreatsEmptyLogAsStartingUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := parseSession("-home-u-proj", logFile, true, 4242)
+	s, err := parseSession("-home-u-proj", logFile, true, 4242, false)
 	if err != nil {
 		t.Fatalf("parseSession returned error: %v", err)
 	}

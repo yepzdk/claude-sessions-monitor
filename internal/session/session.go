@@ -220,7 +220,36 @@ func ClaudeProjectsDir() (string, error) {
 // "nothing is running".
 var listProcesses = func() ([]byte, error) {
 	// ps directly, with no shell pipeline, to avoid shell injection risks.
-	return exec.Command("ps", "ax", "-o", "pid=,comm=").Output()
+	return exec.Command("ps", "ax", "-o", "pid=,ppid=,comm=").Output()
+}
+
+// psLine is one parsed row of `ps -o pid=,ppid=,comm=`.
+type psLine struct {
+	pid, ppid int
+	comm      string
+}
+
+// parsePSOutput splits ps output into rows, skipping anything malformed.
+func parsePSOutput(output []byte) []psLine {
+	var rows []psLine
+	for _, line := range bytes.Split(output, []byte("\n")) {
+		fields := bytes.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// Atoi rather than Sscanf: a malformed field is reported instead of
+		// leaving the variable at zero and relying on the check below.
+		pid, err := strconv.Atoi(string(fields[0]))
+		if err != nil || pid == 0 {
+			continue
+		}
+		ppid, err := strconv.Atoi(string(fields[1]))
+		if err != nil {
+			continue
+		}
+		rows = append(rows, psLine{pid: pid, ppid: ppid, comm: string(fields[len(fields)-1])})
+	}
+	return rows
 }
 
 // getRunningClaudeDirs returns a map of encoded directory names to PIDs where
@@ -232,41 +261,43 @@ var listProcesses = func() ([]byte, error) {
 // "No active Claude sessions." with total confidence while sessions ran.
 // The keys are in the same format as the project directory names (e.g., -Users-username-Projects-...)
 // Multiple Claude processes in the same directory are tracked as separate PIDs.
-func getRunningClaudeDirs() (map[string][]int, error) {
+//
+// The second result is the set of claude pids whose parent shell or IDE is
+// gone and init has adopted them (ppid 1). That, not silence, is what
+// distinguishes a ghost from a session someone left open overnight. It is a
+// side lookup rather than a field on the pid list so pairProcess and the
+// registry code keep working on plain pids.
+//
+// ponytail: ppid==1 is exact on macOS; on Linux a subreaper (some systemd
+// user sessions) can adopt orphans instead of pid 1, which this misses.
+func getRunningClaudeDirs() (map[string][]int, map[int]bool, error) {
 	dirs := make(map[string][]int)
+	orphaned := make(map[int]bool)
 
 	output, err := listProcesses()
 	if err != nil {
-		return nil, fmt.Errorf("listing processes with ps: %w", err)
+		return nil, nil, fmt.Errorf("listing processes with ps: %w", err)
 	}
 
-	// Parse ps output to find claude processes
-	for _, line := range bytes.Split(output, []byte("\n")) {
-		fields := bytes.Fields(line)
-		if len(fields) < 2 {
+	for _, row := range parsePSOutput(output) {
+		if !strings.HasSuffix(row.comm, "claude") {
 			continue
 		}
-		comm := string(fields[len(fields)-1])
-		if !strings.HasSuffix(comm, "claude") {
-			continue
-		}
-
-		pid, err := strconv.Atoi(string(fields[0]))
-		if err != nil || pid == 0 {
-			continue
+		if row.ppid == 1 {
+			orphaned[row.pid] = true
 		}
 
 		// Get cwd for each process
-		path, err := getProcessCwd(pid)
+		path, err := getProcessCwd(row.pid)
 		if err != nil || path == "" {
 			continue
 		}
 		// Convert to encoded format (same as project directory names)
 		encoded := encodeProjectPath(path)
-		dirs[encoded] = append(dirs[encoded], pid)
+		dirs[encoded] = append(dirs[encoded], row.pid)
 	}
 
-	return dirs, nil
+	return dirs, orphaned, nil
 }
 
 // getProcessCwd returns the current working directory of a process by PID.
@@ -348,7 +379,7 @@ func Discover() ([]Session, error) {
 	// Code's own pid <-> session registry when this version writes one. Both
 	// come from one TTL-cached snapshot so they cannot disagree about what is
 	// running, and so ps/lsof are not spawned on every refresh.
-	runningDirs, registry, haveRegistry, err := cachedRunningClaudeDirs()
+	runningDirs, orphanedPIDs, registry, haveRegistry, err := cachedRunningClaudeDirs()
 	if err != nil {
 		return nil, err
 	}
@@ -418,8 +449,12 @@ func Discover() ([]Session, error) {
 			// check PIDConfident first.
 			isRunning, pid, pidConfident := pairProcess(
 				sessionIDFromLogFile(logFile), entry.Name(), registry, haveRegistry, pids, i, len(logFiles))
+			// Orphan-ness follows whichever pid the pairing settled on; with
+			// no pid (unconfident or unknown process) the session cannot be
+			// a ghost, which is the safe side.
+			orphaned := orphanedPIDs[pid]
 
-			session, err := parseSession(entry.Name(), logFile, isRunning, pid)
+			session, err := parseSession(entry.Name(), logFile, isRunning, pid, orphaned)
 			if err != nil {
 				continue
 			}
@@ -698,7 +733,7 @@ func parseLogFileWithLimit(logFile string, keep int, maxLineBytes int) (parsedLo
 }
 
 // parseSession parses a session from its log file
-func parseSession(projectName, logFile string, isRunning bool, pid int) (Session, error) {
+func parseSession(projectName, logFile string, isRunning bool, pid int, orphaned bool) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
 		LogFile:     logFile,
@@ -740,7 +775,7 @@ func parseSession(projectName, logFile string, isRunning bool, pid int) (Session
 		session.Degraded = err.Error()
 	}
 
-	applyParsedLog(&session, pl, isRunning, pid, info.ModTime())
+	applyParsedLog(&session, pl, isRunning, pid, orphaned, info.ModTime())
 	return session, nil
 }
 
@@ -748,7 +783,7 @@ func parseSession(projectName, logFile string, isRunning bool, pid int) (Session
 // come straight from pl (cacheable); the status and PID fields are recomputed
 // on every call because they depend on wall-clock time and the running-process
 // set, both of which change without the file changing.
-func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fileModTime time.Time) {
+func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, orphaned bool, fileModTime time.Time) {
 	if pl.cwd != "" {
 		session.Project = extractProjectName(pl.cwd)
 		session.CWD = pl.cwd
@@ -790,9 +825,11 @@ func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, fil
 	}
 
 	// Derived last, once LastActivity has settled: a ghost is a live process
-	// whose log stopped moving long ago. determineStatus cannot decide this
-	// because it runs before lastEntryTime is applied.
-	session.IsGhost = isRunning && time.Since(session.LastActivity) > GhostThreshold
+	// nobody can reach anymore -- its parent is gone -- whose log has also
+	// stopped moving. Silence alone is not enough: a tab left open overnight
+	// is silent for hours and is not a ghost. determineStatus cannot decide
+	// this because it runs before lastEntryTime is applied.
+	session.IsGhost = isRunning && orphaned && time.Since(session.LastActivity) > GhostThreshold
 }
 
 // extractLastAssistantMessage extracts the last text message from an assistant entry
@@ -995,14 +1032,14 @@ func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 	return family, maj, minor, true
 }
 
-// GhostThreshold is how long a running process's log must be silent before
-// --kill-ghosts will offer to terminate it.
+// GhostThreshold is how long an orphaned process's log must be silent before
+// it is reported as a ghost and --kill-ghosts will offer to terminate it.
 //
-// An hour is deliberately far beyond any normal pause. The cost of the two
-// mistakes is not symmetric: waiting longer to reap an orphan costs some idle
-// memory, while reaping too early kills a session someone is using. A model
-// can sit on a single long tool call, and a user can leave a session open over
-// lunch, without either being abandoned.
+// Being orphaned (see getRunningClaudeDirs) is the primary signal; the hour of
+// silence guards the one legitimate orphan, a headless `claude -p` job whose
+// launching shell has exited but which is still producing output. Waiting
+// longer to reap a true orphan costs some idle memory; reaping too early kills
+// work in progress.
 const GhostThreshold = time.Hour
 
 // recentActivityWindow bounds every "Working" inference in determineStatus: a
@@ -1257,8 +1294,8 @@ type GhostProcess struct {
 	Age     time.Duration
 }
 
-// FindGhostProcesses returns Claude processes that are running but whose log
-// has been silent for longer than GhostThreshold.
+// FindGhostProcesses returns Claude processes that have lost their parent and
+// whose log has been silent for longer than GhostThreshold.
 func FindGhostProcesses() ([]GhostProcess, error) {
 	sessions, err := Discover()
 	if err != nil {
@@ -1267,7 +1304,7 @@ func FindGhostProcesses() ([]GhostProcess, error) {
 	return ghostsFrom(sessions), nil
 }
 
-// ghostsFrom selects the stale sessions whose pid is certainly their own.
+// ghostsFrom selects the ghost sessions whose pid is certainly their own.
 //
 // Staleness is a property of the log, but the pid is paired to that log by
 // position: logs arrive sorted newest-first while pids arrive in ps order, and
@@ -1292,12 +1329,11 @@ func ghostsFrom(sessions []Session) []GhostProcess {
 		}
 		seenPIDs[s.GhostPID] = true
 
-		age := time.Since(s.LastActivity)
-		if age > GhostThreshold {
+		if s.IsGhost {
 			ghosts = append(ghosts, GhostProcess{
 				PID:     s.GhostPID,
 				Project: s.Project,
-				Age:     age,
+				Age:     time.Since(s.LastActivity),
 			})
 		}
 	}

@@ -587,7 +587,7 @@ func TestParseSession_RunningWithoutConfidentPID(t *testing.T) {
 	content := `{"type":"assistant","timestamp":"` + recent + `","message":{"role":"assistant","content":[{"type":"text","text":"Still working"}]}}` + "\n"
 	path, _, _ := writeLog(t, dir, "s.jsonl", content)
 
-	s, err := parseSession("proj", path, true, 0)
+	s, err := parseSession("proj", path, true, 0, false)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestParseSession_NotRunning(t *testing.T) {
 	content := `{"type":"assistant","timestamp":"` + recent + `","message":{"role":"assistant","content":[{"type":"text","text":"Still working"}]}}` + "\n"
 	path, _, _ := writeLog(t, dir, "s.jsonl", content)
 
-	s, err := parseSession("proj", path, false, 0)
+	s, err := parseSession("proj", path, false, 0, false)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}
@@ -1022,13 +1022,13 @@ func TestDetermineStatus(t *testing.T) {
 // id in JavaScript is what let the two views disagree.
 func TestApplyParsedLogSetsContextWindow(t *testing.T) {
 	var s Session
-	applyParsedLog(&s, parsedLog{model: "claude-opus-5"}, true, 0, time.Now())
+	applyParsedLog(&s, parsedLog{model: "claude-opus-5"}, true, 0, false, time.Now())
 	if s.ContextWindow != ExtendedContextWindow {
 		t.Errorf("ContextWindow = %d, want %d", s.ContextWindow, ExtendedContextWindow)
 	}
 
 	var s2 Session
-	applyParsedLog(&s2, parsedLog{model: "claude-haiku-4-5"}, true, 0, time.Now())
+	applyParsedLog(&s2, parsedLog{model: "claude-haiku-4-5"}, true, 0, false, time.Now())
 	if s2.ContextWindow != DefaultContextWindow {
 		t.Errorf("ContextWindow = %d, want %d", s2.ContextWindow, DefaultContextWindow)
 	}

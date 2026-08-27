@@ -88,16 +88,29 @@ A user entry that carries only `tool_result` blocks is *not* a prompt
 
 ### Processes, ghosts and the pairing pitfall
 
-Claude Code exposes no pid↔session mapping. Logs are sorted newest-first; pids
-arrive in `ps` order. The two orderings are unrelated, so pairing log *i* with
-pid *i* is a positional guess. Everything downstream is built around that:
+Claude Code (2.1.x) keeps a registry at `~/.claude/sessions/<pid>.json` with
+the pid, session id and cwd of every live session; `registry.go` reads it.
+Every entry is validated against the set of `claude` pids `ps` found —
+never against the bare pid — because a crash or reboot leaves files behind
+and the pid gets reused. `pairProcess` then decides, per log: registry hit →
+that session's own pid, confident; registry present and every pid in the
+directory accounted for → not running; a pid the registry cannot name →
+running, no pid. Two files carrying one session id (`--resume` in two tabs)
+drop the id rather than guess. The registry snapshot is taken under the same
+lock and TTL as the `ps` scan so the two views cannot disagree mid-tick.
+
+Without a registry (older Claude Code) the pairing is positional: logs are
+sorted newest-first, pids arrive in `ps` order, the two are unrelated, and
+pairing log *i* with pid *i* is a guess. Everything downstream is built to
+survive that:
 
 - `isRunning = len(pids) > 0` — any claude process in the project directory
   marks every candidate log as running. Deliberately generous: a wrong
   "running" self-corrects to Waiting through content staleness, whereas a
   wrong "inactive" hides a live session from the dashboard entirely.
-- `Session.PIDConfident` is true only when the directory has exactly one log
-  and exactly one process. It is `json:"-"`; the web layer never sees it.
+- `Session.PIDConfident` is true on a registry hit, or when the directory has
+  exactly one log and exactly one process. It is serialized as
+  `pid_confident` so API consumers can tell a real pid from a guess.
 - `IsGhost = running && parent pid is 1 && LastActivity older than GhostThreshold (1h)`,
   computed in `applyParsedLog` because it needs `LastActivity`. Orphaning is
   the signal; the hour of silence protects the one legitimate orphan, a

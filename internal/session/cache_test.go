@@ -205,14 +205,14 @@ func TestApplyParsedLog_StatusRecomputedOverTime(t *testing.T) {
 	}
 
 	var recent Session
-	applyParsedLog(&recent, entriesAt(30*time.Second), true, 123, time.Time{})
+	applyParsedLog(&recent, entriesAt(30*time.Second), true, 123, false, time.Time{})
 	if recent.Status != StatusWorking {
 		t.Errorf("recent: status = %q, want %q", recent.Status, StatusWorking)
 	}
 
 	// Same cached parsedLog contents, but the entry is now old: status must flip.
 	var stale Session
-	applyParsedLog(&stale, entriesAt(3*time.Minute), true, 123, time.Time{})
+	applyParsedLog(&stale, entriesAt(3*time.Minute), true, 123, false, time.Time{})
 	if stale.Status != StatusWaiting {
 		t.Errorf("stale: status = %q, want %q", stale.Status, StatusWaiting)
 	}

@@ -13,7 +13,7 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 - **Web dashboard** with `--web` flag for rich session inspection in the browser
 - **History view** to browse past sessions with activity summaries
 - **Process detection** distinguishes running vs inactive sessions
-- **Ghost detection** identifies orphaned Claude processes
+- **Ghost detection** identifies orphaned Claude processes — ones whose launching shell or IDE has exited and whose log has been silent for over an hour. A session left open and idle in a live tab is not a ghost
 - **Last message display** shows recent Claude responses
 - **Git branch display** shows current branch for each session
 - **Status indicators**: Working, Needs Input, Waiting

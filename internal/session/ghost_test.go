@@ -22,7 +22,7 @@ func TestGhostsFromSkipsUnconfidentPairings(t *testing.T) {
 		// Both sessions live in one directory, so neither pid pairing is
 		// trustworthy. The stale log carries the busy process's pid.
 		{Project: "work/api", GhostPID: 4100, LastActivity: busy, PIDConfident: false},
-		{Project: "work/api", GhostPID: 5200, LastActivity: stale, PIDConfident: false},
+		{Project: "work/api", GhostPID: 5200, LastActivity: stale, PIDConfident: false, IsGhost: true},
 	}
 
 	ghosts := ghostsFrom(sessions)
@@ -37,7 +37,7 @@ func TestGhostsFromSkipsUnconfidentPairings(t *testing.T) {
 func TestGhostsFromReportsConfidentStaleSession(t *testing.T) {
 	sessions := []Session{
 		{Project: "work/api", GhostPID: 4100,
-			LastActivity: time.Now().Add(-3 * time.Hour), PIDConfident: true},
+			LastActivity: time.Now().Add(-3 * time.Hour), PIDConfident: true, IsGhost: true},
 	}
 
 	ghosts := ghostsFrom(sessions)
@@ -56,7 +56,12 @@ func TestGhostsFromIgnoresFreshAndUnrunning(t *testing.T) {
 		{Project: "a", GhostPID: 1, LastActivity: time.Now(), PIDConfident: true},
 		// Stale but no running process at all.
 		{Project: "b", GhostPID: 0,
-			LastActivity: time.Now().Add(-5 * time.Hour), PIDConfident: true},
+			LastActivity: time.Now().Add(-5 * time.Hour), PIDConfident: true, IsGhost: true},
+		// Confident, running and silent for hours, but still parented to its
+		// shell: a tab left open overnight, not a ghost. Killing it would take
+		// down a session the user is coming back to.
+		{Project: "c", GhostPID: 3,
+			LastActivity: time.Now().Add(-9 * time.Hour), PIDConfident: true, IsGhost: false},
 	}
 
 	if ghosts := ghostsFrom(sessions); len(ghosts) != 0 {
@@ -67,8 +72,8 @@ func TestGhostsFromIgnoresFreshAndUnrunning(t *testing.T) {
 func TestGhostsFromDeduplicatesPIDs(t *testing.T) {
 	stale := time.Now().Add(-2 * time.Hour)
 	sessions := []Session{
-		{Project: "a", GhostPID: 77, LastActivity: stale, PIDConfident: true},
-		{Project: "b", GhostPID: 77, LastActivity: stale, PIDConfident: true},
+		{Project: "a", GhostPID: 77, LastActivity: stale, PIDConfident: true, IsGhost: true},
+		{Project: "b", GhostPID: 77, LastActivity: stale, PIDConfident: true, IsGhost: true},
 	}
 
 	if ghosts := ghostsFrom(sessions); len(ghosts) != 1 {
@@ -76,29 +81,56 @@ func TestGhostsFromDeduplicatesPIDs(t *testing.T) {
 	}
 }
 
-// The badge is only reachable if something sets the flag. determineStatus
-// returned a hardcoded false for it on every path, so the derivation is worth
-// pinning separately from the filter that decides whether the row is shown.
+// A ghost is a process whose parent is gone *and* whose log has been silent.
+// Silence on its own used to be enough, which badged every session left open
+// overnight and, because Claude Code creates the log lazily, every session in
+// its first minutes (its pid was paired with the previous, stale log).
 func TestApplyParsedLogDerivesIsGhost(t *testing.T) {
 	tests := []struct {
 		name      string
 		isRunning bool
+		orphaned  bool
 		lastEntry time.Time
 		want      bool
 	}{
-		{"running with a long-silent log", true, time.Now().Add(-3 * time.Hour), true},
-		{"running and recently active", true, time.Now().Add(-time.Minute), false},
-		{"just inside the threshold", true, time.Now().Add(-GhostThreshold + time.Minute), false},
-		{"stale but no process", false, time.Now().Add(-3 * time.Hour), false},
+		{"orphaned with a long-silent log", true, true, time.Now().Add(-3 * time.Hour), true},
+		{"orphaned and recently active", true, true, time.Now().Add(-time.Minute), false},
+		{"orphaned, just inside the threshold", true, true, time.Now().Add(-GhostThreshold + time.Minute), false},
+		{"left open overnight, parent alive", true, false, time.Now().Add(-9 * time.Hour), false},
+		{"stale but no process", false, true, time.Now().Add(-3 * time.Hour), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var s Session
-			applyParsedLog(&s, parsedLog{lastEntryTime: tt.lastEntry}, tt.isRunning, 0, tt.lastEntry)
+			applyParsedLog(&s, parsedLog{lastEntryTime: tt.lastEntry}, tt.isRunning, 0, tt.orphaned, tt.lastEntry)
 			if s.IsGhost != tt.want {
 				t.Errorf("IsGhost = %v, want %v", s.IsGhost, tt.want)
 			}
 		})
+	}
+}
+
+// The orphan signal is the ppid column; a parse that drops or shifts it turns
+// every session into a ghost or none into one.
+func TestParsePSOutputReadsPPID(t *testing.T) {
+	out := []byte(`  101     1 /opt/homebrew/bin/claude
+  202  4321 claude
+  303     1 /bin/zsh
+garbage line
+`)
+	rows := parsePSOutput(out)
+	want := []psLine{
+		{pid: 101, ppid: 1, comm: "/opt/homebrew/bin/claude"},
+		{pid: 202, ppid: 4321, comm: "claude"},
+		{pid: 303, ppid: 1, comm: "/bin/zsh"},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i := range want {
+		if rows[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, rows[i], want[i])
+		}
 	}
 }
 
@@ -140,7 +172,7 @@ func TestDiscoverReportsProcessScanFailure(t *testing.T) {
 // sees a fresh Discover rather than a value cached before it changed anything.
 func clearScanCaches() {
 	processScanMu.Lock()
-	processScanDirs = nil
+	processScanDirs, processScanOrphaned = nil, nil
 	processScanRegistry, processScanHaveReg = nil, false
 	processScanAt = time.Time{}
 	processScanMu.Unlock()

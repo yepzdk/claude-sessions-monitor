@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The origin store directory is created `0700` rather than `0755`, and an existing one is repaired on the next save. Other accounts could list the session ids it held; the files themselves were already `0600`
 - CONTRIBUTING.md described a release-on-merge flow, a Go 1.21 minimum and a standard-library-only rule, none of which had been true for some time
 - In a project directory running more than one Claude session, csm paired sessions to processes by position — newest log to first `ps` result — so the process it named for a session was usually a different session's. Sessions are now matched by session id through the registry Claude Code keeps at `~/.claude/sessions/`, which also lets a session that has exited be reported as inactive instead of inheriting a neighbour's process. Only processes `ps` confirms are running are used, and Claude Code versions that write no registry keep the previous behaviour.
+- The `[ghost]` badge and `--kill-ghosts` treated any session whose log had been silent for an hour as orphaned, so tabs left open overnight and sessions in their first minutes (before Claude Code creates the log) were flagged. A ghost now also has to have lost its parent process
 
 ## [0.6.0] - 2026-08-26
 
