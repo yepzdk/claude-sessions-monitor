@@ -50,7 +50,7 @@ type Session struct {
 	Origin       Origin    `json:"origin,omitempty"`     // Where the session was launched from
 	IsGhost      bool      `json:"is_ghost,omitempty"`   // True if process running but log is stale
 	GhostPID     int       `json:"ghost_pid,omitempty"`  // PID of the ghost process (for killing)
-	PIDConfident bool      `json:"-"`                    // True when GhostPID is certainly this session's process, not a positional guess
+	PIDConfident bool      `json:"pid_confident"`        // True when GhostPID is certainly this session's process, not a positional guess
 	// ContextWindow is the model's context size in tokens. The dashboard needs
 	// the decision, not the model id: reimplementing the id parsing in
 	// JavaScript let the two disagree about the same session.
@@ -344,15 +344,14 @@ func Discover() ([]Session, error) {
 		return nil, err
 	}
 
-	// Get directories where Claude is currently running (TTL-cached to avoid
-	// spawning ps/lsof on every refresh).
-	runningDirs, err := cachedRunningClaudeDirs()
+	// Get directories where Claude is currently running, along with Claude
+	// Code's own pid <-> session registry when this version writes one. Both
+	// come from one TTL-cached snapshot so they cannot disagree about what is
+	// running, and so ps/lsof are not spawned on every refresh.
+	runningDirs, registry, haveRegistry, err := cachedRunningClaudeDirs()
 	if err != nil {
 		return nil, err
 	}
-
-	// Claude Code's own pid <-> session registry, when this version writes one.
-	registry, haveRegistry := readSessionRegistry()
 
 	var sessions []Session
 	// Track the log files we actually parse this sweep so stale entries can be
@@ -385,7 +384,7 @@ func Discover() ([]Session, error) {
 			for _, f := range logFiles {
 				present[f] = true
 			}
-			for _, f := range registryLogsForDir(registry, entry.Name(), projectDir) {
+			for _, f := range registryLogsForDir(registry, projectDir) {
 				if !present[f] {
 					logFiles = append(logFiles, f)
 				}
@@ -418,7 +417,7 @@ func Discover() ([]Session, error) {
 			// for this directory", which is all --kill-ghosts needs) must
 			// check PIDConfident first.
 			isRunning, pid, pidConfident := pairProcess(
-				sessionIDFromLogFile(logFile), registry, haveRegistry, pids, i, len(logFiles))
+				sessionIDFromLogFile(logFile), entry.Name(), registry, haveRegistry, pids, i, len(logFiles))
 
 			session, err := parseSession(entry.Name(), logFile, isRunning, pid)
 			if err != nil {

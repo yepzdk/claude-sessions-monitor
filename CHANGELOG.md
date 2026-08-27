@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `golangci-lint` runs in CI and in `make check`, once for `GOOS=linux` and once for `GOOS=darwin` so the macOS-only jump code is covered
 - `docs/ARCHITECTURE.md`, a contributor guide to the data flow, status rules, ghost detection, caches, platform code and test helpers, plus package documentation pointing at it
 - `go install github.com/yepzdk/claude-sessions-monitor@latest` now works, and `csm -v` reports the module version for such builds
+- `pid_confident` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), which says whether `ghost_pid` is known to be that session's own process or only a positional guess.
 
 ### Changed
 
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - The origin store directory is created `0700` rather than `0755`, and an existing one is repaired on the next save. Other accounts could list the session ids it held; the files themselves were already `0600`
 - CONTRIBUTING.md described a release-on-merge flow, a Go 1.21 minimum and a standard-library-only rule, none of which had been true for some time
+- In a project directory running more than one Claude session, csm paired sessions to processes by position — newest log to first `ps` result — so the process it named for a session was usually a different session's. Sessions are now matched by session id through the registry Claude Code keeps at `~/.claude/sessions/`, which also lets a session that has exited be reported as inactive instead of inheriting a neighbour's process. Only processes `ps` confirms are running are used, and Claude Code versions that write no registry keep the previous behaviour.
 
 ## [0.6.0] - 2026-08-26
 

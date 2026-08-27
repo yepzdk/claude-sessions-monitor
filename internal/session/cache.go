@@ -95,19 +95,31 @@ func pruneParseCache(liveFiles map[string]struct{}) {
 // --- 2. Process-scan cache ---------------------------------------------------
 
 var (
-	processScanMu   sync.Mutex
-	processScanAt   time.Time
-	processScanDirs map[string][]int
+	processScanMu       sync.Mutex
+	processScanAt       time.Time
+	processScanDirs     map[string][]int
+	processScanRegistry map[string]registryEntry
+	processScanHaveReg  bool
 )
 
 // cachedRunningClaudeDirs wraps getRunningClaudeDirs with a short TTL so the
-// expensive `ps`/`lsof` subprocess spawns don't run on every refresh.
-func cachedRunningClaudeDirs() (map[string][]int, error) {
+// expensive `ps`/`lsof` subprocess spawns don't run on every refresh. It also
+// returns Claude Code's pid registry, snapshotted under the same lock at the
+// same moment, plus whether a registry exists at all.
+//
+// The two are taken together because they are two halves of one answer. Read
+// separately, a graceful exit removes the pid file while the departed pid is
+// still in the cached ps set, and for up to the TTL every unregistered log in
+// that directory reads as running-with-no-pid instead of inactive -- a visible
+// blink on every exit. Reading them together also absorbs a torn read: Claude
+// Code rewrites these files in place, so an unlucky read fails to parse and
+// drops an entry, and pinning that to one tick keeps it from recurring.
+func cachedRunningClaudeDirs() (map[string][]int, map[string]registryEntry, bool, error) {
 	processScanMu.Lock()
 	defer processScanMu.Unlock()
 
 	if processScanDirs != nil && processScanTTL > 0 && time.Since(processScanAt) < processScanTTL {
-		return processScanDirs, nil
+		return processScanDirs, processScanRegistry, processScanHaveReg, nil
 	}
 
 	dirs, err := getRunningClaudeDirs()
@@ -115,12 +127,14 @@ func cachedRunningClaudeDirs() (map[string][]int, error) {
 		// Leave any previous result in place but do not extend its lifetime;
 		// a caller asking again should retry the scan rather than be handed
 		// a stale map as though it were fresh.
-		return nil, err
+		return nil, nil, false, err
 	}
+	registry, haveRegistry := readSessionRegistry(claudePIDSet(dirs))
 
 	processScanDirs = dirs
+	processScanRegistry, processScanHaveReg = registry, haveRegistry
 	processScanAt = time.Now()
-	return processScanDirs, nil
+	return processScanDirs, processScanRegistry, processScanHaveReg, nil
 }
 
 // --- 3. Discover result cache ------------------------------------------------

@@ -141,6 +141,7 @@ func TestDiscoverReportsProcessScanFailure(t *testing.T) {
 func clearScanCaches() {
 	processScanMu.Lock()
 	processScanDirs = nil
+	processScanRegistry, processScanHaveReg = nil, false
 	processScanAt = time.Time{}
 	processScanMu.Unlock()
 
