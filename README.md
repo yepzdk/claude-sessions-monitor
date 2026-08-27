@@ -75,6 +75,15 @@ ARCH=x86_64   # or aarch64
 sudo rpm -i "https://github.com/yepzdk/claude-sessions-monitor/releases/download/v${VERSION}/csm-${VERSION}.${ARCH}.rpm"
 ```
 
+### Go toolchain
+
+```bash
+go install github.com/yepzdk/claude-sessions-monitor@latest
+```
+
+This installs the binary as `claude-sessions-monitor` (the module name) into
+`$GOBIN` or `~/go/bin`; rename or alias it to `csm` if you like.
+
 ### Build from source
 
 ```bash
@@ -207,12 +216,15 @@ make clean
 
 ## How it works
 
-The tool monitors `~/.claude/projects/` where Claude Code stores session logs. It parses the JSONL log files to determine each session's current state based on the most recent entries.
+The tool monitors `~/.claude/projects/` where Claude Code stores session logs. It parses the JSONL log files to determine each session's current state based on the most recent entries, and matches them to running `claude` processes to tell live sessions from finished ones.
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) goes into detail: the status rules, ghost detection, what csm reads and writes on disk and over the network, and how the packages fit together.
 
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for
-the development workflow, and [SECURITY.md](.github/SECURITY.md) for reporting
+the development workflow, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a
+map of the code, and [SECURITY.md](.github/SECURITY.md) for reporting
 vulnerabilities.
 
 ## Support

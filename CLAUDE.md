@@ -19,6 +19,7 @@ internal/
   web/      - Web dashboard (HTTP server, REST API, SSE, embedded frontend)
     static/ - Frontend assets (HTML, CSS, JS) embedded via go:embed
 main.go     - CLI entry point and flag handling
+docs/ARCHITECTURE.md - Contributor map: data flow, status rules, ghosts, caches, test helpers
 ```
 
 ## Development Workflow

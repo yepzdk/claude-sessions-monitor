@@ -10,7 +10,12 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Both platforms: internal/jump and origin detection are split by build
+    # tag, and a Linux-only run never compiles or tests the darwin half.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 

@@ -1,3 +1,11 @@
+// Package session discovers Claude Code sessions and decides what state each
+// one is in. It joins two sources — the JSONL logs under ~/.claude/projects and
+// a scan of running claude processes — into []Session, which the ui, web and
+// jump packages consume without touching either source themselves. It also
+// holds history, timelines, token usage, API quota and origin detection.
+//
+// docs/ARCHITECTURE.md walks through the data flow, the status rules, ghost
+// semantics and the test conventions for this package.
 package session
 
 import (

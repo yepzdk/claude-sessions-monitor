@@ -19,8 +19,8 @@ import (
 //  3. resultCache      — the whole Discover() result, TTL-cached, so bursts of
 //     concurrent callers within one tick collapse to a single scan.
 //
-// The TTLs are package vars (not consts) so tests can set them to 0 to disable
-// the time-based caches and assert on the parse cache deterministically.
+// All three are package state, so tests that go through Discover() must reset
+// them between cases — see clearScanCaches and resetParseCache in the tests.
 
 var (
 	// resultTTL is how long a full Discover() result is reused. Kept well under

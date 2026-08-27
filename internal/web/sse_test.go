@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // Run closes every client channel and returns when the context is cancelled.

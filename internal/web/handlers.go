@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 func writeJSON(w http.ResponseWriter, v any) {

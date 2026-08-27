@@ -23,8 +23,11 @@ What you expected instead.
 
 - `csm` version (`csm -v`):
 - OS and version:
-- Install method (Homebrew / binary / built from source):
+- Terminal or IDE the session runs in (Ghostty, iTerm, VS Code, ...):
+- Install method (Homebrew / binary / `go install` / built from source):
 
 **Additional context**
 
-Terminal output, screenshots, or anything else that helps.
+Terminal output, screenshots, or anything else that helps. For a wrong status,
+badge or column, the output of `csm -l -json` for the affected session is the
+fastest way for us to see what csm parsed — redact prompt text if you need to.

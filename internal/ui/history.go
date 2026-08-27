@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // RenderHistory renders the session history view with date grouping

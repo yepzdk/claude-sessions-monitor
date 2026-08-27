@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // osascriptTimeout bounds each AppleScript call so a wedged osascript can't

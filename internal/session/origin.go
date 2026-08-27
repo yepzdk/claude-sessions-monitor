@@ -81,9 +81,11 @@ type ProcessInfo struct {
 // Precedence (highest wins):
 //  1. IDE env vars (Zed, VS Code, Cursor, JetBrains)
 //  2. IDE ancestor bundle/exe match
-//  3. Claude Desktop (bundle id or Claude.app ancestor)
-//  4. Terminal env vars (TERM_PROGRAM and friends)
-//  5. Terminal ancestor exe match
+//  3. Terminal env vars (TERM_PROGRAM and friends)
+//  4. Terminal ancestor exe match
+//  5. Claude Desktop (bundle id or Claude.app ancestor) — last, because a
+//     real terminal always stamps its env vars while Desktop-spawned
+//     processes don't
 //  6. Unknown
 func classifyOrigin(env map[string]string, ancestors []ProcessInfo) Origin {
 	// 1. IDE env vars — checked first because an IDE-hosted terminal also

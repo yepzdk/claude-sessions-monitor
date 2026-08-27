@@ -10,14 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `golangci-lint` runs in CI and in `make check`, once for `GOOS=linux` and once for `GOOS=darwin` so the macOS-only jump code is covered
+- `docs/ARCHITECTURE.md`, a contributor guide to the data flow, status rules, ghost detection, caches, platform code and test helpers, plus package documentation pointing at it
+- `go install github.com/yepzdk/claude-sessions-monitor@latest` now works, and `csm -v` reports the module version for such builds
 
 ### Changed
 
 - The terminal size comes from `golang.org/x/term`, so `internal/ui/terminal.go` no longer depends on `syscall` and `unsafe`
+- The Go module path is `github.com/yepzdk/claude-sessions-monitor`, matching the repository; it previously pointed at an organisation the project no longer lives under
+- CI runs on macOS as well as Linux, so the darwin-only jump and origin-detection code is compiled and tested on every pull request
 
 ### Fixed
 
 - The origin store directory is created `0700` rather than `0755`, and an existing one is repaired on the next save. Other accounts could list the session ids it held; the files themselves were already `0600`
+- CONTRIBUTING.md described a release-on-merge flow, a Go 1.21 minimum and a standard-library-only rule, none of which had been true for some time
 
 ## [0.6.0] - 2026-08-26
 

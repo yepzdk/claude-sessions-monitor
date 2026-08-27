@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // usageBarWidth is the number of block characters in the usage progress bar

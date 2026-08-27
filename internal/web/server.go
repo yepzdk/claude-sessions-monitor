@@ -1,3 +1,10 @@
+// Package web serves the browser dashboard: a loopback-only HTTP server with a
+// small JSON API, a Server-Sent Events stream that pushes session updates, and
+// the frontend (vanilla JS, no build step) embedded from ./static via go:embed.
+// The server never reads logs itself; everything comes from package session.
+//
+// See docs/ARCHITECTURE.md for the route table, the SSE cadence, and the
+// security decisions (Host check, headers, the deliberately unset WriteTimeout).
 package web
 
 import (

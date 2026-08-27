@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // Manual end-to-end check against a real Ghostty with live Claude sessions.

@@ -8,18 +8,27 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"syscall"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/jump"
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
-	"github.com/itk-dev/claude-sessions-monitor/internal/ui"
-	"github.com/itk-dev/claude-sessions-monitor/internal/web"
+	"github.com/yepzdk/claude-sessions-monitor/internal/jump"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/ui"
+	"github.com/yepzdk/claude-sessions-monitor/internal/web"
 )
 
+// version is injected by the Makefile via -ldflags. A `go install` build has
+// no ldflags, so fall back to the module version Go stamps into the binary;
+// "(devel)" is what a local checkout reports and is no better than "dev".
 var version = "dev"
 
 func main() {
+	if version == "dev" {
+		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			version = bi.Main.Version
+		}
+	}
 	// internal/session can't reach main's -ldflags-injected version on its own,
 	// and it needs it to identify csm in outgoing API requests.
 	session.SetVersion(version)

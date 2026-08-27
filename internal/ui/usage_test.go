@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // Utilization comes straight off the Anthropic API with no validation.

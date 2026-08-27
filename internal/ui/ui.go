@@ -1,3 +1,11 @@
+// Package ui renders the terminal views (live, history, usage) and reads raw
+// keyboard input. It draws with plain ANSI escapes — alt screen, cursor home,
+// erase-to-end-of-line per row — so frames overwrite in place without a clear.
+// Every string that originates in a log or the filesystem goes through
+// sanitizeForTerminal before it is printed, and widths are counted in runes.
+//
+// View selection lives in main.go; this package only exposes the renderers.
+// See docs/ARCHITECTURE.md for the helpers new views are expected to reuse.
 package ui
 
 import (
@@ -7,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // ANSI color codes

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // discoverSessions is a seam: the scan is the only thing in this package that

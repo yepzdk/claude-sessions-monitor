@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // visibleWidth counts the runes a terminal actually draws, ignoring ANSI

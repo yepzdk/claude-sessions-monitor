@@ -3,7 +3,7 @@
 package jump
 
 import (
-	"github.com/itk-dev/claude-sessions-monitor/internal/session"
+	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
 // errNotDarwin is one value rather than a fresh error per call. A stub that
