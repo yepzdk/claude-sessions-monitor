@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-28
+
 ### Added
 
 - `golangci-lint` runs in CI and in `make check`, once for `GOOS=linux` and once for `GOOS=darwin` so the macOS-only jump code is covered
 - `docs/ARCHITECTURE.md`, a contributor guide to the data flow, status rules, ghost detection, caches, platform code and test helpers, plus package documentation pointing at it
 - `go install github.com/yepzdk/claude-sessions-monitor@latest` now works, and `csm -v` reports the module version for such builds
-- `pid_confident` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), which says whether `ghost_pid` is known to be that session's own process or only a positional guess.
+- `pid_confident` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), which says whether `ghost_pid` is known to be that session's own process or only a positional guess
 
 ### Changed
 
