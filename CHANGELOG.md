@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `harness` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), naming which coding agent a session belongs to
+
+### Changed
+
+- `--kill-ghosts` identifies a ghost's process from its full command line and requires it to belong to the same coding agent as the session, instead of only checking that the command is named `claude`
+
 ## [0.7.0] - 2026-08-28
 
 ### Added

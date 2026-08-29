@@ -35,7 +35,7 @@ const (
 	StatusInactive   Status = "Inactive"
 )
 
-// Session represents a Claude Code session
+// Session represents a session of one of the coding agents csm watches
 type Session struct {
 	Project      string    `json:"project"`
 	Status       Status    `json:"status"`
@@ -46,7 +46,8 @@ type Session struct {
 	LogFile      string    `json:"log_file"`
 	ProjectPath  string    `json:"-"`                    // Encoded project directory name (as used under ~/.claude/projects)
 	CWD          string    `json:"-"`                    // Absolute working directory recorded in the log
-	SessionID    string    `json:"session_id,omitempty"` // Claude session UUID (log filename stem)
+	SessionID    string    `json:"session_id,omitempty"` // Session UUID (log filename stem)
+	Harness      Harness   `json:"harness"`              // Which coding agent this session belongs to
 	Origin       Origin    `json:"origin,omitempty"`     // Where the session was launched from
 	IsGhost      bool      `json:"is_ghost,omitempty"`   // True if process running but log is stale
 	GhostPID     int       `json:"ghost_pid,omitempty"`  // PID of the ghost process (for killing)
@@ -732,7 +733,7 @@ func parseLogFileWithLimit(logFile string, keep int, maxLineBytes int) (parsedLo
 	return pl, scanner.Err()
 }
 
-// parseSession parses a session from its log file
+// parseSession parses a Claude Code session from its log file
 func parseSession(projectName, logFile string, isRunning bool, pid int, orphaned bool) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
@@ -740,6 +741,7 @@ func parseSession(projectName, logFile string, isRunning bool, pid int, orphaned
 		Status:      StatusInactive, // Default to inactive
 		ProjectPath: projectName,    // Store the encoded name for matching
 		SessionID:   sessionIDFromLogFile(logFile),
+		Harness:     HarnessClaude,
 	}
 
 	// Resolve the session's origin (terminal / IDE / Claude Desktop).
@@ -1287,11 +1289,15 @@ func extractTask(entry *LogEntry) string {
 	return "-"
 }
 
-// GhostProcess represents an orphaned Claude process
+// GhostProcess represents an orphaned coding agent process
 type GhostProcess struct {
 	PID     int
 	Project string
 	Age     time.Duration
+	// Harness is the agent this process is believed to belong to. It is what
+	// the pre-SIGTERM recheck is verified against, so it must come from the
+	// session, not from a fresh guess about the pid.
+	Harness Harness
 }
 
 // FindGhostProcesses returns Claude processes that have lost their parent and
@@ -1334,21 +1340,11 @@ func ghostsFrom(sessions []Session) []GhostProcess {
 				PID:     s.GhostPID,
 				Project: s.Project,
 				Age:     time.Since(s.LastActivity),
+				Harness: s.Harness,
 			})
 		}
 	}
 	return ghosts
-}
-
-// isClaudeProcess checks whether the given PID belongs to a process named "claude".
-// This guards against PID reuse where a stale PID now belongs to an unrelated process.
-func isClaudeProcess(pid int) bool {
-	out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "comm=").Output()
-	if err != nil {
-		return false
-	}
-	comm := strings.TrimSpace(string(out))
-	return strings.HasSuffix(comm, "claude")
 }
 
 // KillGhostProcesses sends SIGTERM to every ghost process.
@@ -1365,8 +1361,10 @@ func KillGhostProcesses() (killed []GhostProcess, failed []GhostKillFailure, err
 	}
 
 	for _, ghost := range ghosts {
-		// The pid may have been recycled by an unrelated process since Discover.
-		if !isClaudeProcess(ghost.PID) {
+		// The pid may have been recycled by an unrelated process since
+		// Discover, and "unrelated" includes a process belonging to a
+		// different harness.
+		if !isHarnessProcess(ghost.PID, ghost.Harness) {
 			continue
 		}
 
