@@ -290,6 +290,10 @@
             const ctxCls = pct > 90 ? 'high' : pct > 75 ? 'medium' : 'low';
             const cardCls = isInactive ? 'session-card stopped' : 'session-card';
             const stoppedBadge = isInactive ? `<span class="stopped-badge">Stopped</span>` : '';
+            // Rendered further down, with the origin and context-window chips:
+            // it belongs to that cluster of "what this session is" identifiers,
+            // and sitting alone between the project name and the branch read
+            // like a stray word rather than a badge.
             const harnessBadge = mixedHarnesses && s.harness
                 ? `<span class="badge session-harness-badge" title="${esc(harnessName(s.harness))}">${esc(s.harness)}</span>`
                 : '';
@@ -298,10 +302,10 @@
                 <div class="session-top">
                     <span class="session-status ${cls}" title="${esc(s.status)}">${symbol}</span>
                     <span class="session-project">${esc(s.project)}</span>
-                    ${harnessBadge}
                     ${stoppedBadge}
                     ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
                     ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
+                    ${harnessBadge}
                     ${s.origin && s.origin.category ? `<span class="badge session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
                     ${(s.context_window || 0) > 200000 ? `<span class="badge session-model-badge" title="${esc(s.model)}">1M</span>` : ''}
                     ${s.degraded ? `<span class="badge session-degraded-badge" title="${esc(s.degraded)}">?</span>` : ''}
