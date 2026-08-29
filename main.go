@@ -346,8 +346,6 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				if viewMode != ViewModeLive || selected < 0 || selected >= len(visible) {
 					break
 				}
-				// err is always non-nil on !darwin, where jump_other.go's Focus
-				// is a stub.
 				res, err := jump.Focus(visible[selected])
 				if err != nil {
 					actionMsg = err.Error()

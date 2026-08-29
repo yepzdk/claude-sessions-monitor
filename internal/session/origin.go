@@ -237,6 +237,25 @@ func DetectOrigin(pid int) Origin {
 	return classifyOrigin(env, chain)
 }
 
+// AncestorPIDs returns pid followed by its ancestors, nearest first, stopping
+// at init. Empty when the process is gone or its ancestry cannot be read.
+//
+// internal/jump uses this to answer "which of these windows owns this
+// session": a terminal that forks a process per window is an ancestor of the
+// Claude process running inside it, so the window whose pid appears in this
+// chain is the one to focus.
+func AncestorPIDs(pid int) []int {
+	if pid <= 0 {
+		return nil
+	}
+	chain := parentChain(pid)
+	pids := make([]int, 0, len(chain))
+	for _, p := range chain {
+		pids = append(pids, p.PID)
+	}
+	return pids
+}
+
 // ancestorMatches reports whether the process's comm or exe path contains any
 // of the given needle tokens (case-insensitive substring match). App bundle
 // names like "Ghostty" match "/Applications/Ghostty.app/Contents/MacOS/ghostty".

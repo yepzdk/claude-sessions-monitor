@@ -321,12 +321,13 @@ Network (`http.Client` with 5s timeout, both):
   greppable rather than imitating another client. Keep it that way.
 - `https://status.claude.com/api/v2/status.json` — service health.
 
-Subprocesses, all macOS-only: `lsof` (a process's cwd), `ps` (origin
-detection, and the tty lookup in jump), `security` (Keychain) and `osascript`
-(jump). The native calls for the first and last are libproc and
+Subprocesses, all macOS-only bar the last: `lsof` (a process's cwd), `ps`
+(origin detection, and the tty lookup in jump), `security` (Keychain) and
+`osascript` (jump). The native calls for the first and last are libproc and
 Security.framework, both cgo, and the release workflow cross-builds the darwin
-targets from a Linux runner in one job. On Linux csm spawns nothing except
-`xdg-open`.
+targets from a Linux runner in one job. On Linux csm spawns `xdg-open` and,
+only while jumping, the one window-manager client its display server calls for
+(`hyprctl`, `swaymsg` or `wmctrl`).
 
 ### Platform code
 
@@ -348,8 +349,9 @@ build-tagged file is a build error.
 - `browser.go` holds `openBrowser`; `browser_darwin.go` and `browser_linux.go`
   each supply only the `browserOpener` constant (`open`, `xdg-open`). Splitting
   a shared body from a per-OS constant beats copying the body once per OS.
-- `jump/jump_darwin.go` / `jump_other.go`: focus a terminal tab, or report
-  that we can't.
+- `jump/jump_darwin.go` / `jump_linux.go`: focus a terminal tab (macOS) or
+  window (Linux). There is no stub for other systems because
+  `origin_detect_*.go` already limits the build to these two.
 
 `runtime.GOOS` appears once in the codebase: the port-conflict hint in
 `web/server.go`, which picks between two format strings and is not dispatch.
@@ -365,9 +367,12 @@ GOOS=darwin go vet ./... && GOOS=linux go vet ./...
 
 CI runs the full check on both `ubuntu-latest` and `macos-latest`, and
 `make lint` runs golangci-lint once per `GOOS` for the same reason.
-`jump/livecheck_manual_test.go` is behind the `manual` build tag because it
-needs a real Ghostty, live sessions and macOS Automation consent; the file
-header says when and how to run it.
+`jump/livecheck_manual_test.go` and `jump/livecheck_linux_manual_test.go` are
+behind the `manual` build tag because they need a real terminal, live sessions,
+and (on macOS) Automation consent; each file header says when and how to run
+it. The Linux one also has `TestInspectLinux`, which dumps every window the
+compositor reports next to the window each live session resolves to — start
+there when a jump does not do what you expect.
 
 ### Context window
 
@@ -483,8 +488,11 @@ No framework, no bundler, no `package.json`. Iterate with
 ## `internal/jump`
 
 One function, `Focus(session.Session) (Result, error)`, split by build tag.
-macOS + Ghostty only for now; every other case returns an error that unwraps
-to `ErrUnsupported` with a user-facing sentence.
+Anything it cannot do returns an error that unwraps to `ErrUnsupported` with a
+user-facing sentence; the UI prints those verbatim, so they are written for the
+user, not for a log.
+
+### macOS (`jump_darwin.go`) — Ghostty tabs
 
 Matching (`pick.go`, pure and tested on every platform): exact tty match wins
 when the session is `PIDConfident`; otherwise match on working directory and
@@ -497,6 +505,41 @@ reads `tty` inside a `try`.
 `osascript` gets the script on stdin (nothing touches a shell) with a 30s
 timeout: the first jump opens the macOS Automation consent dialog, and killing
 `osascript` under it permanently records a denial.
+
+### Linux (`jump_linux.go`) — compositor windows
+
+Windows, not tabs: no Linux terminal exposes a scripting interface csm can rely
+on, so a session in a background tab gets its window raised and no more.
+
+`backend_linux.go` holds one `backend` per display server — Hyprland
+(`hyprctl`), sway (`swaymsg`), X11 (`wmctrl`) — chosen by environment variable
+rather than by which tools are installed, so a missing tool is reported as a
+missing tool. GNOME and KDE on Wayland have no way for one client to focus
+another's window; they get a sentence saying so. Every call is bounded at 3s:
+these are local IPC round-trips, and unlike macOS there is no consent dialog to
+wait on.
+
+Hyprland is asked twice. 0.56 replaced dispatch arguments with a Lua API
+(`hl.dsp.focus{window="address:0x…"}`), and the old `focuswindow address:0x…`
+is a syntax error there while the new form is an unknown dispatcher on anything
+older. `hyprctl` exits 0 for success, for a window that is gone, and for a
+command it did not understand, so `"ok"` on stdout is the only success signal —
+check the body, never the exit code.
+
+Matching (`pick_linux.go`, pure) is by process ownership, not title: a terminal
+that forks per window is an ancestor of the Claude process inside it, so the
+window whose pid is in `session.AncestorPIDs(GhostPID)` is the one. That is
+exact, and it is why there is no Linux equivalent of the macOS directory
+heuristic.
+
+It stops being exact when one process owns many windows — Ghostty with
+`--gtk-single-instance`, `foot --server`, `kitty --single-instance`. Every
+window then reports the same pid and the compositor knows nothing else about
+them; Ghostty in particular exports no per-window identifier into the child
+environment, so there is nothing to recover. Where exactly one candidate's
+title does not look like a path it is used and reported as a guess; otherwise
+`Focus` declines and names the cause, because focusing one of the user's
+windows at random is worse than not jumping.
 
 ## Writing tests
 

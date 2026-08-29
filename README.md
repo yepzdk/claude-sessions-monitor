@@ -26,7 +26,7 @@ Oh My Pi — across multiple projects.
 - **Git branch display** shows current branch for each session (Claude Code only — Oh My Pi does not record it)
 - **Status indicators**: Working, Needs Input, Waiting
 - **Usage and history views** with API quota bars and per-session token breakdown (press `u`). Both are labelled *(Claude Code)*: the quota comes from Anthropic's OAuth endpoint and both read Claude Code's logs, so Oh My Pi sessions do not appear in them
-- **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal tab to the front (macOS + Ghostty)
+- **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal to the front: the tab on macOS (Ghostty), the window on Linux (Hyprland, sway, or any X11 window manager via `wmctrl`)
 - **Origin column** showing what launched each session — a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains) — detected from the agent process's parent chain + environment and cached to `~/.claude-monitor/origins/` so it survives session end. On a mixed dashboard it also carries the agent badge; the column widens to fit it, so a single-agent machine keeps exactly the columns it had
 - **Session badges**: Agent [cc] / [omp], Unsandboxed [!S], Ghost [ghost], Incomplete data [?]
 - **Single static binary** - no runtime dependencies, easy to install
@@ -186,7 +186,7 @@ csm -v
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Select a session row |
-| `Enter` | Bring the selected session's terminal tab to the front |
+| `Enter` | Bring the selected session's terminal to the front (see [Jumping](#jumping)) |
 | `h` | Switch to history view |
 | `l` | Switch to live view |
 | `u` | Switch to usage view (API quota + token breakdown) |
@@ -194,18 +194,36 @@ csm -v
 | `f` | Cycle the agent filter: all → Claude Code → Oh My Pi (only offered when both are present) |
 | `Ctrl+C` | Quit |
 
-#### Jumping to a session
+#### Jumping
 
-`Enter` focuses the terminal tab running the selected session, leaving csm where it is.
-This currently works on **macOS with Ghostty**; other terminals report that they can't be
-focused rather than doing nothing. The first jump triggers the standard macOS Automation
-consent dialog — allow it once and it won't ask again.
+`Enter` brings the terminal running the selected session to the front, leaving csm where
+it is. Anything csm can't focus says so rather than doing nothing.
 
-Sessions are matched to tabs by working directory, so if a project has both a Claude tab
-and a plain shell open, csm picks the Claude one and notes that it guessed. Once Ghostty
-ships [#11922](https://github.com/ghostty-org/ghostty/pull/11922) (merged upstream,
-unreleased at the time of writing) csm matches on the exact tty instead, and the guess
-disappears — no configuration needed.
+**macOS (Ghostty)** — focuses the *tab*. The first jump triggers the standard macOS
+Automation consent dialog; allow it once and it won't ask again. Sessions are matched to
+tabs by working directory, so if a project has both a Claude tab and a plain shell open,
+csm picks the Claude one and notes that it guessed. Once Ghostty ships
+[#11922](https://github.com/ghostty-org/ghostty/pull/11922) (merged upstream, unreleased
+at the time of writing) csm matches on the exact tty instead and the guess disappears.
+
+**Linux (Hyprland, sway, or X11 via `wmctrl`)** — focuses the *window*. No Linux terminal
+exposes a scripting interface csm can rely on, so a session sitting in a background tab
+gets its window raised and no more. Matching is by process ownership rather than by title:
+the terminal that spawned the session is one of its parent processes, which is exact.
+
+That exactness needs one terminal process per window, which is the default for most
+terminals. If yours multiplexes every window into a single process — Ghostty with
+`--gtk-single-instance`, `foot --server`, `kitty --single-instance` — the compositor
+reports the same PID for all of them and csm has nothing left to tell them apart. It will
+say so instead of raising one at random. Launching that terminal with its single-instance
+mode off makes jumping work:
+
+```bash
+ghostty --gtk-single-instance=false
+```
+
+On GNOME and KDE under Wayland there is no way for one application to focus another's
+window at all, so jumping reports that rather than failing obscurely.
 
 ### Watching both agents
 
