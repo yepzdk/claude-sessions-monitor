@@ -199,9 +199,19 @@ func TestReadSessionRegistryAbsentDirectory(t *testing.T) {
 	}
 }
 
-func TestClaudePIDSetFlattensRunningDirs(t *testing.T) {
-	got := claudePIDSet(map[string][]int{dirA: {100, 200}, dirB: {300}})
-	want := map[int]bool{100: true, 200: true, 300: true}
+// The registry is Claude Code's file, keyed by pid. A pid belonging to another
+// harness that reached it would let a stale entry naming that number report a
+// dead Claude session as running.
+func TestClaudePIDSetExcludesOtherHarnesses(t *testing.T) {
+	procs := []harnessProcess{
+		{pid: 100, harness: HarnessClaude, cwd: "/a"},
+		{pid: 200, harness: HarnessClaude, cwd: "/b"},
+		{pid: 300, harness: HarnessOMP, cwd: "/a"},
+	}
+
+	got := claudePIDSet(procs)
+	want := map[int]bool{100: true, 200: true}
+
 	if len(got) != len(want) {
 		t.Fatalf("claudePIDSet = %v; want %v", got, want)
 	}
@@ -209,6 +219,9 @@ func TestClaudePIDSetFlattensRunningDirs(t *testing.T) {
 		if !got[pid] {
 			t.Errorf("pid %d missing from %v", pid, got)
 		}
+	}
+	if got[300] {
+		t.Error("an omp pid was offered to Claude Code's registry")
 	}
 }
 

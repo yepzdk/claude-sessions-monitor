@@ -38,7 +38,7 @@ func TestFormatProjectPadsToRuneWidth(t *testing.T) {
 		"a",
 		strings.Repeat("ü", 60),
 	} {
-		got := visibleWidth(formatProject(session.Session{Project: name}, width))
+		got := visibleWidth(formatProject(session.Session{Project: name}, width, false))
 		if got != width {
 			t.Errorf("project %q: visible width = %d, want %d", name, got, width)
 		}
@@ -58,12 +58,89 @@ func TestFormatOriginPadsToRuneWidth(t *testing.T) {
 // A row whose log could not be fully read must say so, or its numbers read as
 // measurements.
 func TestFormatProjectMarksDegradedRow(t *testing.T) {
-	out := formatProject(session.Session{Project: "api", Degraded: "permission denied"}, 30)
+	out := formatProject(session.Session{Project: "api", Degraded: "permission denied"}, 30, false)
 	if !strings.Contains(out, "[?]") {
 		t.Errorf("degraded session is not marked: %q", out)
 	}
 	if visibleWidth(out) != 30 {
 		t.Errorf("visible width = %d, want 30", visibleWidth(out))
+	}
+}
+
+// The tag is what tells a mixed dashboard's rows apart, so it must render, must
+// not disturb the column width, and must stay away when there is only one agent
+// to see -- a single-agent user should get exactly the dashboard they had.
+func TestFormatProjectShowsHarnessTagOnlyWhenAsked(t *testing.T) {
+	const width = 30
+	s := session.Session{Project: "api", Harness: session.HarnessOMP}
+
+	tagged := formatProject(s, width, true)
+	if !strings.Contains(tagged, "[omp]") {
+		t.Errorf("harness tag missing: %q", tagged)
+	}
+	if visibleWidth(tagged) != width {
+		t.Errorf("tagged cell width = %d, want %d; the columns after it shift",
+			visibleWidth(tagged), width)
+	}
+
+	plain := formatProject(s, width, false)
+	if strings.Contains(plain, "[omp]") {
+		t.Errorf("harness tag shown on a single-agent dashboard: %q", plain)
+	}
+}
+
+// The tag survives a narrow column longer than the branch and title do: on a
+// mixed dashboard, which agent a row belongs to matters more than either.
+func TestFormatProjectKeepsHarnessTagWhenCrowded(t *testing.T) {
+	s := session.Session{
+		Project:      "some-long-project-name",
+		Harness:      session.HarnessClaude,
+		GitBranch:    "feature/very-long-branch",
+		SessionTitle: "a session title that will not fit",
+	}
+
+	out := formatProject(s, 16, true)
+	if !strings.Contains(out, "[cc]") {
+		t.Errorf("harness tag was dropped before the branch and title: %q", out)
+	}
+	if visibleWidth(out) != 16 {
+		t.Errorf("visible width = %d, want 16", visibleWidth(out))
+	}
+}
+
+func TestMixedHarnesses(t *testing.T) {
+	claudeOnly := []session.Session{
+		{Harness: session.HarnessClaude}, {Harness: session.HarnessClaude},
+	}
+	if MixedHarnesses(claudeOnly) {
+		t.Error("one agent reported as mixed; every row would carry a pointless tag")
+	}
+
+	both := []session.Session{
+		{Harness: session.HarnessClaude}, {Harness: session.HarnessOMP},
+	}
+	if !MixedHarnesses(both) {
+		t.Error("two agents not reported as mixed; the rows would be ambiguous")
+	}
+
+	if MixedHarnesses(nil) {
+		t.Error("an empty dashboard reported as mixed")
+	}
+}
+
+func TestFilterByHarness(t *testing.T) {
+	in := []session.Session{
+		{Project: "a", Harness: session.HarnessClaude},
+		{Project: "b", Harness: session.HarnessOMP},
+		{Project: "c", Harness: session.HarnessClaude},
+	}
+
+	if got := FilterByHarness(in, ""); len(got) != 3 {
+		t.Errorf("no filter returned %d of 3 sessions", len(got))
+	}
+	got := FilterByHarness(in, session.HarnessOMP)
+	if len(got) != 1 || got[0].Project != "b" {
+		t.Errorf("filtered to omp = %+v, want just b", got)
 	}
 }
 

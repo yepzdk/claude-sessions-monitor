@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Oh My Pi sessions appear alongside Claude Code sessions in one list, auto-detected from `~/.omp/agent/sessions/` with no flag to set. Rows carry a `[cc]` / `[omp]` tag when both agents are on screen
+- `-only claude` / `-only omp` narrows the list, and `f` cycles the same filter in the live view
+- `CSM_OMP_SESSIONS_DIR` points csm at a non-default Oh My Pi session store, for `--profile` and `--session-dir` setups
 - `harness` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), naming which coding agent a session belongs to
 
 ### Changed
 
+- csm is now the *Coding* Sessions Monitor: it watches more than Claude Code. Same binary, same install, nothing to migrate
 - `--kill-ghosts` identifies a ghost's process from its full command line and requires it to belong to the same coding agent as the session, instead of only checking that the command is named `claude`
+- The history and usage views are labelled *(Claude Code)*. Both read Claude Code's logs and the quota comes from Anthropic's OAuth endpoint, so Oh My Pi sessions do not appear in them
+
+### Fixed
+
+- A log that could only be read partway now keeps its `[?]` incomplete-data marker on every refresh. The marker previously appeared only on the tick that parsed the file and vanished while the parse was served from cache
 
 ## [0.7.0] - 2026-08-28
 

@@ -33,15 +33,25 @@ var (
 
 // --- 1. Per-file parse cache -------------------------------------------------
 
-type cachedParse struct {
+// cachedParse is one file's parse, valid while the file's (modTime, size) is
+// unchanged. It is generic because the two harnesses' logs parse into different
+// shapes but want exactly one caching policy: a second hand-rolled copy of this
+// would be a second place for that policy to drift.
+type cachedParse[T any] struct {
 	modTime time.Time
 	size    int64
-	log     parsedLog
+	log     T
+	// err is the non-fatal parse error, cached alongside the partial result it
+	// belongs to. Without it a truncated log reported Degraded only on the tick
+	// that parsed it and looked complete on every cached tick after, so the
+	// row's "incomplete data" marker flickered instead of staying put.
+	err error
 }
 
 var (
-	parseCacheMu sync.Mutex
-	parseCache   = map[string]cachedParse{}
+	parseCacheMu  sync.Mutex
+	parseCache    = map[string]cachedParse[parsedLog]{}
+	ompParseCache = map[string]cachedParse[ompParsedLog]{}
 )
 
 // isFatalParseError reports whether a parseLogFile error means the result has
@@ -58,23 +68,46 @@ func isFatalParseError(err error, entryCount int) bool {
 // cachedParseLogFile returns the parsed log for logFile, reusing a cached parse
 // when the file's (modTime, size) is unchanged since it was last parsed.
 func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int) (parsedLog, error) {
+	return cachedParseFile(parseCache, logFile, modTime, size,
+		func() (parsedLog, error) { return parseLogFile(logFile, keep) },
+		func(pl parsedLog) int { return len(pl.entries) })
+}
+
+// cachedParseOMPLogFile is cachedParseLogFile for omp's session logs.
+//
+// keep is not a parameter: 100 entries is what determineOMPStatus needs to see a
+// whole turn's tool calls, and letting callers vary it would mean a cache whose
+// hits depend on who asked first.
+func cachedParseOMPLogFile(logFile string, modTime time.Time, size int64) (ompParsedLog, error) {
+	const keep = 100
+	return cachedParseFile(ompParseCache, logFile, modTime, size,
+		func() (ompParsedLog, error) { return parseOMPLogFile(logFile, keep) },
+		func(pl ompParsedLog) int { return len(pl.entries) })
+}
+
+// cachedParseFile is the shared cache policy: serve an unchanged file from the
+// map, otherwise parse outside the lock and store. entryCount lets the caller
+// say how much survived a parse error, which is what isFatalParseError needs.
+func cachedParseFile[T any](cache map[string]cachedParse[T], logFile string, modTime time.Time,
+	size int64, parse func() (T, error), entryCount func(T) int) (T, error) {
 	parseCacheMu.Lock()
-	if c, ok := parseCache[logFile]; ok && c.size == size && c.modTime.Equal(modTime) {
+	if c, ok := cache[logFile]; ok && c.size == size && c.modTime.Equal(modTime) {
 		parseCacheMu.Unlock()
-		return c.log, nil
+		return c.log, c.err
 	}
 	parseCacheMu.Unlock()
 
 	// Miss: parse outside the lock (file I/O should not block other lookups).
-	pl, err := parseLogFile(logFile, keep)
-	if isFatalParseError(err, len(pl.entries)) {
-		return parsedLog{}, err
+	pl, err := parse()
+	if isFatalParseError(err, entryCount(pl)) {
+		var zero T
+		return zero, err
 	}
 
 	parseCacheMu.Lock()
-	parseCache[logFile] = cachedParse{modTime: modTime, size: size, log: pl}
+	cache[logFile] = cachedParse[T]{modTime: modTime, size: size, log: pl, err: err}
 	parseCacheMu.Unlock()
-	return pl, nil
+	return pl, err
 }
 
 // pruneParseCache drops cached parses for log files not in liveFiles. Without it
@@ -85,9 +118,16 @@ func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int)
 func pruneParseCache(liveFiles map[string]struct{}) {
 	parseCacheMu.Lock()
 	defer parseCacheMu.Unlock()
-	for path := range parseCache {
+	pruneCache(parseCache, liveFiles)
+	pruneCache(ompParseCache, liveFiles)
+}
+
+// pruneCache drops one cache's entries for files not in liveFiles. Callers hold
+// parseCacheMu.
+func pruneCache[T any](cache map[string]cachedParse[T], liveFiles map[string]struct{}) {
+	for path := range cache {
 		if _, ok := liveFiles[path]; !ok {
-			delete(parseCache, path)
+			delete(cache, path)
 		}
 	}
 }
@@ -97,13 +137,13 @@ func pruneParseCache(liveFiles map[string]struct{}) {
 var (
 	processScanMu       sync.Mutex
 	processScanAt       time.Time
-	processScanDirs     map[string][]int
-	processScanOrphaned map[int]bool
+	processScanValid    bool
+	processScanProcs    []harnessProcess
 	processScanRegistry map[string]registryEntry
 	processScanHaveReg  bool
 )
 
-// cachedRunningClaudeDirs wraps getRunningClaudeDirs with a short TTL so the
+// cachedRunningHarnessProcs wraps getRunningHarnessProcs with a short TTL so the
 // expensive `ps`/`lsof` subprocess spawns don't run on every refresh. It also
 // returns Claude Code's pid registry, snapshotted under the same lock at the
 // same moment, plus whether a registry exists at all.
@@ -116,29 +156,31 @@ var (
 // Code rewrites these files in place, so an unlucky read fails to parse and
 // drops an entry, and pinning that to one tick keeps it from recurring.
 //
-// The orphaned set (pids whose parent is gone) rides along for the same
-// reason: it is read off the same ps output as dirs.
-func cachedRunningClaudeDirs() (map[string][]int, map[int]bool, map[string]registryEntry, bool, error) {
+// processScanValid, not a nil check on the slice: no agent running is a
+// legitimate result, and treating it as a cache miss would spawn a full
+// `ps`/`lsof` sweep on every tick for the users who have nothing open.
+func cachedRunningHarnessProcs() ([]harnessProcess, map[string]registryEntry, bool, error) {
 	processScanMu.Lock()
 	defer processScanMu.Unlock()
 
-	if processScanDirs != nil && processScanTTL > 0 && time.Since(processScanAt) < processScanTTL {
-		return processScanDirs, processScanOrphaned, processScanRegistry, processScanHaveReg, nil
+	if processScanValid && processScanTTL > 0 && time.Since(processScanAt) < processScanTTL {
+		return processScanProcs, processScanRegistry, processScanHaveReg, nil
 	}
 
-	dirs, orphaned, err := getRunningClaudeDirs()
+	procs, err := getRunningHarnessProcs()
 	if err != nil {
 		// Leave any previous result in place but do not extend its lifetime;
 		// a caller asking again should retry the scan rather than be handed
 		// a stale map as though it were fresh.
-		return nil, nil, nil, false, err
+		return nil, nil, false, err
 	}
-	registry, haveRegistry := readSessionRegistry(claudePIDSet(dirs))
+	registry, haveRegistry := readSessionRegistry(claudePIDSet(procs))
 
-	processScanDirs, processScanOrphaned = dirs, orphaned
+	processScanProcs = procs
 	processScanRegistry, processScanHaveReg = registry, haveRegistry
+	processScanValid = true
 	processScanAt = time.Now()
-	return processScanDirs, processScanOrphaned, processScanRegistry, processScanHaveReg, nil
+	return processScanProcs, processScanRegistry, processScanHaveReg, nil
 }
 
 // --- 3. Discover result cache ------------------------------------------------

@@ -38,13 +38,16 @@ var sessionsDir = func() (string, error) {
 	return filepath.Join(home, ".claude", "sessions"), nil
 }
 
-// claudePIDSet collapses the per-directory pid lists from getRunningClaudeDirs
-// into the flat set of `claude` processes ps found this scan.
-func claudePIDSet(runningDirs map[string][]int) map[int]bool {
+// claudePIDSet reduces the process scan to the flat set of `claude` processes ps
+// found. The registry is Claude Code's own file, so a pid from another harness
+// must never be validated against it: pids are unique per machine, not per
+// harness, and a stale registry entry naming a number now held by an omp
+// process would resurrect a dead Claude session as running.
+func claudePIDSet(procs []harnessProcess) map[int]bool {
 	set := make(map[int]bool)
-	for _, pids := range runningDirs {
-		for _, pid := range pids {
-			set[pid] = true
+	for _, p := range procs {
+		if p.harness == HarnessClaude {
+			set[p.pid] = true
 		}
 	}
 	return set

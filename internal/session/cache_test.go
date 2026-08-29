@@ -26,7 +26,8 @@ func writeLog(t *testing.T, dir, name, content string) (string, time.Time, int64
 // resetParseCache clears the package-level parse cache so tests don't interfere.
 func resetParseCache() {
 	parseCacheMu.Lock()
-	parseCache = map[string]cachedParse{}
+	parseCache = map[string]cachedParse[parsedLog]{}
+	ompParseCache = map[string]cachedParse[ompParsedLog]{}
 	parseCacheMu.Unlock()
 }
 

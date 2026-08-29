@@ -1,6 +1,13 @@
-# Claude Sessions Monitor (csm)
+# ~~Claude~~ Coding Sessions Monitor (csm)
 
-A lightweight CLI tool to monitor your Claude Code sessions across multiple projects.
+A lightweight CLI tool to monitor your coding agent sessions — Claude Code and
+Oh My Pi — across multiple projects.
+
+> csm started life as *Claude* Sessions Monitor. It watches
+> [Oh My Pi](https://github.com/badlogic/oh-my-pi) sessions too now, so the C
+> stands for Coding. Same `csm`, same install, nothing to migrate — the
+> repository keeps its old name so existing clones and `go install` paths still
+> work.
 
 [![CI](https://github.com/yepzdk/claude-sessions-monitor/actions/workflows/ci.yaml/badge.svg)](https://github.com/yepzdk/claude-sessions-monitor/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/yepzdk/claude-sessions-monitor?logo=github)](https://github.com/yepzdk/claude-sessions-monitor/releases/latest)
@@ -9,18 +16,19 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 
 ## Features
 
-- **Live dashboard** showing all active Claude Code sessions
+- **Live dashboard** showing all active sessions from Claude Code and Oh My Pi in one list
+- **Both agents, auto-detected** — no flag to set. csm reads `~/.claude/projects/` and `~/.omp/agent/sessions/`, and skips whichever it doesn't find. Rows carry a `[cc]` / `[omp]` tag only when both agents are on screen
 - **Web dashboard** with `--web` flag for rich session inspection in the browser
 - **History view** to browse past sessions with activity summaries
 - **Process detection** distinguishes running vs inactive sessions
-- **Ghost detection** identifies orphaned Claude processes — ones whose launching shell or IDE has exited and whose log has been silent for over an hour. A session left open and idle in a live tab is not a ghost
-- **Last message display** shows recent Claude responses
-- **Git branch display** shows current branch for each session
+- **Ghost detection** identifies orphaned agent processes — ones whose launching shell or IDE has exited and whose log has been silent for over an hour. A session left open and idle in a live tab is not a ghost. Before signalling, csm re-checks that the process still belongs to that session's agent
+- **Last message display** shows recent assistant responses
+- **Git branch display** shows current branch for each session (Claude Code only — Oh My Pi does not record it)
 - **Status indicators**: Working, Needs Input, Waiting
-- **Usage view** with API quota bars and per-session token breakdown (press `u`)
+- **Usage and history views** with API quota bars and per-session token breakdown (press `u`). Both are labelled *(Claude Code)*: the quota comes from Anthropic's OAuth endpoint and both read Claude Code's logs, so Oh My Pi sessions do not appear in them
 - **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal tab to the front (macOS + Ghostty)
-- **Origin column** showing whether each session was launched from a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the Claude process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end
-- **Session badges**: Unsandboxed [!S], Ghost [ghost]
+- **Origin column** showing whether each session was launched from a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the agent process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end
+- **Session badges**: Agent [cc] / [omp], Unsandboxed [!S], Ghost [ghost], Incomplete data [?]
 - **Single static binary** - no runtime dependencies, easy to install
 - **Cross-platform** - macOS and Linux
 
@@ -113,6 +121,10 @@ csm -l
 # Output as JSON
 csm -l -json
 
+# Show only one agent's sessions
+csm -only omp
+csm -l -only claude
+
 # Show session history (last 7 days)
 csm -history
 
@@ -139,6 +151,7 @@ csm -v
 | `l` | Switch to live view |
 | `u` | Switch to usage view (API quota + token breakdown) |
 | `w` | Open web dashboard in browser (when `--web` is active) |
+| `f` | Cycle the agent filter: all → Claude Code → Oh My Pi (only offered when both are present) |
 | `Ctrl+C` | Quit |
 
 #### Jumping to a session
@@ -154,9 +167,35 @@ ships [#11922](https://github.com/ghostty-org/ghostty/pull/11922) (merged upstre
 unreleased at the time of writing) csm matches on the exact tty instead, and the guess
 disappears — no configuration needed.
 
+### Watching both agents
+
+Discovery needs no configuration: csm looks for `~/.claude/projects/` and
+`~/.omp/agent/sessions/` and reports whichever exist. Both kinds of session land
+in one list, sorted by who needs you soonest, and rows are tagged `[cc]` or
+`[omp]` when both agents appear together.
+
+`-only claude` / `-only omp` narrows the list, and `f` cycles the same filter in
+the live view. It is a display filter — both agents are always scanned, so
+toggling it can never hide a session csm failed to find.
+
+Oh My Pi relocates its session store for `--profile` and `--session-dir`. Point
+csm at a non-default store with:
+
+```bash
+export CSM_OMP_SESSIONS_DIR=~/.omp-work/agent/sessions
+```
+
+Two columns stay blank for Oh My Pi rows, on purpose: **context %** (it is
+multi-provider, so a context window cannot be derived from the model id, and a
+wrong percentage reads as a measurement) and **git branch** (not recorded in its
+logs). The history and usage views are Claude Code only, and say so in their
+headings.
+
 ### Usage view
 
-Press `u` in the live dashboard to see token usage. The view has two sections:
+Press `u` in the live dashboard to see token usage. The view is labelled
+*(Claude Code)* because both of its sections are: Oh My Pi authenticates against
+its own providers and keeps its costs in its own logs. It has two sections:
 
 - **API Quota** — Shows your Anthropic plan's utilization (5-hour and 7-day windows, plus per-model breakdowns when available). Uses color-coded progress bars: green (<75%), yellow (75-89%), red (≥90%). Reads the OAuth token from the macOS Keychain or `~/.claude/.credentials.json` on Linux.
 - **Local Usage** — Aggregates token counts (input, output, cache) from session log files within a 5-hour rolling window, broken down per session.
@@ -181,24 +220,24 @@ Features:
 | ● | Working | Session is actively processing |
 | ▲ | Needs Input | Waiting for user to approve a tool use |
 | ◉ | Waiting | Turn completed, waiting for next prompt |
-| ◌ | Inactive | No Claude process running (shown in history) |
+| ◌ | Inactive | No agent process running (shown in history) |
 
 ## Screenshot
 
 ```
-Claude Code Sessions
+Coding Sessions
 
 ● Working: 1  ▲ Needs Input: 1  ◉ Waiting: 0
 
-STATUS          PROJECT                             ORIGIN     CONTEXT          LAST ACTIVITY
-─────────────────────────────────────────────────────────────────────────────────────────────
-● Working       myorg/api-server @main              Ghostty    ███████░░░ 68%   Now
+STATUS          PROJECT                                  ORIGIN     CONTEXT          LAST ACTIVITY
+──────────────────────────────────────────────────────────────────────────────────────────────────
+● Working       myorg/api-server [cc] @main              Ghostty    ███████░░░ 68%   Now
   Implementing auth middleware
 
-▲ Needs Input   work/claude-sessions-monitor @feat  Zed        ██░░░░░░░░ 21%   12s ago
-  Let me check the git status
+▲ Needs Input   work/api-gateway [omp] "Rate limiting"   Ghostty    -                12s ago
+  Using: bash
 
-↑↓: select | Enter: jump | h: history | u: usage | Ctrl+C: quit
+↑↓: select | Enter: jump | h: history | u: usage | f: filter | Ctrl+C: quit
 ```
 
 ## Building
@@ -216,7 +255,14 @@ make clean
 
 ## How it works
 
-The tool monitors `~/.claude/projects/` where Claude Code stores session logs. It parses the JSONL log files to determine each session's current state based on the most recent entries, and matches them to running `claude` processes to tell live sessions from finished ones.
+csm reads two session stores — `~/.claude/projects/` for Claude Code and
+`~/.omp/agent/sessions/` for Oh My Pi — and parses their JSONL logs to decide
+what state each session is in. The two formats have almost nothing in common, so
+each has its own reader and its own status rules, but both answer with the same
+four statuses on the same time windows, which is what makes one mixed list worth
+reading. A scan of running processes then tells live sessions from finished ones,
+identifying each process from its full command line — Oh My Pi runs as
+`bun .../omp`, so the command name alone says nothing.
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) goes into detail: the status rules, ghost detection, what csm reads and writes on disk and over the network, and how the packages fit together.
 

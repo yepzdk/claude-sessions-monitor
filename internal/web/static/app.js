@@ -276,6 +276,11 @@
             return `<span class="status-badge"><span class="status-dot ${cls}"></span>${count} ${status}</span>`;
         }).join('');
 
+        // Tag rows with their agent only when more than one is on screen: with a
+        // single agent the tag says nothing, and tagging one but not the other
+        // would leave the untagged cards ambiguous.
+        const mixedHarnesses = new Set(currentSessions.map(s => s.harness).filter(Boolean)).size > 1;
+
         sessionsList.innerHTML = currentSessions.map(s => {
             const isInactive = s.status === 'Inactive';
             const cls = statusClass(s.status);
@@ -285,11 +290,15 @@
             const ctxCls = pct > 90 ? 'high' : pct > 75 ? 'medium' : 'low';
             const cardCls = isInactive ? 'session-card stopped' : 'session-card';
             const stoppedBadge = isInactive ? `<span class="stopped-badge">Stopped</span>` : '';
+            const harnessBadge = mixedHarnesses && s.harness
+                ? `<span class="badge session-harness-badge" title="${esc(harnessName(s.harness))}">${esc(s.harness)}</span>`
+                : '';
 
             return `<div class="${cardCls}" data-logfile="${esc(s.log_file || '')}" data-project="${esc(s.project)}">
                 <div class="session-top">
                     <span class="session-status ${cls}" title="${esc(s.status)}">${symbol}</span>
                     <span class="session-project">${esc(s.project)}</span>
+                    ${harnessBadge}
                     ${stoppedBadge}
                     ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
                     ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
@@ -988,6 +997,16 @@
             case 'Waiting': return '\u25C9';      // ◉
             case 'Inactive': return '\u25CC';      // ◌
             default: return '\u25CC';
+        }
+    }
+
+    // The badge shows the short id the API sends; the tooltip spells it out, so
+    // "omp" on a card is never a mystery.
+    function harnessName(harness) {
+        switch (harness) {
+            case 'claude': return 'Claude Code';
+            case 'omp': return 'Oh My Pi';
+            default: return harness;
         }
     }
 

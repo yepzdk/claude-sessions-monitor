@@ -44,7 +44,14 @@ func main() {
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
 	webPort := flag.Int("port", 9847, "Port for web dashboard")
+	only := flag.String("only", "", "Show only one agent's sessions: claude or omp")
 	flag.Parse()
+
+	filter, err := parseHarnessFilter(*only)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Check for conflicting flags
 	if *webMode && *webOnly {
@@ -82,6 +89,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error discovering sessions: %v\n", err)
 			os.Exit(1)
 		}
+		sessions = ui.FilterByHarness(sessions, filter)
 
 		if *jsonOutput {
 			if err := ui.RenderJSON(sessions); err != nil {
@@ -100,7 +108,36 @@ func main() {
 	}
 
 	// Live view mode
-	os.Exit(runLiveView(*interval, *webMode, *webPort))
+	os.Exit(runLiveView(*interval, *webMode, *webPort, filter))
+}
+
+// parseHarnessFilter turns the -only flag into a harness. An unknown value is an
+// error rather than a silent "show everything": a typo that quietly widened the
+// view would be indistinguishable from the flag working.
+func parseHarnessFilter(only string) (session.Harness, error) {
+	switch only {
+	case "":
+		return "", nil
+	case string(session.HarnessClaude):
+		return session.HarnessClaude, nil
+	case string(session.HarnessOMP):
+		return session.HarnessOMP, nil
+	default:
+		return "", fmt.Errorf("unknown -only value %q; want claude or omp", only)
+	}
+}
+
+// nextHarnessFilter cycles the live view's filter: everything, then each agent
+// in turn.
+func nextHarnessFilter(current session.Harness) session.Harness {
+	switch current {
+	case "":
+		return session.HarnessClaude
+	case session.HarnessClaude:
+		return session.HarnessOMP
+	default:
+		return ""
+	}
 }
 
 // ViewMode represents the current display mode
@@ -116,7 +153,7 @@ const (
 // the terminal is on the alternate screen with echo off from the moment the
 // defer below is registered, and an exit that skipped it would leave the user
 // at an invisible prompt.
-func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int) {
+func runLiveView(interval time.Duration, webEnabled bool, webPort int, filter session.Harness) (code int) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -224,18 +261,30 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 			sessions, err := session.Discover()
 			// An empty dashboard and a failed scan look identical once the
 			// error is dropped, so the reason goes into the frame rather than
-			// leaving csm to report "No active Claude sessions." either way.
+			// leaving csm to report "No active sessions." either way.
 			msg := jumpMsg
 			if err != nil {
 				msg = "Cannot read sessions: " + err.Error()
 			}
+			// Whether to tag rows with their agent is decided before filtering,
+			// so narrowing to one agent still says which one is on screen.
+			mixed := ui.MixedHarnesses(sessions)
+			sessions = ui.FilterByHarness(sessions, filter)
 			// Sessions come and go between frames, so the selection is clamped
 			// on every render rather than only when a key moves it.
 			visible = ui.ActiveSessions(sessions)
 			if selected >= len(visible) {
 				selected = len(visible) - 1
 			}
-			ui.RenderLive(sessions, webURL, lastClaudeStatus, selected, msg)
+			ui.RenderLive(ui.LiveView{
+				Sessions:     sessions,
+				WebURL:       webURL,
+				ClaudeStatus: lastClaudeStatus,
+				Selected:     selected,
+				JumpMsg:      msg,
+				Filter:       filter,
+				Mixed:        mixed,
+			})
 		}
 		// Erase anything left over below this frame from a previous, longer
 		// one, once per render cycle rather than each view remembering to.
@@ -314,6 +363,14 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				}
 			case 'r', 'R':
 				if viewMode == ViewModeUsage {
+					render()
+				}
+			case 'f', 'F':
+				if viewMode == ViewModeLive {
+					filter = nextHarnessFilter(filter)
+					// The row count changes with the filter, so a selection
+					// carried over would point at a different session.
+					selected = -1
 					render()
 				}
 			case 'w', 'W':

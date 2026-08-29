@@ -219,15 +219,22 @@ func ClaudeProjectsDir() (string, error) {
 // listProcesses shells out to ps. It is a variable so a test can make the
 // process scan fail, which is the case that used to be indistinguishable from
 // "nothing is running".
+//
+// args= rather than comm=, because a coding agent is not always its own
+// argv[0]: omp runs as `bun /path/to/omp`, so comm is `bun` and the only
+// evidence of what the process is sits in the arguments. tty= rides along
+// because it costs nothing here and is how an omp session's log is matched to
+// the process running it.
 var listProcesses = func() ([]byte, error) {
 	// ps directly, with no shell pipeline, to avoid shell injection risks.
-	return exec.Command("ps", "ax", "-o", "pid=,ppid=,comm=").Output()
+	return exec.Command("ps", "ax", "-o", "pid=,ppid=,tty=,args=").Output()
 }
 
-// psLine is one parsed row of `ps -o pid=,ppid=,comm=`.
+// psLine is one parsed row of `ps -o pid=,ppid=,tty=,args=`.
 type psLine struct {
 	pid, ppid int
-	comm      string
+	tty       string // controlling terminal, or ps's placeholder when there is none
+	argv      string // full command line, whitespace-normalised
 }
 
 // parsePSOutput splits ps output into rows, skipping anything malformed.
@@ -235,7 +242,10 @@ func parsePSOutput(output []byte) []psLine {
 	var rows []psLine
 	for _, line := range bytes.Split(output, []byte("\n")) {
 		fields := bytes.Fields(line)
-		if len(fields) < 3 {
+		// pid, ppid, tty, and at least one argv token. A row with no command
+		// line cannot be attributed to a harness, so dropping it here loses
+		// nothing.
+		if len(fields) < 4 {
 			continue
 		}
 		// Atoi rather than Sscanf: a malformed field is reported instead of
@@ -248,57 +258,66 @@ func parsePSOutput(output []byte) []psLine {
 		if err != nil {
 			continue
 		}
-		rows = append(rows, psLine{pid: pid, ppid: ppid, comm: string(fields[len(fields)-1])})
+		argv := make([]string, 0, len(fields)-3)
+		for _, f := range fields[3:] {
+			argv = append(argv, string(f))
+		}
+		rows = append(rows, psLine{
+			pid:  pid,
+			ppid: ppid,
+			tty:  string(fields[2]),
+			argv: strings.Join(argv, " "),
+		})
 	}
 	return rows
 }
 
-// getRunningClaudeDirs returns a map of encoded directory names to PIDs where
-// Claude processes are running.
+// getRunningHarnessProcs returns one entry per running coding-agent process,
+// carrying the harness it belongs to, its working directory, its controlling
+// terminal and whether it has been orphaned.
 //
-// It reports the error rather than an empty map: "nothing is running" and "the
-// process scan failed" produce identical results downstream, and every session
-// would be reported Inactive and filtered out of the dashboard. csm would say
-// "No active Claude sessions." with total confidence while sessions ran.
-// The keys are in the same format as the project directory names (e.g., -Users-username-Projects-...)
-// Multiple Claude processes in the same directory are tracked as separate PIDs.
+// It reports the error rather than an empty slice: "nothing is running" and
+// "the process scan failed" produce identical results downstream, and every
+// session would be reported Inactive and filtered out of the dashboard. csm
+// would say "No active sessions." with total confidence while sessions ran.
 //
-// The second result is the set of claude pids whose parent shell or IDE is
-// gone and init has adopted them (ppid 1). That, not silence, is what
-// distinguishes a ghost from a session someone left open overnight. It is a
-// side lookup rather than a field on the pid list so pairProcess and the
-// registry code keep working on plain pids.
+// A process whose cwd cannot be read is dropped, because a project is the only
+// thing callers use the cwd for and an unplaceable process cannot be joined to
+// any log directory.
+//
+// orphan (ppid 1) is a field on the process rather than a side lookup because
+// it is read off this same ps output; splitting the two let them disagree about
+// what was running. That, not silence, is what distinguishes a ghost from a
+// session someone left open overnight.
 //
 // ponytail: ppid==1 is exact on macOS; on Linux a subreaper (some systemd
 // user sessions) can adopt orphans instead of pid 1, which this misses.
-func getRunningClaudeDirs() (map[string][]int, map[int]bool, error) {
-	dirs := make(map[string][]int)
-	orphaned := make(map[int]bool)
-
+func getRunningHarnessProcs() ([]harnessProcess, error) {
 	output, err := listProcesses()
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing processes with ps: %w", err)
+		return nil, fmt.Errorf("listing processes with ps: %w", err)
 	}
 
+	var procs []harnessProcess
 	for _, row := range parsePSOutput(output) {
-		if !strings.HasSuffix(row.comm, "claude") {
+		harness := classifyProcess(row.argv)
+		if harness == HarnessNone {
 			continue
 		}
-		if row.ppid == 1 {
-			orphaned[row.pid] = true
-		}
-
-		// Get cwd for each process
-		path, err := getProcessCwd(row.pid)
-		if err != nil || path == "" {
+		cwd, err := getProcessCwd(row.pid)
+		if err != nil || cwd == "" {
 			continue
 		}
-		// Convert to encoded format (same as project directory names)
-		encoded := encodeProjectPath(path)
-		dirs[encoded] = append(dirs[encoded], row.pid)
+		procs = append(procs, harnessProcess{
+			pid:     row.pid,
+			harness: harness,
+			cwd:     cwd,
+			tty:     row.tty,
+			orphan:  row.ppid == 1,
+		})
 	}
 
-	return dirs, orphaned, nil
+	return procs, nil
 }
 
 // getProcessCwd returns the current working directory of a process by PID.
@@ -376,14 +395,18 @@ func Discover() ([]Session, error) {
 		return nil, err
 	}
 
-	// Get directories where Claude is currently running, along with Claude
-	// Code's own pid <-> session registry when this version writes one. Both
-	// come from one TTL-cached snapshot so they cannot disagree about what is
-	// running, and so ps/lsof are not spawned on every refresh.
-	runningDirs, orphanedPIDs, registry, haveRegistry, err := cachedRunningClaudeDirs()
+	// Get every running coding-agent process, along with Claude Code's own
+	// pid <-> session registry when this version writes one. Both come from one
+	// TTL-cached snapshot so they cannot disagree about what is running, and so
+	// ps/lsof are not spawned on every refresh.
+	procs, registry, haveRegistry, err := cachedRunningHarnessProcs()
 	if err != nil {
 		return nil, err
 	}
+	// Claude Code buckets its logs by the encoded working directory, so keying
+	// the processes the same way makes the join a plain string-key match.
+	runningDirs := pidsByDir(procs, HarnessClaude, encodeProjectPath)
+	procByPID := procsByPID(procs)
 
 	var sessions []Session
 	// Track the log files we actually parse this sweep so stale entries can be
@@ -453,7 +476,7 @@ func Discover() ([]Session, error) {
 			// Orphan-ness follows whichever pid the pairing settled on; with
 			// no pid (unconfident or unknown process) the session cannot be
 			// a ghost, which is the safe side.
-			orphaned := orphanedPIDs[pid]
+			orphaned := procByPID[pid].orphan
 
 			session, err := parseSession(entry.Name(), logFile, isRunning, pid, orphaned)
 			if err != nil {
@@ -464,6 +487,11 @@ func Discover() ([]Session, error) {
 			sessions = append(sessions, session)
 		}
 	}
+
+	// The second producer. It reads a different store in a different format and
+	// returns the same []Session, which is why every view downstream needs no
+	// idea that more than one agent exists.
+	sessions = append(sessions, discoverOMP(procs, liveFiles)...)
 
 	// Evict parse-cache entries for logs no longer in the active set, keeping the
 	// cache bounded to the current working set over a long-running server.
@@ -1051,6 +1079,18 @@ const GhostThreshold = time.Hour
 // yielded back to the user without writing a turn-completion marker.
 const recentActivityWindow = 2 * time.Minute
 
+// logWriteWindow is how recently the log file must have been written for the
+// write itself to count as evidence of work, independent of what the parsed
+// entries say. It covers a session mid-write, whose newest entry is not on disk
+// yet.
+const logWriteWindow = 30 * time.Second
+
+// sessionStaleWindow is the age past which a running session's newest entry
+// stops supporting any "Working" inference at all. Both harnesses use these
+// three windows, so that the status column means the same thing on every row of
+// a mixed dashboard.
+const sessionStaleWindow = 5 * time.Minute
+
 // determineStatus analyzes log entries to determine session status.
 // fileModTime is the log file's modification time, used to detect recent writes
 // that may not yet appear as parsed entries (e.g., during streaming).
@@ -1206,9 +1246,9 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 		return StatusWorking, task
 	}
 
-	// If the log file was recently modified (within 30s), the session is actively
-	// writing — even if parsed entries are stale (e.g., streaming writes in progress).
-	if !fileModTime.IsZero() && time.Since(fileModTime) < 30*time.Second {
+	// If the log file was recently modified, the session is actively writing —
+	// even if parsed entries are stale (e.g., streaming writes in progress).
+	if !fileModTime.IsZero() && time.Since(fileModTime) < logWriteWindow {
 		task := extractTask(lastAssistant)
 		return StatusWorking, task
 	}
@@ -1216,7 +1256,7 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 	// If process is running but log is stale, it's Waiting (not ghost)
 	// The user may be away or thinking - this is a valid active session
 	// Ghost detection is only for --kill-ghosts to find truly orphaned processes
-	if time.Since(lastTimestamp) > 5*time.Minute {
+	if time.Since(lastTimestamp) > sessionStaleWindow {
 		return StatusWaiting, "-"
 	}
 

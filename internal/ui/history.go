@@ -48,8 +48,11 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool,
 	// see rawNewline in ui.go for why printing line-by-line causes flicker.
 	var buf strings.Builder
 
-	// Header
-	fmt.Fprintf(&buf, "%sSession History%s (past %d days)%s%s", Bold, Reset, days, nl, nl)
+	// Scoped in the heading: DiscoverHistory reads Claude Code's projects
+	// directory only, so an omp session is absent from this list. Saying so is
+	// the difference between a known limit and a row the user thinks is missing.
+	fmt.Fprintf(&buf, "%sSession History%s %s(Claude Code)%s (past %d days)%s%s",
+		Bold, Reset, Dim, Reset, days, nl, nl)
 
 	// Column headers (once at the top)
 	colHeader := fmt.Sprintf("%-*s %-*s %-*s %-*s %*s",

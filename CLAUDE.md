@@ -1,8 +1,8 @@
-# Claude Code Project Guidelines
+# Project Guidelines
 
 ## Project Overview
 
-Claude Sessions Monitor (csm) is a CLI tool that monitors Claude Code sessions across multiple projects. It reads JSONL log files from `~/.claude/projects/` and displays session status in a terminal dashboard.
+Coding Sessions Monitor (csm) is a CLI tool that monitors coding agent sessions across multiple projects. It reads JSONL logs from Claude Code (`~/.claude/projects/`) and Oh My Pi (`~/.omp/agent/sessions/`) and shows both in one terminal or web dashboard. The repository keeps its original `claude-sessions-monitor` name so existing clones and `go install` paths keep working.
 
 ## Tech Stack
 
@@ -13,7 +13,7 @@ Claude Sessions Monitor (csm) is a CLI tool that monitors Claude Code sessions a
 
 ```
 internal/
-  session/  - Session discovery, log parsing, status detection, timeline/metrics
+  session/  - Session discovery for both agents, log parsing, status detection, timeline/metrics
   ui/       - Terminal rendering (ANSI colors, formatting)
   jump/     - Bring a session's terminal tab to the front (macOS + Ghostty)
   web/      - Web dashboard (HTTP server, REST API, SSE, embedded frontend)

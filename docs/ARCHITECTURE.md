@@ -8,13 +8,14 @@ decision, and that comment is the authority if the two ever disagree.
 ## Data flow
 
 ```
-~/.claude/projects/<encoded-cwd>/<session>.jsonl     ps ax -o pid=,ppid=,comm=
-                    │                                          │
-                    └──────────── session.Discover() ──────────┘
-                                        │
-                                   []session.Session
-                    ┌───────────────────┼───────────────────┐
-                 ui (TUI)        web (JSON + SSE)      jump (focus tab)
+~/.claude/projects/<encoded-cwd>/<session>.jsonl  ──►  discoverClaude()  ─┐
+~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl ─►  discoverOMP()  ───┤
+                                                                          │
+ps ax -o pid=,ppid=,tty=,args=  ──►  classifyProcess()  ──►  both above  ──┤
+                                                    []session.Session  ◄──┘
+                                                             │
+                                    ┌────────────────────────┼────────────────────┐
+                                 ui (TUI)            web (JSON + SSE)     jump (focus tab)
 ```
 
 `internal/session` is the only package that reads logs or looks at processes.
@@ -23,24 +24,52 @@ decision, and that comment is the authority if the two ever disagree.
 `session.ParseTimeline` / `ParseMetrics` read a single log on demand for the
 web detail panel.
 
+There are two session producers behind `Discover()`: the Claude Code path in
+`session.go`, and the Oh My Pi path in `omp.go`. They are two concrete
+functions, not an interface with two implementations — the two log formats share
+nothing but the letters JSONL, so an interface would have one method per caller
+and no reuse. What *is* shared they call directly: the `ps` scan, `getProcessCwd`,
+`findActiveLogs`, the caches, `sessionLess`, and origin detection.
+
+Every `Session` carries a `Harness` (`claude` / `omp`), serialized as `harness`.
+It is not decoration: `--kill-ghosts` verifies a pid against it before sending
+SIGTERM, and `ui` decides the row tag from it.
+
 `main.go` dispatches on flags in this order: `-v`, `-kill-ghosts`, `-history`,
-`-l` (with `-json`), `-web-only`, then the default live view. The live loop
-owns the `ViewMode` (live / history / usage); `ui` only exposes the three
-renderers. The ticker runs at `-interval` (2s); the usage view never
+`-l` (with `-json`), `-web-only`, then the default live view. `-only` filters
+the result by harness for every one of them; `f` cycles the same filter live.
+The live loop owns the `ViewMode` (live / history / usage); `ui` only exposes
+the three renderers. The ticker runs at `-interval` (2s); the usage view never
 auto-refreshes and the history view is throttled to once per 30s.
 
 ## `internal/session`
 
-### Discovery (`session.go`)
+### The process scan (`harness.go`, `session.go`)
+
+`getRunningHarnessProcs()` runs `ps ax -o pid=,ppid=,tty=,args=` (no shell) and
+returns one `harnessProcess` per recognised agent, with its harness, cwd
+(`/proc/<pid>/cwd` on Linux, `lsof -p` on macOS), controlling terminal and
+whether it has been orphaned.
+
+`args=`, not `comm=`, because an agent is not always its own `argv[0]`: omp runs
+as `bun /path/to/omp`, so `comm` is `bun`. `classifyProcess` therefore matches
+**argv token basenames, never command-line substrings**. This is not fussiness:
+a machine with omp installed runs a puppeteer Chrome under `~/.omp/puppeteer/`
+and a Python REPL out of `/var/folders/.../T/omp-python-runner/`, and
+`strings.Contains(argv, "omp")` claims both. `--kill-ghosts` would then SIGTERM
+a browser. Don't loosen it.
+
+A failed `ps` scan aborts `Discover` with an error rather than returning an
+empty slice: empty is indistinguishable from "nothing running" and would mark
+every session Inactive.
+
+### Claude Code discovery (`session.go`)
 
 1. `ClaudeProjectsDir()` is `$HOME/.claude/projects`. Every subdirectory is a
    project; its name is Claude Code's encoding of the working directory
    (`encodeProjectPath`: every rune outside `[A-Za-z0-9-]` becomes `-`).
-2. `getRunningClaudeDirs()` runs `ps ax -o pid=,ppid=,comm=` (no shell), keeps
-   rows whose command ends in `claude`, resolves each pid's cwd
-   (`/proc/<pid>/cwd` on Linux, `lsof -p` on macOS) and keys the result by
-   `encodeProjectPath(cwd)`. Because both sides use the same encoding, joining
-   processes to project directories is a plain string-key match.
+2. `pidsByDir(procs, HarnessClaude, encodeProjectPath)` keys the scan the same
+   way, so joining processes to project directories is a plain string-key match.
 3. `findActiveLogs(dir, runningCount)` picks which `*.jsonl` files to parse.
    `agent-*.jsonl` (subagent logs) are skipped. With no running process it
    returns the single newest log; with N processes it returns the N newest plus
@@ -55,16 +84,58 @@ The encoded directory name is only a fallback for the project name. The real
 working directory is the `cwd` field inside the log, and `extractProjectName`
 (`history.go`) turns it into the short `org/repo` label.
 
-A failed `ps` scan aborts `Discover` with an error rather than returning an
-empty process map: an empty map is indistinguishable from "nothing running"
-and would mark every session Inactive.
+### Oh My Pi discovery (`omp.go`, `omp_terminal.go`)
+
+`OMPSessionsDir()` is `$HOME/.omp/agent/sessions`, overridable with
+`CSM_OMP_SESSIONS_DIR` — omp relocates its store for `--profile` and
+`--session-dir`, so unlike Claude Code the default path is not a guarantee.
+
+omp's bucket encoding is home-relative, has had several spellings, and is
+migrated best-effort on access, so csm does not reimplement it. Instead
+`ompHeaderCWD` reads the working directory out of the newest log's header (two
+lines, one file per bucket) and joins that to processes keyed by raw cwd.
+`findActiveLogs` is reused unchanged; it already skips directories, which is what
+excludes omp's per-session artifact directory sitting beside each log.
+
+What the format demands of the parser:
+
+- The physical first line is a fixed-width 256-byte `{"type":"title"}` slot, not
+  the header. A parser that assumed otherwise reads no `cwd` and every omp
+  session loses its project name and its process.
+- Entries form an append-only **tree** (`id`/`parentId` + leaf pointer). csm
+  reads the physical tail. Known ceiling: after a rewind or branch switch the
+  tail may not be on the live branch. It is what the file's mtime reflects, and
+  walking from the leaf would mean reading whole multi-MB files every tick.
+- `message.content` is either a block array or a bare string, so it stays
+  `json.RawMessage` and `ompMessage.text()` handles both. Same for `custom.data`,
+  whose shape depends on `customType`.
+- An unparseable line costs one entry, not the session. omp's own loader is
+  lenient here too.
+
+Pairing has no registry to work from — omp writes no pid anywhere. It does write
+a best-effort breadcrumb per terminal (`terminal-sessions/<terminal-id>` →
+cwd + log path), and the terminal id is the tty when the process has one, so
+`pairOMPProcess` joins breadcrumbs to the scan's `tty` column for an exact
+pairing. It degrades to running-with-no-pid (`PIDConfident` false) when omp used
+an env-derived id (`TMUX_PANE`, `CMUX_SURFACE_ID`, ...) that `ps` cannot see, or
+the process has no terminal. Two breadcrumbs naming one log drop the pairing
+rather than guess, the same rule `pairProcess` applies to a duplicated session id.
+
+Known ceiling: an omp store that exists but cannot be read is skipped silently.
+Failing the sweep would take the Claude Code half of the dashboard down with it.
+The honest fix is a partial-scan warning surface; `sse.go` already has
+`scan_error` to hang it on.
 
 ### Status inference (`determineStatus` in `session.go`)
 
 Reads four kinds of log entries: `user`, `assistant`, `system` with subtype
 `turn_duration`, and the progress heartbeats (`progress`, `hook_progress`,
-`agent_progress`). Three thresholds: 2 minutes for "recent activity", 30
-seconds for the log file's mtime, 5 minutes for "the whole session is stale".
+`agent_progress`).
+
+Three named windows, shared with the omp rules so that the status column means
+the same thing on every row of a mixed dashboard: `recentActivityWindow` (2m,
+"recent activity"), `logWriteWindow` (30s, the log file's mtime),
+`sessionStaleWindow` (5m, "the whole session is stale").
 
 The rules, in evaluation order:
 
@@ -85,6 +156,43 @@ The rules, in evaluation order:
 A user entry that carries only `tool_result` blocks is *not* a prompt
 (`isUserPrompt`); it is the tail of Claude's own turn. Live subagents
 (`subagent.go`) promote Waiting to Working but never override Needs Input.
+
+### Status inference (`determineOMPStatus` in `omp.go`)
+
+Same four statuses, same three windows, different evidence. omp has no progress
+heartbeats, but it announces every tool call with a `tool_execution_start` custom
+entry, and a working session calls tools.
+
+The rules, in evaluation order:
+
+- Not running → **Inactive**. Running with no entries → **Waiting** (just
+  started; omp keeps a new session in memory until its first assistant message,
+  so this window is wider than Claude Code's).
+- A tool call announced with no matching result → younger than 2m → **Working**,
+  older → **Needs Input**. The *only* producer of Needs Input.
+- A `session_exit` newer than the last assistant message → **Waiting**.
+- Last assistant message with `stopReason` `stop` or `aborted` and no newer
+  prompt → **Waiting**. This is checked before mtime, because the write that
+  ends a turn updates the mtime and would otherwise read as Working.
+- File mtime within 30s → **Working**. Nothing within 5m → **Waiting**.
+- Assistant message or user prompt within 2m → **Working**.
+- Otherwise **Waiting**.
+
+Pending tool calls are an exact **set difference**: `tool_execution_start` and
+the `toolResult` message both carry the same `toolCallId`. Claude Code only
+allows a count of `tool_use` against `tool_result` blocks, which cannot say
+*which* call is outstanding. The task label prefers the start entry's `intent`
+(a one-line description omp already wrote) over the bare tool name.
+
+A `user` role is always a real prompt here — omp gives tool results their own
+`toolResult` role — so there is no `isUserPrompt` equivalent to write.
+
+Fields deliberately left zero on an omp session (`applyOMPParsedLog`):
+`ContextPercent`, `ContextTokens`, `ContextWindow`, `GitBranch`,
+`HasUnsandboxed`, `Subagents`. omp is multi-provider, so a context window cannot
+be derived from the model id the way `contextWindowForModel` does for Claude, and
+a wrong percentage reads as a measurement. The rest have no equivalent in its
+log. If you add a column, blank it honestly rather than guessing.
 
 ### Processes, ghosts and the pairing pitfall
 
@@ -117,9 +225,15 @@ survive that:
   headless `claude -p` whose shell has exited. Known ceiling: a Linux
   subreaper adopts orphans instead of pid 1 and this misses them.
 - `ghostsFrom` refuses any session that is not `PIDConfident`, and
-  `KillGhostProcesses` re-checks the pid is still a claude process before
-  `SIGTERM`. An unconfident pairing would be a coin flip over which session
-  dies. `jump` applies the same rule before trusting a pid's tty.
+  `KillGhostProcesses` re-checks the pid with `isHarnessProcess(pid, ghost.Harness)`
+  before `SIGTERM` — the *session's* harness, not "any known agent", because pids
+  are unique per machine and not per agent. An unconfident pairing, or an
+  unattributed one, would be a coin flip over which session dies. `jump` applies
+  the same rule before trusting a pid's tty.
+
+The omp side has no registry at all; see
+[Oh My Pi discovery](#oh-my-pi-discovery-ompgo-omp_terminalgo) for the
+breadcrumb pairing that replaces it.
 
 ### `Degraded`
 
@@ -127,16 +241,18 @@ survive that:
 could not be read to the end — typically a line over the 10 MB scanner cap or
 an I/O error. Partial data is kept unless zero entries parsed
 (`isFatalParseError` in `cache.go`); the session still gets a status and stays
-visible. Every view must render the marker so the numbers are not read as
-measurements: `[?]` in `ui/ui.go` and `ui/history.go`, the `?` badge in
-`web/static/app.js`. A new view or column that shows counts needs the same.
+visible. The non-fatal error is cached alongside the partial parse, so the marker
+stays put instead of showing only on the tick that parsed the file. Every view
+must render it so the numbers are not read as measurements: `[?]` in `ui/ui.go`
+and `ui/history.go`, the `?` badge in `web/static/app.js`. A new view or column
+that shows counts needs the same.
 
 ### Caches (`cache.go`, `quota.go`, `status.go`)
 
 | Cache | Key / TTL | Why |
 |---|---|---|
-| `parseCache` | log path; valid while `(mtime, size)` unchanged | skip re-parsing multi-MB logs every tick |
-| `processScanCache` | 2s | one `ps`/`lsof` round per tick, not per caller |
+| `parseCache` / `ompParseCache` | log path; valid while `(mtime, size)` unchanged | skip re-parsing multi-MB logs every tick. One generic `cachedParse[T]` policy, two maps, because the formats parse into different shapes |
+| `processScanCache` | 2s | one `ps`/`lsof` round per tick, not per caller. Guarded by `processScanValid`, not a nil check: no agent running is a legitimate result |
 | `resultCache` | 1s | TUI loop, SSE hub and HTTP handlers collapse to one scan |
 | `apiQuotaCache` | 60s | the quota endpoint rate-limits hard |
 | `claudeStatusCache` | 60s | status page, fetched on demand only |
@@ -146,9 +262,17 @@ see [Writing tests](#writing-tests).
 
 ### What csm touches outside its own process
 
-Reads: `~/.claude/projects/` (logs, `sessions-index.json`), and the OAuth token
-from the macOS Keychain item `Claude Code-credentials` or
-`~/.claude/.credentials.json` on Linux (`oauth.go`).
+Reads: `~/.claude/projects/` (logs, `sessions-index.json`),
+`~/.omp/agent/sessions/` (logs) and `~/.omp/agent/terminal-sessions/`
+(breadcrumbs), and the OAuth token from the macOS Keychain item
+`Claude Code-credentials` or `~/.claude/.credentials.json` on Linux
+(`oauth.go`).
+
+Nothing else under `~/.omp` is read, deliberately. `agent/models.yml` holds the
+authoritative context windows csm would like for its context column — and
+provider API keys in plaintext right beside them. `models.db` has the same
+numbers behind a SQLite dependency that would end the single static binary. The
+context column stays blank for omp rows instead.
 
 Writes: only `~/.claude-monitor/origins/<sessionID>.json` (`origin_store.go`),
 atomically via temp file + rename, so a session's origin badge survives after
@@ -223,6 +347,10 @@ Reuse these instead of writing new ones:
   inject ANSI into the dashboard.
 - `ActiveSessions` — the one filter that decides which rows are shown. Any
   code that addresses a row by index (selection, jump) must use it too.
+- `MixedHarnesses` / `FilterByHarness` — the harness tag renders only in mixed
+  company, decided *before* the filter is applied so narrowing to one agent
+  still says which one is on screen and the rows don't re-flow when `f` is
+  pressed. `-only` and `f` are display filters; both agents are always scanned.
 - `calcSessionLayout` / `calcHistoryLayout` / `calcUsageLayout` in `layout.go`
   — every column width is a named constant there.
 - Pad by `utf8.RuneCountInString`, never `len()`; the row gutter for the
@@ -335,9 +463,11 @@ Fixture helpers already exist; use them rather than hand-rolling JSONL:
 | `timelineFixture` | `web/handlers_test.go` | a log under a fake `$HOME` for the handlers |
 
 Seams for the things you can't drive from a test: `listProcesses` (the `ps`
-scan), `originStoreDirFn`, `parseLogFileWithLimit` (trigger the oversized-line
-path without writing 10 MB), `web.discoverSessions`. Swap them and restore in
-`t.Cleanup`.
+scan), `processArgs` (the pre-SIGTERM pid recheck), `originStoreDirFn`,
+`parseLogFileWithLimit` / `parseOMPLogFileWithLimit` (trigger the oversized-line
+path without writing 10 MB), `web.discoverSessions`, and the
+`CSM_OMP_SESSIONS_DIR` env override (point omp discovery at a fixture tree).
+Swap them and restore in `t.Cleanup`.
 
 Write the failure message as the user-visible consequence, not the mismatch.
 From `ghost_test.go`:

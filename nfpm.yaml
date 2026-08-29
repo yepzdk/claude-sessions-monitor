@@ -13,8 +13,9 @@ section: utils
 priority: optional
 maintainer: Jesper Pedersen <pejes@aarhus.dk>
 description: |
-  Claude Sessions Monitor — a lightweight CLI to monitor Claude Code sessions
-  across multiple projects, with live dashboard, web dashboard, and history view.
+  Coding Sessions Monitor — a lightweight CLI to monitor Claude Code and
+  Oh My Pi sessions across multiple projects, with live dashboard, web
+  dashboard, and history view.
 vendor: yepzdk
 homepage: https://github.com/yepzdk/claude-sessions-monitor
 license: MIT

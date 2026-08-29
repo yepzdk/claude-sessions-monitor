@@ -484,6 +484,10 @@ main {
 
 .session-model-badge { color: var(--text-muted); }
 
+/* Which agent a session belongs to. Neutral on purpose: the accent and the
+   status hues are spoken for, and this is an identifier, not a state. */
+.session-harness-badge { color: var(--text-muted); }
+
 .session-context {
     flex-shrink: 0;
     display: flex;

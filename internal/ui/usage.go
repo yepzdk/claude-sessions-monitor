@@ -21,7 +21,11 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 	// see rawNewline in ui.go for why printing line-by-line causes flicker.
 	var buf strings.Builder
 
-	fmt.Fprintf(&buf, "%sToken Usage%s%s%s", Bold, Reset, nl, nl)
+	// Named for its scope. Both numbers below are Claude Code's: the quota comes
+	// from Anthropic's OAuth usage endpoint, and the per-session tokens are read
+	// out of Claude Code's own logs. An omp session appears in neither, and a
+	// heading that said only "Token Usage" would read as covering everything.
+	fmt.Fprintf(&buf, "%sToken Usage%s %s(Claude Code)%s%s%s", Bold, Reset, Dim, Reset, nl, nl)
 
 	// --- API Quota Section ---
 	width := getTerminalWidth()

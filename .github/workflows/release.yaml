@@ -77,7 +77,7 @@ jobs:
           # any leading indentation would end up in the committed formula.
           cat > Formula/csm.rb <<FORMULA_EOF
           class Csm < Formula
-            desc "CLI tool to monitor Claude Code sessions"
+            desc "CLI tool to monitor Claude Code and Oh My Pi sessions"
             homepage "https://github.com/yepzdk/claude-sessions-monitor"
             version "${VERSION}"
             license "MIT"
