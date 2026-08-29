@@ -129,7 +129,8 @@ Otherwise it downloads the new binary, verifies it against the release's
 step leaves the working csm untouched.
 
 The live dashboard also checks once a day, in the background, and shows a
-footer line when a newer release exists. To turn that off:
+footer line when a newer release exists. To turn that off, set
+`CSM_NO_UPDATE_CHECK` to **any** non-empty value — including `0`:
 
 ```bash
 export CSM_NO_UPDATE_CHECK=1

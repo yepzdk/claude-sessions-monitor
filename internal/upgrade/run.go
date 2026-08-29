@@ -105,7 +105,11 @@ type checkState struct {
 //
 // Callers run this off the render path -- it blocks on the network.
 func Notice(version string) string {
-	// Opt-out for anyone who does not want csm talking to github.com.
+	// Opt-out for anyone who does not want csm talking to github.com. Any
+	// non-empty value counts, NO_COLOR-style: a privacy switch that quietly
+	// ignores CSM_NO_UPDATE_CHECK=true because it only recognises "1" fails in
+	// the direction that matters, so this errs the other way -- including for
+	// "0", which the README says out loud.
 	if os.Getenv("CSM_NO_UPDATE_CHECK") != "" {
 		return ""
 	}

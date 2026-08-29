@@ -23,16 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `install.sh`, a one-line installer (`curl -fsSL .../install.sh | sh`) that detects OS/arch, verifies the download against the release's checksums, and installs to `~/.local/bin` without sudo
-- `csm -upgrade` updates a directly-installed csm in place, verifying the download and smoke-testing it before replacing the running binary; installs owned by Homebrew, mise, dpkg, rpm, pacman or `go install` get that tool's upgrade command instead
-- The live dashboard checks for a newer release once a day in the background and shows a footer line when one exists; set `CSM_NO_UPDATE_CHECK=1` to disable
-- An AUR package, `csm-bin`, published automatically on release, so Arch users get csm through `yay -Syu` like anything else
-- Release binaries are statically linked (`CGO_ENABLED=0`), so the amd64 build no longer requires a glibc as new as the CI runner's; it previously linked against the build machine's libc while the arm64 build was static
+- `install.sh`, a one-line installer (`curl -fsSL .../install.sh | sh`) that detects OS/arch, verifies the download, and installs to `~/.local/bin` without sudo
+- `csm -upgrade` replaces a directly-installed csm in place; installs owned by Homebrew, mise, dpkg, rpm, pacman or `go install` get that tool's upgrade command instead
+- The live dashboard checks for a newer release once a day in the background; set `CSM_NO_UPDATE_CHECK` to disable
+- An AUR package, `csm-bin`, published automatically on release
 - Releases now ship a `checksums.txt` asset, which `install.sh`, `csm -upgrade` and the Homebrew formula all verify against
 - `golangci-lint` runs in CI and in `make check`, once for `GOOS=linux` and once for `GOOS=darwin` so the macOS-only jump code is covered
 - `docs/ARCHITECTURE.md`, a contributor guide to the data flow, status rules, ghost detection, caches, platform code and test helpers, plus package documentation pointing at it
 - `go install github.com/yepzdk/claude-sessions-monitor@latest` now works, and `csm -v` reports the module version for such builds
 - `pid_confident` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), which says whether `ghost_pid` is known to be that session's own process or only a positional guess
+
+### Fixed
+
+- The amd64 release binary no longer requires a glibc as new as the CI runner's; release builds are now statically linked (`CGO_ENABLED=0`)
 
 ### Changed
 

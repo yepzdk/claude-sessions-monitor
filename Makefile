@@ -1,4 +1,4 @@
-.PHONY: build build-all install packages checksums clean fmt lint check
+.PHONY: build build-all install packages checksums clean fmt lint shellcheck check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -37,8 +37,17 @@ check:
 	@gofmt -l . | grep . && { echo "Not gofmt-clean — run 'make fmt'"; exit 1; } || true
 	go vet ./...
 	$(MAKE) lint
+	$(MAKE) shellcheck
 	go build $(LDFLAGS) -o /dev/null .
 	go test ./...
+
+# The two POSIX sh scripts CI checks. Skipped with a note rather than failing
+# when shellcheck is absent: it is not part of the Go toolchain, so requiring it
+# would make `make check` unrunnable on a machine that can build and test fine.
+# CI's runner always has it, so nothing merges unchecked.
+shellcheck:
+	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not installed — skipping (CI will run it)"; exit 0; }; \
+		shellcheck --shell=sh install.sh packaging/aur/render.sh && echo "shellcheck: 0 issues"
 
 # Build for current platform
 build:

@@ -74,9 +74,9 @@ jobs:
       - name: Test
         run: go test ./...
 
-  # install.sh is the `curl | sh` entry point, so a slip there breaks the first
-  # thing a new user runs — and it is the one file in the repo that no Go test
-  # can cover. shellcheck is preinstalled on ubuntu runners.
+  # install.sh is the `curl | sh` entry point and render.sh builds the AUR
+  # package: both are release-critical, and both are invisible to every Go test
+  # in the repo. shellcheck is preinstalled on ubuntu runners.
   shell:
     runs-on: ubuntu-latest
     steps:
@@ -85,5 +85,5 @@ jobs:
       # --shell=sh because install.sh targets POSIX sh, not bash: without it
       # shellcheck reads the shebang and permits bashisms the script must not
       # rely on.
-      - name: Shellcheck install.sh
-        run: shellcheck --shell=sh install.sh
+      - name: Shellcheck shell scripts
+        run: shellcheck --shell=sh install.sh packaging/aur/render.sh
