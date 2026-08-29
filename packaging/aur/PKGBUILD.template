@@ -11,10 +11,8 @@ pkgdesc="Lightweight CLI to monitor Claude Code sessions across multiple project
 arch=('x86_64' 'aarch64')
 url="https://github.com/yepzdk/claude-sessions-monitor"
 license=('MIT')
-# The x86_64 release binary is built with cgo enabled, so it links against the
-# system libc. The aarch64 one is cross-compiled and static, but declaring the
-# dependency for both costs nothing: glibc is in base.
-depends=('glibc')
+# No depends: the release binaries are built with CGO_ENABLED=0 and are
+# statically linked, so they need nothing from the system at runtime.
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 # A released binary is what upstream published and what its checksum covers.

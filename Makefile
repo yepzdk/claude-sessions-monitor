@@ -44,13 +44,21 @@ check:
 build:
 	go build $(LDFLAGS) -o csm .
 
-# Build for all platforms
+# Build for all platforms.
+#
+# CGO_ENABLED=0 on every target so all four binaries are statically linked.
+# Without it the host-architecture build picks up cgo (net pulls it in when a C
+# compiler is present) and links against the build machine's glibc, while the
+# cross-compiled ones come out static -- so the amd64 release binary refused to
+# run on any distro older than the CI runner while the arm64 one ran anywhere.
+# Nothing here needs cgo: the pure-Go resolver is fine for the three HTTPS
+# endpoints csm talks to, and no package uses os/user.
 build-all: clean
 	@mkdir -p dist
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-darwin-amd64 .
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-darwin-arm64 .
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-linux-amd64 .
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-linux-arm64 .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-darwin-amd64 .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-darwin-arm64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-linux-amd64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-linux-arm64 .
 
 # Install to ~/.local/bin
 install: build

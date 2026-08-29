@@ -105,6 +105,13 @@ Homebrew formula, `install.sh` and `csm -upgrade` all vouch for the same bytes.
 
 The job is **dormant until `AUR_SSH_KEY` is set** — without it the step logs
 that and exits 0, so releases stay green on a repo that isn't wired to the AUR.
+
+> **Blocked as of 2026-08-29:** aur.archlinux.org has account registration
+> temporarily closed, so step 1 below cannot be completed yet. Everything else
+> — the PKGBUILD, the renderer, the release job — is finished and tested;
+> `csm-bin` goes live the moment an account can be created. Re-check
+> https://aur.archlinux.org/register periodically.
+
 To enable it:
 
 1. Create an account at https://aur.archlinux.org and add an SSH public key to it.
