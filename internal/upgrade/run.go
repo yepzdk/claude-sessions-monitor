@@ -24,7 +24,16 @@ func Run(version string, out io.Writer) int {
 		printf(out, "Could not locate the running csm binary: %v\n", err)
 		return 1
 	}
+	return runFor(version, exe, out)
+}
 
+// runFor is Run with the binary's location supplied rather than discovered.
+//
+// The split exists so the property this whole feature rests on -- a managed
+// install is told what to run and nothing on disk is touched -- is a test
+// rather than something a reviewer has to take on trust. Run itself is then
+// only the os.Executable call.
+func runFor(version, exe string, out io.Writer) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
