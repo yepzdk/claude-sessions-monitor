@@ -102,7 +102,7 @@ if [ "${CSM_SKIP_CHECKSUM:-}" = "1" ]; then
 	echo "Skipping checksum verification (CSM_SKIP_CHECKSUM=1)."
 else
 	fetch "${base}/checksums.txt" "${tmp}/checksums.txt" ||
-		die "could not download ${base}/checksums.txt — releases before v0.7.0 have no checksums file; re-run with CSM_SKIP_CHECKSUM=1 to install anyway"
+		die "could not download ${base}/checksums.txt — releases published before checksums were introduced do not have one; re-run with CSM_SKIP_CHECKSUM=1 to install anyway"
 
 	# The file is `<sha>  <name>` per line, names unqualified. Anchoring on the
 	# name keeps csm-linux-arm64 from matching a line for csm-linux-arm64.deb.

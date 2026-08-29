@@ -13,6 +13,7 @@ import (
 	"github.com/yepzdk/claude-sessions-monitor/internal/jump"
 	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 	"github.com/yepzdk/claude-sessions-monitor/internal/ui"
+	"github.com/yepzdk/claude-sessions-monitor/internal/upgrade"
 	"github.com/yepzdk/claude-sessions-monitor/internal/web"
 )
 
@@ -42,6 +43,7 @@ func main() {
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
 	webPort := flag.Int("port", 9847, "Port for web dashboard")
+	doUpgrade := flag.Bool("upgrade", false, "Upgrade csm to the latest release")
 	flag.Parse()
 
 	// Check for conflicting flags
@@ -54,6 +56,12 @@ func main() {
 	if *showVersion {
 		fmt.Printf("csm version %s\n", version)
 		os.Exit(0)
+	}
+
+	// Handle upgrade mode. Before every other mode: it neither reads sessions
+	// nor draws anything, so nothing below needs to have run first.
+	if *doUpgrade {
+		os.Exit(upgrade.Run(version, os.Stdout))
 	}
 
 	// Handle kill-ghosts mode
@@ -173,6 +181,18 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 	// the user can see rather than re-discovering and racing the ticker.
 	var visible []session.Session
 
+	// Check for a newer release off the render path: upgrade.Notice blocks on
+	// the network, and a frame must never wait on github.com. The result
+	// arrives once, over a channel, so the render loop owns the string and
+	// there is nothing to race on.
+	updateNotice := ""
+	noticeCh := make(chan string, 1)
+	go func() {
+		if n := upgrade.Notice(version); n != "" {
+			noticeCh <- n
+		}
+	}()
+
 	// Claude status: fetch on-demand (user interaction), use cached on ticker
 	var lastClaudeStatus *session.ClaudeStatus
 	refreshClaudeStatus := func() {
@@ -233,7 +253,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 			if selected >= len(visible) {
 				selected = len(visible) - 1
 			}
-			ui.RenderLive(sessions, webURL, lastClaudeStatus, selected, msg)
+			ui.RenderLive(sessions, webURL, lastClaudeStatus, selected, msg, updateNotice)
 		}
 		// Erase anything left over below this frame from a previous, longer
 		// one, once per render cycle rather than each view remembering to.
@@ -258,6 +278,8 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 		case fatalErr = <-webFatal:
 			cancel()
 			return 0
+		case updateNotice = <-noticeCh:
+			render()
 		case key := <-keyCh:
 			// Any keypress clears the previous action's feedback, so a stale
 			// message never sits under a table it no longer describes.

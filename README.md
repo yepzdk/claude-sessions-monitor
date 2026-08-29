@@ -36,12 +36,9 @@ Detects your OS and architecture, verifies the download against the release's
 `checksums.txt`, and installs to `~/.local/bin/csm` — no sudo. Re-run it any
 time to upgrade, or use [`csm -upgrade`](#upgrading).
 
-Knobs: `CSM_VERSION` (default: latest), `CSM_INSTALL_DIR` (default:
-`~/.local/bin`). To pin a version through the pipe, pass it as an argument:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/yepzdk/claude-sessions-monitor/main/install.sh | sh -s -- 0.7.0
-```
+Knobs: `CSM_VERSION` (default: latest) and `CSM_INSTALL_DIR` (default:
+`~/.local/bin`). A version can also be passed as an argument, which is the form
+that survives the pipe: `... | sh -s -- 0.8.0`.
 
 ### Homebrew (macOS/Linux)
 
@@ -107,6 +104,26 @@ This installs the binary as `claude-sessions-monitor` (the module name) into
 git clone https://github.com/yepzdk/claude-sessions-monitor.git
 cd claude-sessions-monitor
 make install
+```
+
+## Upgrading
+
+```bash
+csm -upgrade
+```
+
+Checks GitHub for a newer release. If csm was installed with a package manager
+(Homebrew, mise, `.deb`/`.rpm`, pacman, `go install`), it prints that tool's
+upgrade command rather than overwriting a file the manager believes it owns.
+Otherwise it downloads the new binary, verifies it against the release's
+`checksums.txt`, checks that it runs, and replaces itself — a failure at any
+step leaves the working csm untouched.
+
+The live dashboard also checks once a day, in the background, and shows a
+footer line when a newer release exists. To turn that off:
+
+```bash
+export CSM_NO_UPDATE_CHECK=1
 ```
 
 ## Usage

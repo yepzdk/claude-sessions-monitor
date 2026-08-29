@@ -128,7 +128,8 @@ func ActiveSessions(sessions []session.Session) []session.Session {
 // selected is an index into ActiveSessions(sessions), or -1 for no selection.
 // actionMsg is one line of feedback from the last key the user pressed, or ""
 // for none.
-func RenderLive(sessions []session.Session, webURL string, claudeStatus *session.ClaudeStatus, selected int, actionMsg string) {
+// updateNotice announces a newer csm release, or "" for none.
+func RenderLive(sessions []session.Session, webURL string, claudeStatus *session.ClaudeStatus, selected int, actionMsg, updateNotice string) {
 	// Set terminal title with status summary
 	SetTerminalTitle(buildTerminalTitle(sessions))
 
@@ -196,6 +197,12 @@ func RenderLive(sessions []session.Session, webURL string, claudeStatus *session
 	// the table.
 	if actionMsg != "" {
 		fmt.Fprintf(&buf, "%s%s%s%s", Dim, sanitizeForTerminal(actionMsg), Reset, rawNewline)
+	}
+
+	// A newer release, if one was found. Above the help line so it reads as
+	// part of the footer rather than as a row of the table.
+	if updateNotice != "" {
+		fmt.Fprintf(&buf, "%s%s%s%s", Yellow, sanitizeForTerminal(updateNotice), Reset, rawNewline)
 	}
 
 	// Show help footer
