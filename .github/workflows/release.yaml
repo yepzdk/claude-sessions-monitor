@@ -72,7 +72,22 @@ jobs:
 
           # Read the hashes out of checksums.txt rather than recomputing them,
           # so the formula and the file users verify against can never disagree.
-          sha() { awk -v n="$1" '$2 == n { print $1 }' dist/checksums.txt; }
+          #
+          # The empty check is what makes a missing entry stop the release. awk
+          # prints nothing for a name it cannot find, and `set -u` does not fire
+          # on the assignment below because assigning an empty value succeeds --
+          # so without this the formula is committed and pushed with sha256 "",
+          # breaking every `brew install csm` until someone notices.
+          #
+          # This works because every call site below is a plain assignment: the
+          # exit runs in the substitution subshell and `set -e` then aborts on
+          # the failed assignment. Embedding a call in a larger command (echo
+          # "$(sha …)") would swallow it -- keep the assignment form.
+          sha() {
+            s=$(awk -v n="$1" '$2 == n { print $1 }' dist/checksums.txt)
+            [ -n "$s" ] || { echo "checksums.txt has no entry for $1" >&2; exit 1; }
+            echo "$s"
+          }
           sha_darwin_arm64=$(sha csm-darwin-arm64)
           sha_darwin_amd64=$(sha csm-darwin-amd64)
           sha_linux_arm64=$(sha csm-linux-arm64)
@@ -150,7 +165,12 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Install tools
-        run: pacman -Sy --noconfirm git openssh curl
+        # -Syu, not -Sy: refreshing the database and then installing against
+        # a not-upgraded root is a partial upgrade, which Arch warns breaks
+        # systems. In a throwaway container it usually survives, and when it
+        # does not it fails mid-release with a libc mismatch that has nothing
+        # to do with csm.
+        run: pacman -Syu --noconfirm git openssh curl
 
       - name: Checkout
         uses: actions/checkout@v7

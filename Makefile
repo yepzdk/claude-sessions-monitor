@@ -86,9 +86,13 @@ packages: build-all
 # Deliberately has no prerequisites — `packages` rebuilds from `clean`, so
 # depending on it here would wipe and rebuild dist/ a third time in CI. Run it
 # after `make packages`.
+# Written through a temp file: an unmatched glob is passed through literally and
+# sha256sum errors on it, but `>` has already truncated the target, so a direct
+# redirect leaves a *partial* single source of truth on disk. Reachable with
+# `make build-all && make checksums` before any package exists.
 checksums:
 	@test -d dist || { echo >&2 "dist/ is empty — run 'make packages' first"; exit 1; }
-	cd dist && sha256sum csm-darwin-* csm-linux-* csm_*.deb csm-*.rpm > checksums.txt
+	cd dist && { sha256sum csm-darwin-* csm-linux-* csm_*.deb csm-*.rpm > checksums.txt.tmp || { rm -f checksums.txt.tmp; exit 1; }; } && mv checksums.txt.tmp checksums.txt
 	@echo "Wrote dist/checksums.txt"
 
 # Clean build artifacts
