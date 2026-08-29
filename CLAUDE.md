@@ -89,10 +89,44 @@ That triggers `.github/workflows/release.yaml`, which does everything in one job
 Pick the version from what actually changed since the last tag — `CHANGELOG.md`'s
 `[Unreleased]` section is the place to look. Nothing computes it for you.
 
-Only **one** secret is involved: `HOMEBREW_TAP_PAT` in *this* repo, a token with
+It also publishes the AUR package `csm-bin` — see below — in a second job.
+
+Two secrets are involved. The first is `HOMEBREW_TAP_PAT` in *this* repo, a token with
 `contents: write` on `yepzdk/homebrew-tools`. The tap repo does not run its own
 workflow, so there is no second copy of the token to keep in sync. When rotating
 the PAT, update it here (`gh secret set HOMEBREW_TAP_PAT -R yepzdk/claude-sessions-monitor`).
+
+### AUR (`csm-bin`)
+
+The `aur` job renders `packaging/aur/PKGBUILD.template` for the tag, generates
+`.SRCINFO` with `makepkg`, and pushes both to `ssh://aur@aur.archlinux.org/csm-bin.git`.
+Hashes come from the release's own `checksums.txt`, so the AUR package, the
+Homebrew formula, `install.sh` and `csm -upgrade` all vouch for the same bytes.
+
+The job is **dormant until `AUR_SSH_KEY` is set** — without it the step logs
+that and exits 0, so releases stay green on a repo that isn't wired to the AUR.
+To enable it:
+
+1. Create an account at https://aur.archlinux.org and add an SSH public key to it.
+2. Generate a dedicated keypair for CI (`ssh-keygen -t ed25519 -f aur -C csm-ci`),
+   register the public half with that account, and store the private half here:
+   `gh secret set AUR_SSH_KEY -R yepzdk/claude-sessions-monitor < aur`
+3. Create the package once, by hand — the AUR has no "create repo" API, the
+   first push does it:
+   ```bash
+   git clone ssh://aur@aur.archlinux.org/csm-bin.git   # empty, this is expected
+   cd csm-bin
+   ../packaging/aur/render.sh 0.7.0 checksums.txt ../LICENSE > PKGBUILD
+   makepkg --printsrcinfo > .SRCINFO
+   git add PKGBUILD .SRCINFO && git commit -m "Initial import" && git push
+   ```
+
+To test a PKGBUILD change without releasing:
+
+```bash
+packaging/aur/render.sh <version> <checksums.txt> LICENSE > /tmp/aur/PKGBUILD
+cd /tmp/aur && makepkg --printsrcinfo > .SRCINFO && makepkg -f
+```
 
 ### Troubleshooting releases
 
@@ -101,6 +135,10 @@ the PAT, update it here (`gh secret set HOMEBREW_TAP_PAT -R yepzdk/claude-sessio
 2. Check if the release was created: `gh release list`
 3. Verify the formula was updated: `gh api repos/yepzdk/homebrew-tools/contents/Formula/csm.rb --jq '.content' | base64 -d | head -5`
 4. If the formula step failed with an auth error, the `HOMEBREW_TAP_PAT` in this repo has likely expired — rotate it (see above).
+
+**AUR package not updating:** check the `aur` job in `gh run list`. "AUR_SSH_KEY
+is not set" means the secret is missing (see above); an SSH failure means the key
+was rotated or removed from the AUR account.
 
 **Users hitting `Refusing to load formula ... untrusted tap`:** this is Homebrew's
 third-party-tap policy, not a release problem. Run `brew trust yepzdk/tools` once.

@@ -136,3 +136,73 @@ jobs:
             git push
             echo "Homebrew formula updated to ${TAG_NAME}"
           fi
+
+  # Publishing to the AUR needs an Arch environment: makepkg generates the
+  # .SRCINFO the AUR requires, and it exists nowhere else.
+  #
+  # This job is dormant until AUR_SSH_KEY is set. A missing secret is not a
+  # failed release -- it is a release on a repo that has not been connected to
+  # the AUR yet -- so the step reports that and stops rather than turning every
+  # release red.
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: pacman -Sy --noconfirm git openssh curl
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Publish csm-bin to the AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AUR_SSH_KEY}" ]; then
+            echo "AUR_SSH_KEY is not set — skipping the AUR publish."
+            echo "See CLAUDE.md (Release Workflow > AUR) for how to enable it."
+            exit 0
+          fi
+
+          VERSION="${TAG_NAME#v}"
+
+          # The release job already published checksums.txt; reuse it rather
+          # than re-hashing, so the AUR package vouches for the same bytes as
+          # install.sh and the Homebrew formula.
+          curl -fsSL -o checksums.txt \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/checksums.txt"
+
+          mkdir -p aur && cd aur
+          ../packaging/aur/render.sh "${VERSION}" ../checksums.txt ../LICENSE > PKGBUILD
+
+          # makepkg refuses to run as root, and the container is root.
+          useradd -m builder
+          chown -R builder .
+          su builder -c "makepkg --printsrcinfo" > .SRCINFO
+
+          mkdir -p ~/.ssh
+          echo "${AUR_SSH_KEY}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory '*'
+
+          git clone ssh://aur@aur.archlinux.org/csm-bin.git repo
+          cp PKGBUILD .SRCINFO repo/
+          cd repo
+          git add PKGBUILD .SRCINFO
+          # Re-running a release on an unchanged package is a clean success.
+          if git diff --cached --quiet; then
+            echo "AUR package already up to date for ${TAG_NAME}"
+          else
+            git commit -m "Update to ${TAG_NAME}"
+            git push
+            echo "AUR csm-bin updated to ${TAG_NAME}"
+          fi

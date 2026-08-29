@@ -67,6 +67,15 @@ sudo mv csm /usr/local/bin/
 
 **macOS:** Use Homebrew (above) or download `csm-darwin-amd64` / `csm-darwin-arm64` from releases.
 
+### Arch Linux (AUR)
+
+```bash
+yay -S csm-bin        # or paru -S csm-bin
+```
+
+`csm-bin` installs the released binary to `/usr/bin/csm`, so `yay -Syu` upgrades
+it with the rest of your system.
+
 ### Debian / Ubuntu (.deb)
 
 Grab the `.deb` matching your architecture from the [latest release](https://github.com/yepzdk/claude-sessions-monitor/releases/latest) and install with `dpkg`. The asset filename is `csm_<version>_<arch>.deb`:
