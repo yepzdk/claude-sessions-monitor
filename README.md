@@ -26,6 +26,23 @@ A lightweight CLI tool to monitor your Claude Code sessions across multiple proj
 
 ## Installation
 
+### Quick install (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yepzdk/claude-sessions-monitor/main/install.sh | sh
+```
+
+Detects your OS and architecture, verifies the download against the release's
+`checksums.txt`, and installs to `~/.local/bin/csm` — no sudo. Re-run it any
+time to upgrade, or use [`csm -upgrade`](#upgrading).
+
+Knobs: `CSM_VERSION` (default: latest), `CSM_INSTALL_DIR` (default:
+`~/.local/bin`). To pin a version through the pipe, pass it as an argument:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yepzdk/claude-sessions-monitor/main/install.sh | sh -s -- 0.7.0
+```
+
 ### Homebrew (macOS/Linux)
 
 ```bash

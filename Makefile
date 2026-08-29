@@ -1,4 +1,4 @@
-.PHONY: build build-all install packages clean fmt lint check
+.PHONY: build build-all install packages checksums clean fmt lint check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -68,6 +68,20 @@ packages: build-all
 			VERSION=$(PKG_VERSION) ARCH=$$arch nfpm package --config nfpm.yaml --packager $$pkg --target dist/ || exit 1; \
 		done; \
 	done
+
+# Hash every release asset into dist/checksums.txt.
+#
+# This file is the single source of truth for the hashes: install.sh, `csm
+# -upgrade`, the Homebrew formula and the AUR PKGBUILD all read it rather than
+# each hashing the binaries themselves, which is how those four drift apart.
+#
+# Deliberately has no prerequisites — `packages` rebuilds from `clean`, so
+# depending on it here would wipe and rebuild dist/ a third time in CI. Run it
+# after `make packages`.
+checksums:
+	@test -d dist || { echo >&2 "dist/ is empty — run 'make packages' first"; exit 1; }
+	cd dist && sha256sum csm-darwin-* csm-linux-* csm_*.deb csm-*.rpm > checksums.txt
+	@echo "Wrote dist/checksums.txt"
 
 # Clean build artifacts
 clean:
