@@ -55,8 +55,15 @@ func parseVersion(v string) (parsed, bool) {
 
 // isGitDescribeSuffix reports whether a pre-release suffix is what `git
 // describe --tags --dirty` appends to the nearest tag: "<commits>-g<sha>",
-// optionally "-dirty". The Makefile stamps builds with exactly that.
+// optionally "-dirty" -- or a bare "dirty", which is what it appends when the
+// checkout sits exactly on the tag. The Makefile stamps builds with that.
 func isGitDescribeSuffix(pre string) bool {
+	// No commit count means no commits past the tag, but a modified tree is
+	// still not a pre-release *of* that tag: ordering v0.7.0-dirty before
+	// v0.7.0 is what makes a developer's own build report itself out of date.
+	if pre == "dirty" {
+		return true
+	}
 	pre = strings.TrimSuffix(pre, "-dirty")
 	i := strings.Index(pre, "-g")
 	if i <= 0 {

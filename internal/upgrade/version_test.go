@@ -28,6 +28,10 @@ func TestIsNewer(t *testing.T) {
 		{"dirty git describe build is ahead of its tag", "v0.6.0-11-g660745b-dirty", "v0.6.0", false},
 		{"git describe build is behind a later tag", "v0.6.0-11-g660745b", "v0.7.0", true},
 
+		// A dirty checkout sitting *on* the tag has no commit count at all.
+		{"dirty build at its own tag", "v0.7.0-dirty", "v0.7.0", false},
+		{"dirty build behind a later tag", "v0.6.0-dirty", "v0.7.0", true},
+
 		// `go install` stamps a pseudo-version, which is a genuine pre-release
 		// of a version that does not exist yet.
 		{"go install pseudo-version", "v0.6.1-0.20260828080851-660745bbaa5e", "v0.6.0", false},
@@ -58,8 +62,8 @@ func TestParseVersionRejects(t *testing.T) {
 }
 
 func TestIsGitDescribeSuffix(t *testing.T) {
-	yes := []string{"11-g660745b", "0-gabc1234", "3-g660745b-dirty"}
-	no := []string{"rc1", "beta", "g660745b", "11-660745b", "11-gzzz", "0.20260828080851-660745bbaa5e"}
+	yes := []string{"11-g660745b", "0-gabc1234", "3-g660745b-dirty", "dirty"}
+	no := []string{"rc1", "beta", "g660745b", "11-660745b", "11-gzzz", "0.20260828080851-660745bbaa5e", "dirty-rc1"}
 
 	for _, s := range yes {
 		if !isGitDescribeSuffix(s) {
