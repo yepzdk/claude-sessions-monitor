@@ -408,10 +408,21 @@ Reuse these instead of writing new ones:
   inject ANSI into the dashboard.
 - `ActiveSessions` — the one filter that decides which rows are shown. Any
   code that addresses a row by index (selection, jump) must use it too.
-- `MixedHarnesses` / `FilterByHarness` — the agent label renders only in mixed
-  company, decided *before* the filter is applied so narrowing to one agent
-  still says which one is on screen and the rows don't re-flow when `f` is
-  pressed. `f` is a display filter; both agents are always scanned.
+- `session.MixedHarnesses` / `FilterByHarness` — the agent label renders only in
+  mixed company, and "mixed" is a question about the *machine*: every surface
+  passes everything `Discover` returned, bounded by `HarnessBadgeHorizon` (7
+  days). Reading it off the rows a view is about to draw is what it used to do,
+  and it made the badge — and the six columns `calcSessionLayout` adds for it —
+  come and go as sessions went idle, differently on each of the three surfaces:
+  `-l` spans every session, the live view only active ones, the web dashboard
+  active plus the last hour. The web dashboard cannot derive it at all, which is
+  why the SSE `harnesses` event carries it (`harnessEvent`, sent immediately
+  before the `sessions` frame it applies to).
+- `f` is a display filter; both agents are always scanned. The filter outlives
+  the mixed dashboard that allowed it, so the key and the footer entry are
+  offered whenever `Mixed || Filter != ""` — gating them on `Mixed` alone let a
+  user filter to one agent, watch it go idle, and end up with rows hidden and no
+  key that would bring them back (`liveHelpKeys`, `emptyLiveMessage`).
 - The agent badge lives in the origin cell (`formatOrigin`), one space after the
   origin name: which agent and what launched it are one fact about where a
   session came from, and the origin is the column's subject. It has to read as

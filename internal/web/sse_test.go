@@ -118,3 +118,75 @@ func TestRunReportsScannerPanicInsteadOfCrashing(t *testing.T) {
 		t.Error("done was not closed, so connected handlers park forever")
 	}
 }
+
+// The dashboard cannot work out whether to name each card's agent: the rows it
+// is sent are only the last hour, and the sessions that make the machine a
+// two-agent machine are usually older than that. So the server decides, and
+// says so before the rows arrive -- a client that renders on the sessions event
+// must already hold the answer.
+func TestRunSendsTheHarnessDecisionBeforeTheRowsItAppliesTo(t *testing.T) {
+	orig := discoverSessions
+	t.Cleanup(func() { discoverSessions = orig })
+	discoverSessions = func() ([]session.Session, error) {
+		return []session.Session{
+			{Project: "api", Harness: session.HarnessOMP, Status: session.StatusWorking, LastActivity: time.Now()},
+			// Idle for hours: filterLiveSessions drops it, so the browser never
+			// sees the second agent this machine is running.
+			{Project: "web", Harness: session.HarnessClaude, Status: session.StatusInactive,
+				LastActivity: time.Now().Add(-4 * time.Hour)},
+		}, nil
+	}
+
+	hub := NewSSEHub()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx, make(chan error, 1))
+
+	srv := httptest.NewServer(http.HandlerFunc(hub.HandleSSE))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("connecting: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// One broadcast tick is 2s; read until both events have arrived.
+	stream := make(chan string, 1)
+	go func() {
+		var b strings.Builder
+		buf := make([]byte, 1024)
+		for {
+			n, err := resp.Body.Read(buf)
+			b.Write(buf[:n])
+			if strings.Contains(b.String(), "event: sessions") || err != nil {
+				stream <- b.String()
+				return
+			}
+		}
+	}()
+
+	var got string
+	select {
+	case got = <-stream:
+	case <-time.After(8 * time.Second):
+		t.Fatal("no sessions event arrived")
+	}
+
+	harnesses := strings.Index(got, "event: harnesses")
+	sessions := strings.Index(got, "event: sessions")
+	if harnesses < 0 {
+		t.Fatalf("no harnesses event in the stream; the dashboard has nothing to decide the badge from:\n%s", got)
+	}
+	if harnesses > sessions {
+		t.Error("the rows arrived before the harness decision, so the first frame renders them untagged")
+	}
+	if !strings.Contains(got[harnesses:sessions], `"mixed":true`) {
+		t.Errorf("harness decision was not mixed, though the machine has an idle Claude session:\n%s", got[harnesses:sessions])
+	}
+
+	// The decision is machine-wide; the rows themselves are still the live ones.
+	if strings.Contains(got[sessions:], `"project":"web"`) {
+		t.Error("a session idle for hours was sent as a live row")
+	}
+}

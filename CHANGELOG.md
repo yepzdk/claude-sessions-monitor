@@ -11,9 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `csm upgrade` and `csm update` do what `csm -upgrade` does. Arguments after the flags were silently discarded, so either of these started the dashboard instead of upgrading; an argument csm does not recognise is now an error rather than a different command
 
+### Changed
+
+- The `[cc]` / `[omp]` badge is decided from every session on the machine, bounded to agents seen in the last week, instead of from the rows each view happens to be showing. The live view draws only active sessions and the web dashboard only the last hour, so the badge — and the six columns the origin column grows by to hold it — used to appear and vanish as sessions went idle, and the three surfaces disagreed about when. A machine that has settled on one agent stops showing badges a week later
+
 ### Fixed
 
 - Jumping to a session on Linux works under a terminal that runs one process for all its windows, which is how Omarchy launches Ghostty (`--gtk-single-instance=true`). The compositor reports the same pid for every window, so csm now picks the one whose title carries the session's own title — the agent writes it there, which makes it per-window evidence the pid is not. Previously a desktop with more than one agent window open was reported as ambiguous and nothing was focused
+- `f` no longer strands the live view in a filter. The key was only accepted while more than one agent was active, but the filter it set outlived that: filter to one agent, let its sessions go idle, and the rows stayed hidden with the footer no longer naming the key that would bring them back — restarting csm was the only way out. `f` now works whenever a filter is set, and an empty list says which filter emptied it instead of reporting "No active sessions."
 
 ## [1.0.0] - 2026-08-30
 

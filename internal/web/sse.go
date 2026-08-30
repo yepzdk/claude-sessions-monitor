@@ -103,6 +103,10 @@ func (h *SSEHub) Run(ctx context.Context, fatal chan<- error) {
 				h.broadcast(formatSSE("scan_error", []byte(`{"message":"session scan failed"}`)))
 				continue
 			}
+			if frame := harnessEvent(allSessions); frame != nil {
+				h.broadcast(frame)
+			}
+
 			live := filterLiveSessions(allSessions)
 			data, err := json.Marshal(live)
 			if err != nil {
@@ -114,6 +118,26 @@ func (h *SSEHub) Run(ctx context.Context, fatal chan<- error) {
 			h.broadcast(formatSSE("heartbeat", []byte("{}")))
 		}
 	}
+}
+
+// harnessEvent renders the badge decision for these sessions as an SSE frame,
+// or nil when it cannot be marshalled.
+//
+// Whether a card names its agent is decided from every session on the machine,
+// and what the dashboard is sent is filterLiveSessions' last hour of them: the
+// browser cannot see the other agent's idle sessions, so deriving this in the
+// page would drop the badge exactly when the machine is running both agents and
+// one of them happens to be quiet.
+//
+// Its own event rather than a field folded into the sessions payload, whose
+// array shape /api/sessions publishes. Every sender emits it immediately before
+// the rows it applies to, so no frame is ever rendered without it.
+func harnessEvent(all []session.Session) []byte {
+	data, err := json.Marshal(map[string]bool{"mixed": session.MixedHarnesses(all)})
+	if err != nil {
+		return nil
+	}
+	return formatSSE("harnesses", data)
 }
 
 // formatSSE formats an SSE message safely. If data contains literal newlines
@@ -176,9 +200,15 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send initial session data immediately (active + recently stopped sessions)
+	// Send initial session data immediately (active + recently stopped sessions),
+	// preceded by the badge decision: this payload is what the page renders
+	// first, and without the flag that frame would draw every card untagged
+	// until the next broadcast two seconds later.
 	allSessions, err := discoverSessions()
 	if err == nil {
+		if frame := harnessEvent(allSessions); frame != nil {
+			_, _ = w.Write(frame)
+		}
 		live := filterLiveSessions(allSessions)
 		data, err := json.Marshal(live)
 		if err == nil {
@@ -187,8 +217,8 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 			// defer is not set until below; the r.Context().Done() case takes
 			// it off moments later.
 			_, _ = w.Write(formatSSE("sessions", data))
-			flusher.Flush()
 		}
+		flusher.Flush()
 	}
 
 	defer func() {

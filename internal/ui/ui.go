@@ -46,7 +46,7 @@ func RenderList(sessions []session.Session) {
 		return
 	}
 
-	showHarness := MixedHarnesses(sessions)
+	showHarness := session.MixedHarnesses(sessions)
 	l := calcSessionLayout(getTerminalWidth(), showHarness)
 
 	var buf strings.Builder
@@ -58,31 +58,6 @@ func RenderList(sessions []session.Session) {
 	}
 
 	fmt.Print(buf.String())
-}
-
-// MixedHarnesses reports whether these sessions come from more than one coding
-// agent.
-//
-// It is what decides whether rows carry a harness tag. Tagging only in mixed
-// company means someone running a single agent sees exactly the dashboard they
-// saw before, and someone running two never has to guess which row is which --
-// tagging one agent and not the other would leave the untagged rows ambiguous
-// to anyone who does not already know the feature exists.
-func MixedHarnesses(sessions []session.Session) bool {
-	var first session.Harness
-	for _, s := range sessions {
-		if s.Harness == "" {
-			continue
-		}
-		if first == "" {
-			first = s.Harness
-			continue
-		}
-		if s.Harness != first {
-			return true
-		}
-	}
-	return false
 }
 
 // FilterByHarness returns only the sessions belonging to h, or all of them when
@@ -225,7 +200,7 @@ func RenderLive(v LiveView) {
 	buf.WriteString(rawNewline)
 
 	if len(active) == 0 {
-		fmt.Fprintf(&buf, "%sNo active sessions.%s%s", Dim, Reset, rawNewline)
+		fmt.Fprintf(&buf, "%s%s%s%s", Dim, emptyLiveMessage(v.Filter), Reset, rawNewline)
 	} else {
 		l := calcSessionLayout(getTerminalWidth(), v.Mixed)
 
@@ -270,13 +245,7 @@ func RenderLive(v LiveView) {
 		fmt.Fprintf(&buf, "%s%s%s%s", Yellow, sanitizeForTerminal(v.UpdateNotice), Reset, rawNewline)
 	}
 
-	// Show help footer. The harness filter is only offered when there is
-	// something to filter: on a single-agent machine the key does nothing and
-	// advertising it would be noise.
-	keys := "↑↓: select | Enter: jump | h: history | u: usage"
-	if v.Mixed {
-		keys += " | f: filter"
-	}
+	keys := liveHelpKeys(v.Mixed, v.Filter)
 	if v.WebURL != "" {
 		fmt.Fprintf(&buf, "%s%s | w: open webview (%s) | Ctrl+C: quit%s%s", Dim, keys, v.WebURL, Reset, rawNewline)
 	} else {
@@ -284,6 +253,35 @@ func RenderLive(v LiveView) {
 	}
 
 	fmt.Print(buf.String())
+}
+
+// emptyLiveMessage is what the live view says when it has no rows to draw.
+//
+// A filter that hid every row has to say so. "No active sessions." is what a
+// machine with nothing running says, and reading it while your own session is
+// running and merely filtered out is how a display filter gets mistaken for a
+// broken scan -- so the message names the filter and the key that clears it.
+func emptyLiveMessage(filter session.Harness) string {
+	if filter == "" {
+		return "No active sessions."
+	}
+	return fmt.Sprintf("No active %s sessions — press f to show every agent.", harnessLabel(filter))
+}
+
+// liveHelpKeys is the footer's list of keys.
+//
+// The harness filter is offered when there is something to filter -- on a
+// single-agent machine the key does nothing and advertising it would be noise --
+// and always while a filter is set, even after the other agent's sessions have
+// gone quiet. A filter outlives the mixed dashboard that allowed it, and
+// dropping the key from the footer while its effect was still on screen left
+// the user filtered into a view with no advertised way out.
+func liveHelpKeys(mixed bool, filter session.Harness) string {
+	keys := "↑↓: select | Enter: jump | h: history | u: usage"
+	if mixed || filter != "" {
+		keys += " | f: filter"
+	}
+	return keys
 }
 
 // newlineFor returns the line ending a render function should use: rawNewline

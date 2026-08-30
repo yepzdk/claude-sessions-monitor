@@ -308,13 +308,14 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 			if err != nil {
 				msg = "Cannot read sessions: " + err.Error()
 			}
-			// Decided over the rows the frame will actually draw, and before the
-			// filter: RenderLive only shows ActiveSessions, so counting the
-			// Inactive ones tagged every row `[cc]` and advertised `f` on a
-			// Claude-only machine that merely had one stale omp bucket on disk.
-			// Taking it before the filter keeps the tag stable while `f` cycles,
-			// so the rows do not re-flow under the user.
-			mixed = ui.MixedHarnesses(ui.ActiveSessions(sessions))
+			// Asked of every session on the machine, not of the rows this frame
+			// will draw: the live view shows only active ones, so a rule read
+			// off them turns the badge -- and the six columns the origin cell
+			// grows by to hold it -- on and off as sessions go idle, re-flowing
+			// the table under the user. session.MixedHarnesses bounds it by
+			// recency instead, and the `-l` listing and web dashboard ask it the
+			// same way, so the three surfaces cannot disagree.
+			mixed = session.MixedHarnesses(sessions)
 			sessions = ui.FilterByHarness(sessions, filter)
 			// Sessions come and go between frames, so the selection is clamped
 			// on every render rather than only when a key moves it.
@@ -417,7 +418,13 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				// key used to cycle anyway, landing the user on "No active
 				// sessions." with no footer entry naming the key that gets them
 				// back out.
-				if viewMode == ViewModeLive && mixed {
+				//
+				// A filter already set is reason enough on its own: it outlives
+				// the mixed dashboard that allowed it -- start a session of the
+				// other agent, filter to it, let it go idle -- and gating the
+				// key on `mixed` alone left the rows hidden with nothing able to
+				// bring them back short of restarting csm.
+				if viewMode == ViewModeLive && (mixed || filter != "") {
 					filter = nextHarnessFilter(filter)
 					// The row count changes with the filter, so a selection
 					// carried over would point at a different session.

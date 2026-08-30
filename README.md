@@ -191,7 +191,7 @@ csm -v
 | `l` | Switch to live view |
 | `u` | Switch to usage view (API quota + token breakdown) |
 | `w` | Open web dashboard in browser (when `--web` is active) |
-| `f` | Cycle the agent filter: all → Claude Code → Oh My Pi (only offered when both are present) |
+| `f` | Cycle the agent filter: all → Claude Code → Oh My Pi (offered when the machine runs both, and always while a filter is set) |
 | `Ctrl+C` | Quit |
 
 #### Jumping
@@ -238,18 +238,29 @@ window at all, so jumping reports that rather than failing obscurely.
 
 Discovery needs no configuration: csm looks for `~/.claude/projects/` and
 `~/.omp/agent/sessions/` and reports whichever exist. Both kinds of session land
-in one list, sorted by who needs you soonest. When both are on screen the origin
-column carries a `[cc]` or `[omp]` badge after the origin name — the origin is
-what the column is about, and the agent qualifies it; both answer the same
-question about where a session came from. On a terminal too narrow for the
-origin column the badge moves into the project column instead of disappearing.
+in one list, sorted by who needs you soonest. On a machine that has run both
+agents within the last week the origin column carries a `[cc]` or `[omp]` badge
+after the origin name — the origin is what the column is about, and the agent
+qualifies it; both answer the same question about where a session came from. On a
+terminal too narrow for the origin column the badge moves into the project column
+instead of disappearing.
+
+The badge is decided from every session csm can see, not from the rows a view
+happens to be showing. The live view draws only active sessions and the web
+dashboard only the last hour of them, so a rule read off what is on screen would
+turn the badge — and the six columns the origin cell grows by to hold it — on and
+off as sessions go idle, re-flowing the table under you. The week-long horizon is
+the other half of that: a machine that has settled on one agent stops being asked
+about the other, so trying an agent once does not tag every row forever.
 
 Press `f` in the live view to cycle which agent's rows you are reading: all →
 Claude Code → Oh My Pi. It is a reading aid, not a discovery switch — both
 agents are always scanned, so a filter can never hide a session csm failed to
-find, and it resets when csm restarts. There is no flag for it: tracking every
-agent on the machine is the point, and the web dashboard has no key to press to
-undo a filter you forgot you set.
+find, and it resets when csm restarts. The header says which agent you are
+narrowed to, an empty list names the filter that emptied it, and `f` keeps
+working while one is set even if the other agent's sessions have since gone
+quiet. There is no flag for it: tracking every agent on the machine is the point,
+and the web dashboard has no key to press to undo a filter you forgot you set.
 
 Oh My Pi relocates its session store for `--profile` and `--session-dir`. Point
 csm at a non-default store with:

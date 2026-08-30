@@ -366,3 +366,70 @@ func TestProcessArgvReadsThisProcessesOwnCommandLine(t *testing.T) {
 		t.Errorf("argv[0] = %q, want %q", argv[0], os.Args[0])
 	}
 }
+
+// The badge exists so a row on a two-agent machine is never ambiguous, and the
+// origin column grows six columns to hold it. Both of those have to be decided
+// the same way every time csm draws, or the table re-flows as sessions idle.
+func TestMixedHarnessesAsksAboutTheMachineNotTheVisibleRows(t *testing.T) {
+	now := time.Now()
+
+	// The shape that started this: two omp sessions running, both Claude
+	// sessions idle for hours. The live view draws only the omp rows, but the
+	// machine is plainly running two agents and the column must not resize.
+	oneAgentOnScreen := []Session{
+		{Harness: HarnessOMP, Status: StatusWorking, LastActivity: now},
+		{Harness: HarnessOMP, Status: StatusWaiting, LastActivity: now.Add(-45 * time.Minute)},
+		{Harness: HarnessClaude, Status: StatusInactive, LastActivity: now.Add(-4 * time.Hour)},
+		{Harness: HarnessClaude, Status: StatusInactive, LastActivity: now.Add(-3 * 24 * time.Hour)},
+	}
+	if !MixedHarnesses(oneAgentOnScreen) {
+		t.Error("a machine with idle sessions from the other agent reported as single-agent; the badge would blink out as sessions go idle")
+	}
+
+	if !MixedHarnesses([]Session{
+		{Harness: HarnessClaude, LastActivity: now},
+		{Harness: HarnessOMP, LastActivity: now},
+	}) {
+		t.Error("two agents not reported as mixed; the rows would be ambiguous")
+	}
+
+	if MixedHarnesses([]Session{
+		{Harness: HarnessClaude, LastActivity: now},
+		{Harness: HarnessClaude, LastActivity: now.Add(-time.Hour)},
+	}) {
+		t.Error("one agent reported as mixed; every row would carry a pointless tag")
+	}
+
+	if MixedHarnesses(nil) {
+		t.Error("an empty dashboard reported as mixed")
+	}
+}
+
+// The horizon is what keeps the badge from being permanent: trying the other
+// agent once must not tag every row for the life of the machine.
+func TestMixedHarnessesForgetsAnAgentPastTheHorizon(t *testing.T) {
+	now := time.Now()
+	claude := Session{Harness: HarnessClaude, LastActivity: now}
+
+	stale := []Session{claude, {Harness: HarnessOMP, LastActivity: now.Add(-HarnessBadgeHorizon - time.Hour)}}
+	if MixedHarnesses(stale) {
+		t.Errorf("an agent last seen over %v ago still counts, so the badge never clears", HarnessBadgeHorizon)
+	}
+
+	fresh := []Session{claude, {Harness: HarnessOMP, LastActivity: now.Add(-HarnessBadgeHorizon + time.Hour)}}
+	if !MixedHarnesses(fresh) {
+		t.Errorf("an agent seen inside %v was forgotten, so alternating between agents loses the badge", HarnessBadgeHorizon)
+	}
+}
+
+// A session csm could not attribute is not a third agent. Counting it would
+// tag every row on a single-agent machine that has one unreadable log.
+func TestMixedHarnessesIgnoresUnattributedSessions(t *testing.T) {
+	now := time.Now()
+	if MixedHarnesses([]Session{
+		{Harness: HarnessClaude, LastActivity: now},
+		{Harness: HarnessNone, LastActivity: now},
+	}) {
+		t.Error("an unattributed session counted as a second agent")
+	}
+}

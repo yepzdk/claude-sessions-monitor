@@ -205,26 +205,6 @@ func TestFormatProjectKeepsHarnessTagWhenCrowded(t *testing.T) {
 	}
 }
 
-func TestMixedHarnesses(t *testing.T) {
-	claudeOnly := []session.Session{
-		{Harness: session.HarnessClaude}, {Harness: session.HarnessClaude},
-	}
-	if MixedHarnesses(claudeOnly) {
-		t.Error("one agent reported as mixed; every row would carry a pointless tag")
-	}
-
-	both := []session.Session{
-		{Harness: session.HarnessClaude}, {Harness: session.HarnessOMP},
-	}
-	if !MixedHarnesses(both) {
-		t.Error("two agents not reported as mixed; the rows would be ambiguous")
-	}
-
-	if MixedHarnesses(nil) {
-		t.Error("an empty dashboard reported as mixed")
-	}
-}
-
 func TestFilterByHarness(t *testing.T) {
 	in := []session.Session{
 		{Project: "a", Harness: session.HarnessClaude},
@@ -238,6 +218,40 @@ func TestFilterByHarness(t *testing.T) {
 	got := FilterByHarness(in, session.HarnessOMP)
 	if len(got) != 1 || got[0].Project != "b" {
 		t.Errorf("filtered to omp = %+v, want just b", got)
+	}
+}
+
+// A filter outlives the mixed dashboard that allowed it: filter to the other
+// agent, let its sessions go idle, and `Mixed` is false again while the rows are
+// still hidden. If the footer stops naming `f` there, nothing on screen says how
+// to get the rows back and restarting csm is the only way out.
+func TestLiveHelpKeysAlwaysOffersTheKeyOutOfAFilter(t *testing.T) {
+	if got := liveHelpKeys(false, session.HarnessClaude); !strings.Contains(got, "f: filter") {
+		t.Errorf("footer = %q; a filtered view with no `f` offered cannot be undone", got)
+	}
+	if got := liveHelpKeys(true, ""); !strings.Contains(got, "f: filter") {
+		t.Errorf("footer = %q, want `f` offered on a mixed dashboard", got)
+	}
+	// A single-agent machine with no filter: the key does nothing, so naming it
+	// is noise.
+	if got := liveHelpKeys(false, ""); strings.Contains(got, "f: filter") {
+		t.Errorf("footer = %q, want no filter key on a single-agent dashboard", got)
+	}
+}
+
+// "No active sessions." while your own session is running and merely filtered
+// out reads as a broken scan. That is the report this fix came from.
+func TestEmptyLiveMessageNamesTheFilterThatHidTheRows(t *testing.T) {
+	got := emptyLiveMessage(session.HarnessClaude)
+	if !strings.Contains(got, "cc") {
+		t.Errorf("message = %q, want the filter named", got)
+	}
+	if !strings.Contains(got, "f") {
+		t.Errorf("message = %q, want the key that clears it", got)
+	}
+
+	if got := emptyLiveMessage(""); got != "No active sessions." {
+		t.Errorf("unfiltered message = %q, want the plain sentence", got)
 	}
 }
 

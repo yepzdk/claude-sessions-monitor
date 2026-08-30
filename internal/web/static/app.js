@@ -3,6 +3,10 @@
 
     // --- State ---
     let currentSessions = [];
+    // Whether rows name their agent. The server decides it from every session
+    // on the machine and sends it on the `harnesses` event, which precedes the
+    // `sessions` event that renders them.
+    let mixedHarnesses = false;
     let currentView = 'live';
     let historyData = [];
     let usageData = null;
@@ -221,6 +225,12 @@
         if (sseSource) sseSource.close();
         sseSource = new EventSource('/api/events');
 
+        sseSource.addEventListener('harnesses', e => {
+            try {
+                mixedHarnesses = JSON.parse(e.data).mixed === true;
+            } catch (err) { /* leave the previous answer in place */ }
+        });
+
         sseSource.addEventListener('sessions', e => {
             try {
                 currentSessions = JSON.parse(e.data);
@@ -276,10 +286,10 @@
             return `<span class="status-badge"><span class="status-dot ${cls}"></span>${count} ${status}</span>`;
         }).join('');
 
-        // Tag rows with their agent only when more than one is on screen: with a
-        // single agent the tag says nothing, and tagging one but not the other
-        // would leave the untagged cards ambiguous.
-        const mixedHarnesses = new Set(currentSessions.map(s => s.harness).filter(Boolean)).size > 1;
+        // Whether to name each card's agent is the server's call: it is decided
+        // from every session on the machine, and this list is only the last
+        // hour of it, so deriving it here would drop the badge whenever the
+        // other agent happened to be idle.
 
         sessionsList.innerHTML = currentSessions.map(s => {
             const isInactive = s.status === 'Inactive';

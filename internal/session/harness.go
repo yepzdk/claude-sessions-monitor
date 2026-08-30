@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Harness names the coding agent a session belongs to. csm watches more than
@@ -35,6 +36,52 @@ func (h Harness) String() string {
 		return "no recognised coding agent"
 	}
 	return string(h)
+}
+
+// HarnessBadgeHorizon is how long a coding agent goes on counting toward a
+// mixed dashboard after its last session was active.
+//
+// A bound is needed in both directions. Without one, a machine that ran the
+// other agent once a year ago tags every row forever, which is noise dressed
+// as information. Bounded by what is on screen instead, the badge blinks out
+// the moment the other agent's last session goes inactive -- and because the
+// origin column is six columns narrower without it, every row re-flows as that
+// happens. A week is long enough to cover the gap between two agents in normal
+// alternating use, and short enough that a machine which has settled on one
+// agent stops being asked about the other.
+const HarnessBadgeHorizon = 7 * 24 * time.Hour
+
+// MixedHarnesses reports whether this machine has recently run more than one
+// coding agent, which is what decides whether rows name the agent they belong
+// to.
+//
+// The question is deliberately about the machine and not about what is on
+// screen: pass everything Discover returned, not the rows a view is about to
+// render. Every surface asking the same question of the same input is what
+// makes the answer stable -- the terminal's live view, its `-l` listing and the
+// web dashboard each show a different slice of the same sessions, and a badge
+// that appears in one and not another reads as a bug in whichever you looked at
+// second.
+//
+// Sessions csm could not attribute to an agent are ignored rather than counted
+// as a third kind.
+func MixedHarnesses(sessions []Session) bool {
+	cutoff := time.Now().Add(-HarnessBadgeHorizon)
+
+	var first Harness
+	for _, s := range sessions {
+		if s.Harness == HarnessNone || s.LastActivity.Before(cutoff) {
+			continue
+		}
+		if first == HarnessNone {
+			first = s.Harness
+			continue
+		}
+		if s.Harness != first {
+			return true
+		}
+	}
+	return false
 }
 
 // harnessProcess is one running coding-agent process, as the scan found it.
