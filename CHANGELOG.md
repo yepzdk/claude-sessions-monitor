@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-30
+
 ### Added
 
 - `csm upgrade` and `csm update` do what `csm -upgrade` does. Arguments after the flags were silently discarded, so either of these started the dashboard instead of upgrading; an argument csm does not recognise is now an error rather than a different command
