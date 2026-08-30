@@ -8,14 +8,14 @@ import (
 // This file holds the caching layer that keeps csm's CPU usage low. Without it,
 // every 2-second refresh (from the TUI loop, the SSE hub, and each HTTP request)
 // re-scanned every project, re-parsed every session's multi-MB JSONL log three
-// times, and spawned a `ps`/`lsof` subprocess per Claude process — all regardless
+// times, and re-read the whole process table for every one, all regardless
 // of whether anything had changed.
 //
 // Three caches, all package-level so the speedup is transparent to callers:
 //
 //  1. parseCache      — parsed log contents keyed by (path, modTime, size).
 //     Skips the full-file re-parse when a log is unchanged.
-//  2. processScanCache — the `ps`/`lsof` running-process scan, TTL-cached.
+//  2. processScanCache: the running-process scan, TTL-cached.
 //  3. resultCache      — the whole Discover() result, TTL-cached, so bursts of
 //     concurrent callers within one tick collapse to a single scan.
 //
@@ -157,7 +157,7 @@ var (
 //
 // The two are taken together because they are two halves of one answer. Read
 // separately, a graceful exit removes the pid file while the departed pid is
-// still in the cached ps set, and for up to the TTL every unregistered log in
+// still in the cached process set, and for up to the TTL every unregistered log in
 // that directory reads as running-with-no-pid instead of inactive -- a visible
 // blink on every exit. Reading them together also absorbs a torn read: Claude
 // Code rewrites these files in place, so an unlucky read fails to parse and

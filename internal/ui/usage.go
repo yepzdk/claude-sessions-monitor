@@ -49,7 +49,9 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 			fmt.Fprintf(&buf, "  %sExtra usage: enabled%s%s", Dim, Reset, nl)
 		}
 	} else {
-		errMsg := "OAuth token not found"
+		// No guessed default: "not found" was printed for every reason the
+		// quota could not be read, including reasons no sign-in would fix.
+		errMsg := "reason unknown"
 		if apiQuota != nil && apiQuota.Error != "" {
 			errMsg = apiQuota.Error
 		}

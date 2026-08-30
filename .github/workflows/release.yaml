@@ -34,6 +34,13 @@ jobs:
       - name: Build Linux packages
         run: make packages
 
+      # One checksums file is the single source of truth for every downstream
+      # consumer: install.sh, `csm -upgrade`, the Homebrew formula below, and
+      # the AUR PKGBUILD. Hashing the same binaries separately in each place is
+      # how those four drift apart.
+      - name: Generate checksums
+        run: make checksums
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -46,6 +53,7 @@ jobs:
             dist/csm_*_arm64.deb
             dist/csm-*.x86_64.rpm
             dist/csm-*.aarch64.rpm
+            dist/checksums.txt
           generate_release_notes: true
 
       # Update the Homebrew formula directly from the binaries we just built,
@@ -62,11 +70,28 @@ jobs:
           VERSION="${TAG_NAME#v}"
           BASE_URL="https://github.com/yepzdk/claude-sessions-monitor/releases/download/${TAG_NAME}"
 
-          # Hash the binaries we already built in dist/ — no re-download needed.
-          sha_darwin_arm64=$(sha256sum dist/csm-darwin-arm64 | awk '{print $1}')
-          sha_darwin_amd64=$(sha256sum dist/csm-darwin-amd64 | awk '{print $1}')
-          sha_linux_arm64=$(sha256sum dist/csm-linux-arm64 | awk '{print $1}')
-          sha_linux_amd64=$(sha256sum dist/csm-linux-amd64 | awk '{print $1}')
+          # Read the hashes out of checksums.txt rather than recomputing them,
+          # so the formula and the file users verify against can never disagree.
+          #
+          # The empty check is what makes a missing entry stop the release. awk
+          # prints nothing for a name it cannot find, and `set -u` does not fire
+          # on the assignment below because assigning an empty value succeeds --
+          # so without this the formula is committed and pushed with sha256 "",
+          # breaking every `brew install csm` until someone notices.
+          #
+          # This works because every call site below is a plain assignment: the
+          # exit runs in the substitution subshell and `set -e` then aborts on
+          # the failed assignment. Embedding a call in a larger command (echo
+          # "$(sha …)") would swallow it -- keep the assignment form.
+          sha() {
+            s=$(awk -v n="$1" '$2 == n { print $1 }' dist/checksums.txt)
+            [ -n "$s" ] || { echo "checksums.txt has no entry for $1" >&2; exit 1; }
+            echo "$s"
+          }
+          sha_darwin_arm64=$(sha csm-darwin-arm64)
+          sha_darwin_amd64=$(sha csm-darwin-amd64)
+          sha_linux_arm64=$(sha csm-linux-arm64)
+          sha_linux_amd64=$(sha csm-linux-amd64)
 
           # Clone the tap using the PAT this workflow already holds.
           git clone --depth 1 \
@@ -125,4 +150,79 @@ jobs:
             git commit -m "Update csm formula to ${TAG_NAME}"
             git push
             echo "Homebrew formula updated to ${TAG_NAME}"
+          fi
+
+  # Publishing to the AUR needs an Arch environment: makepkg generates the
+  # .SRCINFO the AUR requires, and it exists nowhere else.
+  #
+  # This job is dormant until AUR_SSH_KEY is set. A missing secret is not a
+  # failed release -- it is a release on a repo that has not been connected to
+  # the AUR yet -- so the step reports that and stops rather than turning every
+  # release red.
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        # -Syu, not -Sy: refreshing the database and then installing against
+        # a not-upgraded root is a partial upgrade, which Arch warns breaks
+        # systems. In a throwaway container it usually survives, and when it
+        # does not it fails mid-release with a libc mismatch that has nothing
+        # to do with csm.
+        run: pacman -Syu --noconfirm git openssh curl
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Publish csm-bin to the AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AUR_SSH_KEY}" ]; then
+            echo "AUR_SSH_KEY is not set — skipping the AUR publish."
+            echo "See CLAUDE.md (Release Workflow > AUR) for how to enable it."
+            exit 0
+          fi
+
+          VERSION="${TAG_NAME#v}"
+
+          # The release job already published checksums.txt; reuse it rather
+          # than re-hashing, so the AUR package vouches for the same bytes as
+          # install.sh and the Homebrew formula.
+          curl -fsSL -o checksums.txt \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/checksums.txt"
+
+          mkdir -p aur && cd aur
+          ../packaging/aur/render.sh "${VERSION}" ../checksums.txt ../LICENSE > PKGBUILD
+
+          # makepkg refuses to run as root, and the container is root.
+          useradd -m builder
+          chown -R builder .
+          su builder -c "makepkg --printsrcinfo" > .SRCINFO
+
+          mkdir -p ~/.ssh
+          echo "${AUR_SSH_KEY}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory '*'
+
+          git clone ssh://aur@aur.archlinux.org/csm-bin.git repo
+          cp PKGBUILD .SRCINFO repo/
+          cd repo
+          git add PKGBUILD .SRCINFO
+          # Re-running a release on an unchanged package is a clean success.
+          if git diff --cached --quiet; then
+            echo "AUR package already up to date for ${TAG_NAME}"
+          else
+            git commit -m "Update to ${TAG_NAME}"
+            git push
+            echo "AUR csm-bin updated to ${TAG_NAME}"
           fi

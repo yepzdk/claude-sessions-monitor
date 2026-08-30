@@ -2,10 +2,8 @@ package session
 
 import (
 	"encoding/json"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
+	"errors"
+	"fmt"
 )
 
 // OAuthToken holds the Claude Code OAuth credentials.
@@ -13,66 +11,30 @@ type OAuthToken struct {
 	AccessToken string `json:"accessToken"`
 }
 
-// keychainServiceName is the service name Claude Code uses in the macOS Keychain.
-const keychainServiceName = "Claude Code-credentials"
+// Claude Code keeps its OAuth credentials in a different place on each
+// platform: the macOS Keychain, or ~/.claude/.credentials.json on Linux. Each
+// platform file declares GetOAuthToken, and this file holds what they share.
+//
+// GetOAuthToken reports an error rather than a nil token, so a platform csm
+// cannot read at all does not reach the user as "no token found". The two need
+// different answers: one is a machine to sign in on, the other is a machine to
+// stop asking. The token is non-nil whenever the error is nil.
 
-// GetOAuthToken retrieves the Claude Code OAuth token.
-// On macOS it reads from the system Keychain; on Linux it reads from
-// ~/.claude/.credentials.json. Returns nil if the token cannot be found.
-func GetOAuthToken() *OAuthToken {
-	switch runtime.GOOS {
-	case "darwin":
-		return getOAuthTokenDarwin()
-	case "linux":
-		return getOAuthTokenLinux()
-	default:
-		return nil
-	}
-}
-
-// getOAuthTokenDarwin reads the token from macOS Keychain.
-func getOAuthTokenDarwin() *OAuthToken {
-	out, err := exec.Command("security", "find-generic-password", "-s", keychainServiceName, "-w").Output()
-	if err != nil {
-		return nil
-	}
-
-	var creds struct {
-		ClaudeAiOauth *OAuthToken `json:"claudeAiOauth"`
-	}
-	if err := json.Unmarshal(out, &creds); err != nil {
-		return nil
-	}
-
-	if creds.ClaudeAiOauth == nil || creds.ClaudeAiOauth.AccessToken == "" {
-		return nil
-	}
-
-	return creds.ClaudeAiOauth
-}
-
-// getOAuthTokenLinux reads the token from ~/.claude/.credentials.json.
-func getOAuthTokenLinux() *OAuthToken {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	data, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
-	if err != nil {
-		return nil
-	}
-
+// parseCredentials reads the token out of Claude Code's credentials JSON, which
+// both platforms store in the same shape.
+//
+// An empty access token is an error, not a token. Passed on, it becomes an
+// Authorization header with nothing after "Bearer", and the quota panel then
+// reports the API's 401 instead of the sign-in that would fix it.
+func parseCredentials(data []byte) (*OAuthToken, error) {
 	var creds struct {
 		ClaudeAiOauth *OAuthToken `json:"claudeAiOauth"`
 	}
 	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil
+		return nil, fmt.Errorf("credentials are not valid JSON: %w", err)
 	}
-
 	if creds.ClaudeAiOauth == nil || creds.ClaudeAiOauth.AccessToken == "" {
-		return nil
+		return nil, errors.New("credentials hold no access token")
 	}
-
-	return creds.ClaudeAiOauth
+	return creds.ClaudeAiOauth, nil
 }

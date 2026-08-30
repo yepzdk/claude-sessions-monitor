@@ -34,8 +34,8 @@ import (
 // which is the failure mode this package works hardest to avoid.
 const ompSessionsDirEnv = "CSM_OMP_SESSIONS_DIR"
 
-// OMPSessionsDir returns the directory omp keeps session logs in.
-func OMPSessionsDir() (string, error) {
+// ompSessionsDir returns the directory omp keeps session logs in.
+func ompSessionsDir() (string, error) {
 	if dir := os.Getenv(ompSessionsDirEnv); dir != "" {
 		return dir, nil
 	}
@@ -292,7 +292,7 @@ func ompLastAssistant(entries []ompEntry) (text, model string) {
 // an unreadable ~/.omp is the worse outcome. That trade is a known ceiling: the
 // scan reports no omp sessions and no reason.
 func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Session {
-	sessionsDir, err := OMPSessionsDir()
+	sessionsDir, err := ompSessionsDir()
 	if err != nil {
 		return nil
 	}

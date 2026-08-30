@@ -11,7 +11,7 @@ import (
 
 // A directory with several Claude processes pairs pids to logs positionally,
 // and the two orderings are unrelated: logs are sorted newest-first while pids
-// arrive in ps order. Reporting a ghost from an unconfident pairing means
+// arrive in scan order. Reporting a ghost from an unconfident pairing means
 // --kill-ghosts sends SIGTERM to whichever process happens to sit at that
 // index, which can be the actively working one.
 func TestGhostsFromSkipsUnconfidentPairings(t *testing.T) {
@@ -110,38 +110,6 @@ func TestApplyParsedLogDerivesIsGhost(t *testing.T) {
 	}
 }
 
-// The orphan signal is the ppid column and the harness is decided from argv, so
-// a parse that drops or shifts a column turns every session into a ghost, none
-// into one, or every process into an unrecognised one. argv is the whole
-// remainder of the row, not its last field: a command line has arguments.
-func TestParsePSOutputReadsColumns(t *testing.T) {
-	out := []byte(`  101     1 ttys003 /opt/homebrew/bin/claude --resume
-  202  4321 ttys004 claude
-  303     1 pts/3 bun /Users/dev/.bun/bin/omp
-  404   303 ?? /bin/zsh -l
-garbage line
-  505     1 ttys009
-`)
-	rows := parsePSOutput(out)
-	want := []psLine{
-		{pid: 101, ppid: 1, tty: "ttys003", argv: "/opt/homebrew/bin/claude --resume"},
-		{pid: 202, ppid: 4321, tty: "ttys004", argv: "claude"},
-		// Linux prints pts/3; omp's breadcrumb for the same terminal is pts-3.
-		// The tty is kept as ps reports it and normalised where it is compared
-		// (ompTerminalID), so this column stays the real device name.
-		{pid: 303, ppid: 1, tty: "pts/3", argv: "bun /Users/dev/.bun/bin/omp"},
-		{pid: 404, ppid: 303, tty: "??", argv: "/bin/zsh -l"},
-	}
-	if len(rows) != len(want) {
-		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
-	}
-	for i := range want {
-		if rows[i] != want[i] {
-			t.Errorf("row %d = %+v, want %+v", i, rows[i], want[i])
-		}
-	}
-}
-
 // An empty process list and a failed process scan used to be the same value.
 // Every session was then marked Inactive and filtered out, so csm printed
 // "No active Claude sessions." with total confidence while sessions ran.
@@ -160,8 +128,8 @@ func TestDiscoverReportsProcessScanFailure(t *testing.T) {
 		listProcesses = original
 		clearScanCaches()
 	})
-	listProcesses = func() ([]byte, error) {
-		return nil, errors.New("ps: operation not permitted")
+	listProcesses = func() ([]procInfo, error) {
+		return nil, errors.New("operation not permitted")
 	}
 	// Both caches would otherwise serve a result from before the swap.
 	clearScanCaches()

@@ -10,15 +10,12 @@ package session
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -217,59 +214,36 @@ func ClaudeProjectsDir() (string, error) {
 	return filepath.Join(home, ".claude", "projects"), nil
 }
 
-// listProcesses shells out to ps. It is a variable so a test can make the
-// process scan fail, which is the case that used to be indistinguishable from
-// "nothing is running".
-//
-// args= rather than comm=, because a coding agent is not always its own
-// argv[0]: omp runs as `bun /path/to/omp`, so comm is `bun` and the only
-// evidence of what the process is sits in the arguments. tty= rides along
-// because it costs nothing here and is how an omp session's log is matched to
-// the process running it.
-var listProcesses = func() ([]byte, error) {
-	// ps directly, with no shell pipeline, to avoid shell injection risks.
-	return exec.Command("ps", "ax", "-o", "pid=,ppid=,tty=,args=").Output()
-}
-
-// psLine is one parsed row of `ps -o pid=,ppid=,tty=,args=`.
-type psLine struct {
+// procInfo is one live process, holding the fields the pairing and ghost rules
+// read. comm is the name the OS accounts the process under: a basename,
+// truncated to 15 bytes on Linux and 16 on macOS.
+type procInfo struct {
 	pid, ppid int
-	tty       string // controlling terminal, or ps's placeholder when there is none
-	argv      string // full command line, whitespace-normalised
+	comm      string
 }
 
-// parsePSOutput splits ps output into rows, skipping anything malformed.
-func parsePSOutput(output []byte) []psLine {
-	var rows []psLine
-	for _, line := range bytes.Split(output, []byte("\n")) {
-		fields := bytes.Fields(line)
-		// pid, ppid, tty, and at least one argv token. A row with no command
-		// line cannot be attributed to a harness, so dropping it here loses
-		// nothing.
-		if len(fields) < 4 {
-			continue
-		}
-		// Atoi rather than Sscanf: a malformed field is reported instead of
-		// leaving the variable at zero and relying on the check below.
-		pid, err := strconv.Atoi(string(fields[0]))
-		if err != nil || pid == 0 {
-			continue
-		}
-		ppid, err := strconv.Atoi(string(fields[1]))
-		if err != nil {
-			continue
-		}
-		rows = append(rows, psLine{
-			pid:  pid,
-			ppid: ppid,
-			tty:  string(fields[2]),
-			// One allocation. This runs over every process on the machine,
-			// twice a second.
-			argv: string(bytes.Join(fields[3:], []byte(" "))),
-		})
-	}
-	return rows
-}
+// listProcesses returns every process the caller can see, read from the kernel.
+// It is a variable so a test can make the process scan fail, which is the case
+// that used to be indistinguishable from "nothing is running".
+//
+// See listprocs_linux.go and listprocs_darwin.go for the implementations.
+var listProcesses = listProcessesNative
+
+// getProcessCwdFn is the per-process working-directory lookup. A var so a test
+// can drive getRunningClaudeDirs without a real process behind each pid.
+var getProcessCwdFn = getProcessCwd
+
+// processArgvFn reads one process's full argument vector. A var so a test can
+// supply an argv without a real process behind the pid.
+//
+// See listprocs_linux.go and listprocs_darwin.go for the implementations.
+var processArgvFn = processArgv
+
+// processTerminalFn reads one process's controlling terminal. A var so a test
+// can supply one without a real process behind the pid.
+//
+// See listprocs_linux.go and listprocs_darwin.go for the implementations.
+var processTerminalFn = processTerminal
 
 // getRunningHarnessProcs returns one entry per running coding-agent process,
 // carrying the harness it belongs to, its working directory, its controlling
@@ -292,61 +266,57 @@ func parsePSOutput(output []byte) []psLine {
 // ponytail: ppid==1 is exact on macOS; on Linux a subreaper (some systemd
 // user sessions) can adopt orphans instead of pid 1, which this misses.
 func getRunningHarnessProcs() ([]harnessProcess, error) {
-	output, err := listProcesses()
+	rows, err := listProcesses()
 	if err != nil {
-		return nil, fmt.Errorf("listing processes with ps: %w", err)
+		return nil, fmt.Errorf("scanning processes: %w", err)
+	}
+	// A platform that returns an empty list with no error puts back the bug this
+	// whole path exists to remove, so the invariant is checked here rather than
+	// trusted to each implementation.
+	if len(rows) == 0 {
+		return nil, errors.New("scanning processes: the process table came back empty")
 	}
 
 	var procs []harnessProcess
-	for _, row := range parsePSOutput(output) {
-		harness := classifyProcess(row.argv)
+	for _, row := range rows {
+		// comm narrows the table to the few pids worth a second read; argv is
+		// what actually identifies the process. Discovery and the pre-SIGTERM
+		// recheck in KillGhostProcesses run the same classifyProcess over the
+		// same kind of input, so a pid this loop lists can only fail that
+		// recheck by having been recycled -- not by the two disagreeing about
+		// what an agent's process looks like.
+		if !harnessCandidate(row.comm) {
+			continue
+		}
+		argv, err := processArgvFn(row.pid)
+		if err != nil {
+			continue
+		}
+		harness := classifyProcess(argv)
 		if harness == HarnessNone {
 			continue
 		}
-		cwd, err := getProcessCwd(row.pid)
+
+		cwd, err := getProcessCwdFn(row.pid)
 		if err != nil || cwd == "" {
 			continue
 		}
+		// The controlling terminal is read per candidate rather than carried in
+		// procInfo: only omp pairing uses it, and by here the table is already
+		// down to the few pids that are agents. A process without one, or whose
+		// stdin cannot be read, simply pairs unconfidently.
+		terminal, _ := processTerminalFn(row.pid)
+
 		procs = append(procs, harnessProcess{
-			pid:     row.pid,
-			harness: harness,
-			cwd:     cwd,
-			tty:     row.tty,
-			orphan:  row.ppid == 1,
+			pid:      row.pid,
+			harness:  harness,
+			cwd:      cwd,
+			terminal: terminal,
+			orphan:   row.ppid == 1,
 		})
 	}
 
 	return procs, nil
-}
-
-// getProcessCwd returns the current working directory of a process by PID.
-// On Linux it reads /proc/<pid>/cwd; on Darwin it uses lsof.
-// Note: on Linux, reading /proc/<pid>/cwd requires the caller to be the same
-// user as the target process (or root). If csm runs as a different user,
-// os.Readlink will return a permission error and the process will be skipped.
-func getProcessCwd(pid int) (string, error) {
-	if runtime.GOOS == "linux" {
-		return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
-	}
-
-	// Darwin: use lsof to find cwd
-	pidStr := fmt.Sprintf("%d", pid)
-	lsofCmd := exec.Command("lsof", "-p", pidStr)
-	lsofOutput, err := lsofCmd.Output()
-	if err != nil {
-		return "", err
-	}
-
-	lines := bytes.Split(lsofOutput, []byte("\n"))
-	for _, l := range lines {
-		if bytes.Contains(l, []byte(" cwd ")) {
-			lFields := bytes.Fields(l)
-			if len(lFields) >= 9 {
-				return string(lFields[len(lFields)-1]), nil
-			}
-		}
-	}
-	return "", fmt.Errorf("cwd not found in lsof output for pid %d", pid)
 }
 
 // sessionIDFromLogFile returns the session UUID from a log file path.
@@ -457,7 +427,7 @@ func Discover() ([]Session, error) {
 			// findActiveLogs already decided every file here is a plausible
 			// candidate for one of this directory's runningCount processes, but
 			// pairing a *specific* pid to a *specific* file by array position
-			// (most-recent log <-> first ps result) has no real correspondence --
+			// (most-recent log <-> first scanned pid) has no real correspondence --
 			// neither list is ordered by anything that ties them together. When
 			// a directory holds more candidate logs than confidently-paired
 			// pids (i >= len(pids)), still treat the session as running rather
@@ -1421,7 +1391,7 @@ type GhostProcess struct {
 	Harness Harness
 }
 
-// FindGhostProcesses returns Claude processes that have lost their parent and
+// FindGhostProcesses returns coding agent processes that have lost their parent and
 // whose log has been silent for longer than GhostThreshold.
 func FindGhostProcesses() ([]GhostProcess, error) {
 	sessions, err := Discover()
@@ -1434,7 +1404,7 @@ func FindGhostProcesses() ([]GhostProcess, error) {
 // ghostsFrom selects the ghost sessions whose pid is certainly their own.
 //
 // Staleness is a property of the log, but the pid is paired to that log by
-// position: logs arrive sorted newest-first while pids arrive in ps order, and
+// position: logs arrive sorted newest-first while pids arrive in scan order, and
 // the two orderings have no relationship. In a directory running one Claude the
 // pairing is the only one available and therefore correct; with several, the
 // stale log can carry the busy process's pid. Since the caller sends SIGTERM to
@@ -1480,12 +1450,26 @@ func KillGhostProcesses() (killed []GhostProcess, failed []GhostKillFailure, err
 	if err != nil {
 		return nil, nil, err
 	}
+	killed, failed = killGhosts(ghosts)
+	return killed, failed, nil
+}
 
+// killGhosts is the signalling half of KillGhostProcesses, split from the
+// discovery half so a test can drive it with a ghost list. The property worth
+// testing here is what it refuses to signal, and that path sends nothing.
+func killGhosts(ghosts []GhostProcess) (killed []GhostProcess, failed []GhostKillFailure) {
 	for _, ghost := range ghosts {
-		// The pid may have been recycled by an unrelated process since
-		// Discover, and "unrelated" includes a process belonging to a
-		// different harness.
-		if !isHarnessProcess(ghost.PID, ghost.Harness) {
+		// The pid may have been recycled since Discover, and "recycled"
+		// includes a process belonging to a different coding agent.
+		if verifyErr := verifyGhostProcess(ghost.PID, ghost.Harness); verifyErr != nil {
+			// A ghost that exited on its own is the outcome --kill-ghosts
+			// wanted, and needs no report. Anything else means csm listed a
+			// process one moment and refused to signal it the next, and
+			// saying nothing would leave that indistinguishable from a clean
+			// run.
+			if !errors.Is(verifyErr, errProcessGone) {
+				failed = append(failed, GhostKillFailure{Ghost: ghost, Err: verifyErr})
+			}
 			continue
 		}
 
@@ -1507,7 +1491,7 @@ func KillGhostProcesses() (killed []GhostProcess, failed []GhostKillFailure, err
 		killed = append(killed, ghost)
 	}
 
-	return killed, failed, nil
+	return killed, failed
 }
 
 // GhostKillFailure is a ghost process that would not accept SIGTERM, paired

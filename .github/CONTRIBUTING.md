@@ -30,6 +30,12 @@ you should reuse.
 3. Add an entry to the `[Unreleased]` section of `CHANGELOG.md`
 4. Open a pull request
 
+A changelog entry is one or two lines: what changed, and why a user cares.
+Leave the mechanism out. It belongs next to the code, where the comments
+already carry it, and a reader who wants it will look there. The same rule
+holds for `docs/ARCHITECTURE.md`: point at the comment that explains a
+decision instead of repeating it, so the two cannot drift apart.
+
 CI runs `make check` on both Linux and macOS for every pull request.
 
 `make lint` runs [golangci-lint](https://golangci-lint.run) against

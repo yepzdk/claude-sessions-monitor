@@ -1,4 +1,4 @@
-.PHONY: build build-all install packages clean fmt lint check
+.PHONY: build build-all install packages checksums clean fmt lint shellcheck check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -37,20 +37,39 @@ check:
 	@gofmt -l . | grep . && { echo "Not gofmt-clean — run 'make fmt'"; exit 1; } || true
 	go vet ./...
 	$(MAKE) lint
+	$(MAKE) shellcheck
 	go build $(LDFLAGS) -o /dev/null .
 	go test ./...
+
+# The two POSIX sh scripts CI checks. Skipped with a note rather than failing
+# when shellcheck is absent: it is not part of the Go toolchain, so requiring it
+# would make `make check` unrunnable on a machine that can build and test fine.
+# CI's runner always has it, so nothing merges unchecked. Probed by running it,
+# not with `command -v`: a version manager (mise) can leave a shim on PATH that
+# exists but fails, and that must count as absent.
+shellcheck:
+	@shellcheck --version >/dev/null 2>&1 || { echo "shellcheck not installed — skipping (CI will run it)"; exit 0; }; \
+		shellcheck --shell=sh install.sh packaging/aur/render.sh && echo "shellcheck: 0 issues"
 
 # Build for current platform
 build:
 	go build $(LDFLAGS) -o csm .
 
-# Build for all platforms
+# Build for all platforms.
+#
+# CGO_ENABLED=0 on every target so all four binaries are statically linked.
+# Without it the host-architecture build picks up cgo (net pulls it in when a C
+# compiler is present) and links against the build machine's glibc, while the
+# cross-compiled ones come out static -- so the amd64 release binary refused to
+# run on any distro older than the CI runner while the arm64 one ran anywhere.
+# Nothing here needs cgo: the pure-Go resolver is fine for the three HTTPS
+# endpoints csm talks to, and no package uses os/user.
 build-all: clean
 	@mkdir -p dist
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-darwin-amd64 .
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-darwin-arm64 .
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-linux-amd64 .
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-linux-arm64 .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-darwin-amd64 .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-darwin-arm64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/csm-linux-amd64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/csm-linux-arm64 .
 
 # Install to ~/.local/bin
 install: build
@@ -68,6 +87,24 @@ packages: build-all
 			VERSION=$(PKG_VERSION) ARCH=$$arch nfpm package --config nfpm.yaml --packager $$pkg --target dist/ || exit 1; \
 		done; \
 	done
+
+# Hash every release asset into dist/checksums.txt.
+#
+# This file is the single source of truth for the hashes: install.sh, `csm
+# -upgrade`, the Homebrew formula and the AUR PKGBUILD all read it rather than
+# each hashing the binaries themselves, which is how those four drift apart.
+#
+# Deliberately has no prerequisites — `packages` rebuilds from `clean`, so
+# depending on it here would wipe and rebuild dist/ a third time in CI. Run it
+# after `make packages`.
+# Written through a temp file: an unmatched glob is passed through literally and
+# sha256sum errors on it, but `>` has already truncated the target, so a direct
+# redirect leaves a *partial* single source of truth on disk. Reachable with
+# `make build-all && make checksums` before any package exists.
+checksums:
+	@test -d dist || { echo >&2 "dist/ is empty — run 'make packages' first"; exit 1; }
+	cd dist && { sha256sum csm-darwin-* csm-linux-* csm_*.deb csm-*.rpm > checksums.txt.tmp || { rm -f checksums.txt.tmp; exit 1; }; } && mv checksums.txt.tmp checksums.txt
+	@echo "Wrote dist/checksums.txt"
 
 # Clean build artifacts
 clean:

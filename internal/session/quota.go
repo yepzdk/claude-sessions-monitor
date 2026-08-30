@@ -179,9 +179,9 @@ func FetchAPIQuota() *APIQuota {
 }
 
 func fetchAPIQuotaUncached() *APIQuota {
-	token := GetOAuthToken()
-	if token == nil {
-		return &APIQuota{Available: false, Error: "OAuth token not found"}
+	token, err := GetOAuthToken()
+	if err != nil {
+		return &APIQuota{Available: false, Error: err.Error()}
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}

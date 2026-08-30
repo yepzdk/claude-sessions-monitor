@@ -5,9 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
-	"runtime"
 	"runtime/debug"
 	"syscall"
 	"time"
@@ -15,6 +13,7 @@ import (
 	"github.com/yepzdk/claude-sessions-monitor/internal/jump"
 	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 	"github.com/yepzdk/claude-sessions-monitor/internal/ui"
+	"github.com/yepzdk/claude-sessions-monitor/internal/upgrade"
 	"github.com/yepzdk/claude-sessions-monitor/internal/web"
 )
 
@@ -44,6 +43,7 @@ func main() {
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
 	webPort := flag.Int("port", 9847, "Port for web dashboard")
+	doUpgrade := flag.Bool("upgrade", false, "Upgrade csm to the latest release")
 	flag.Parse()
 
 	// Check for conflicting flags
@@ -56,6 +56,12 @@ func main() {
 	if *showVersion {
 		fmt.Printf("csm version %s\n", version)
 		os.Exit(0)
+	}
+
+	// Handle upgrade mode. Before every other mode: it neither reads sessions
+	// nor draws anything, so nothing below needs to have run first.
+	if *doUpgrade {
+		os.Exit(upgrade.Run(version, os.Stdout))
 	}
 
 	// Handle kill-ghosts mode
@@ -188,7 +194,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 	// Row selection for jumping. -1 means nothing is selected; the live view
 	// starts that way so the first arrow press lands on the top row.
 	selected := -1
-	jumpMsg := ""
+	actionMsg := ""
 	// Sessions as of the last render, so a keypress acts on exactly the rows
 	// the user can see rather than re-discovering and racing the ticker.
 	var visible []session.Session
@@ -199,6 +205,18 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 	// The `f` handler reads it so the key is inert on a single-agent machine,
 	// which is what the footer promises by not advertising it there.
 	mixed := false
+
+	// Check for a newer release off the render path: upgrade.Notice blocks on
+	// the network, and a frame must never wait on github.com. The result
+	// arrives once, over a channel, so the render loop owns the string and
+	// there is nothing to race on.
+	updateNotice := ""
+	noticeCh := make(chan string, 1)
+	go func() {
+		if n := upgrade.Notice(version); n != "" {
+			noticeCh <- n
+		}
+	}()
 
 	// Claude status: fetch on-demand (user interaction), use cached on ticker
 	var lastClaudeStatus *session.ClaudeStatus
@@ -250,7 +268,7 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 			// An empty dashboard and a failed scan look identical once the
 			// error is dropped, so the reason goes into the frame rather than
 			// leaving csm to report "No active sessions." either way.
-			msg := jumpMsg
+			msg := actionMsg
 			if err != nil {
 				msg = "Cannot read sessions: " + err.Error()
 			}
@@ -273,7 +291,8 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				WebURL:       webURL,
 				ClaudeStatus: lastClaudeStatus,
 				Selected:     selected,
-				JumpMsg:      msg,
+				ActionMsg:    msg,
+				UpdateNotice: updateNotice,
 				Filter:       filter,
 				Mixed:        mixed,
 			})
@@ -301,10 +320,12 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 		case fatalErr = <-webFatal:
 			cancel()
 			return 0
+		case updateNotice = <-noticeCh:
+			render()
 		case key := <-keyCh:
-			// Any keypress clears feedback from the previous jump, so a stale
+			// Any keypress clears the previous action's feedback, so a stale
 			// message never sits under a table it no longer describes.
-			jumpMsg = ""
+			actionMsg = ""
 			switch key {
 			case ui.KeyUp, ui.KeyDown:
 				if viewMode != ViewModeLive || len(visible) == 0 {
@@ -329,9 +350,9 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				// is a stub.
 				res, err := jump.Focus(visible[selected])
 				if err != nil {
-					jumpMsg = err.Error()
+					actionMsg = err.Error()
 				} else {
-					jumpMsg = res.Message()
+					actionMsg = res.Message()
 				}
 				render()
 			case 'h', 'H':
@@ -371,7 +392,16 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				}
 			case 'w', 'W':
 				if webBrowseURL != "" {
-					openBrowser(webBrowseURL)
+					// Confirming the launch matters as much as reporting the
+					// failure: openBrowser returns once the child is running,
+					// so a browser that starts and then gives up looks exactly
+					// like a key that was never registered.
+					if err := openBrowser(webBrowseURL); err != nil {
+						actionMsg = "Cannot open a browser: " + err.Error()
+					} else {
+						actionMsg = "Opening " + webBrowseURL
+					}
+					render()
 				}
 			case 3: // Ctrl+C
 				cancel()
@@ -465,20 +495,4 @@ func handleKillGhosts() {
 	if len(failed) > 0 {
 		os.Exit(1)
 	}
-}
-
-// openBrowser opens the given URL in the default browser
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	default:
-		return
-	}
-	// A failure has nowhere to go from here: this runs with the alternate
-	// screen up, where the next frame overwrites anything printed.
-	_ = cmd.Start()
 }

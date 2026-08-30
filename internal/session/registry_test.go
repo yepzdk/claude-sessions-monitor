@@ -15,7 +15,7 @@ var (
 	dirB  = encodeProjectPath(pathB)
 )
 
-// Three sessions in one directory. ps order and log order disagree, which is
+// Three sessions in one directory. Scan order and log order disagree, which is
 // the case the positional pairing gets wrong. With a registry every session
 // gets its own pid, confidently, regardless of either order.
 func TestPairProcessUsesRegistryWhenPresent(t *testing.T) {
@@ -24,7 +24,7 @@ func TestPairProcessUsesRegistryWhenPresent(t *testing.T) {
 		"bbb": {PID: 100, SessionID: "bbb", Cwd: pathA},
 		"ccc": {PID: 200, SessionID: "ccc", Cwd: pathA},
 	}
-	pids := []int{100, 200, 300}          // ps order
+	pids := []int{100, 200, 300}          // scan order
 	logs := []string{"aaa", "bbb", "ccc"} // newest-first
 
 	for i, id := range logs {
@@ -140,7 +140,7 @@ func TestReadSessionRegistryFiltersMalformed(t *testing.T) {
 }
 
 // The load-bearing check: a registry file whose pid is not one of the claude
-// processes ps found is ignored. Such a file is left behind by a crash, a
+// processes the scan found is ignored. Such a file is left behind by a crash, a
 // SIGKILL or a reboot, and its pid has very likely been reused since -- acting
 // on it resurrects a dead session as running and aims csm's tty lookup, origin
 // detection and --kill-ghosts at an unrelated process.
@@ -158,7 +158,7 @@ func TestReadSessionRegistryRejectsPIDsNotFoundByPS(t *testing.T) {
 		t.Errorf("registry = %+v; want only live->100", reg)
 	}
 	if _, ok := reg["stale"]; ok {
-		t.Error("a pid ps did not report as a claude process was accepted")
+		t.Error("a pid the scan did not report as a claude process was accepted")
 	}
 }
 

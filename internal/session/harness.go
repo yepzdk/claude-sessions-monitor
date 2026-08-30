@@ -1,10 +1,12 @@
 package session
 
 import (
-	"os/exec"
+	"errors"
+	"fmt"
+	"io/fs"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Harness names the coding agent a session belongs to. csm watches more than
@@ -26,13 +28,25 @@ const (
 	HarnessOMP Harness = "omp"
 )
 
-// harnessProcess is one running coding-agent process, as the ps scan found it.
+// String names the harness for a human. The zero value has to read as
+// something, because it appears in the reason a ghost was not signalled.
+func (h Harness) String() string {
+	if h == HarnessNone {
+		return "no recognised coding agent"
+	}
+	return string(h)
+}
+
+// harnessProcess is one running coding-agent process, as the scan found it.
 type harnessProcess struct {
 	pid     int
 	harness Harness
 	cwd     string // resolved working directory, absolute
-	tty     string // controlling terminal, or ps's placeholder when there is none
-	orphan  bool   // parent shell or IDE is gone and init adopted it
+	// terminal is the controlling terminal's device path, or "" when the
+	// process has none or it could not be read. omp names its session
+	// breadcrumbs after this; see ompTerminalID.
+	terminal string
+	orphan   bool // parent shell or IDE is gone and init adopted it
 }
 
 // pidsByDir groups one harness's processes into the buckets its session store
@@ -70,83 +84,171 @@ func procsByPID(procs []harnessProcess) map[int]harnessProcess {
 // names the runtime and the program itself is a later argument.
 var interpreters = map[string]bool{"bun": true, "node": true, "deno": true}
 
-// classifyProcess decides which harness, if any, a command line belongs to.
+// harnessCandidate reports whether a process is worth reading a full argv for.
 //
-// It matches the basename of a whole argv token, never a substring of the
-// command line, because a harness's name appears in paths that have nothing to
-// do with a session. Both of these run on an ordinary machine with omp
-// installed:
+// The process table carries comm -- a basename the kernel truncates to 15 bytes
+// on Linux and 16 on macOS -- for every process on the machine, and argv costs
+// one read per pid. So comm narrows the field and classifyProcess makes the
+// decision. This is deliberately the loose half of the pair: it only has to
+// avoid missing an agent, never to be right about one, which is why it matches
+// suffixes that classifyProcess goes on to reject. Anything dropped here is
+// dropped without ever being looked at.
+func harnessCandidate(comm string) bool {
+	if strings.HasSuffix(comm, "claude") ||
+		strings.HasSuffix(comm, "omp") ||
+		interpreters[comm] {
+		return true
+	}
+	// comm is the executable's own name, and an installer is free to name the
+	// executable after the version rather than the agent: Claude Code's puts
+	// it at ~/.local/share/claude/versions/<version>, so comm reads "2.1.250"
+	// and the agent's name appears nowhere in it. A session installed that way
+	// is invisible to a name-only prefilter -- reported Inactive while it runs,
+	// and never a ghost candidate.
+	//
+	// A leading digit is what those names have in common and program names do
+	// not. It costs one extra argv read per such install, and classifyProcess
+	// still has to recognise the argv before anything acts on it.
+	//
+	// ponytail: an install naming the executable something else again --
+	// neither the agent's name nor a version -- is still missed here.
+	return len(comm) > 0 && comm[0] >= '0' && comm[0] <= '9'
+}
+
+// classifyProcess decides which harness, if any, an argument vector belongs to.
+//
+// It matches the basename of a whole argv element, never a substring of a
+// flattened command line, because a harness's name appears in paths that have
+// nothing to do with a session. Both of these run on an ordinary machine with
+// omp installed:
 //
 //	~/.omp/puppeteer/chrome/.../Google Chrome for Testing --disable-...
 //	.../Python -u /var/folders/.../T/omp-python-runner/runner-xxxx.py
 //
-// strings.Contains(argv, "omp") claims both. One is a browser, the other a
-// Python REPL, and --kill-ghosts would SIGTERM either.
+// strings.Contains over a command line claims both. One is a browser, the
+// other a Python REPL, and --kill-ghosts would SIGTERM either.
+//
+// Taking argv as the kernel stored it, rather than re-splitting a printed
+// command line on spaces, is what makes the match exact: a harness installed
+// under a path holding a space (/Volumes/My Disk/bin/claude) is one element
+// here, where splitting on whitespace would read it as /Volumes/My and miss
+// the agent -- and, worse, would read /Users/dev/claude tools/bin/server as
+// the claude binary and hand its pid to SIGTERM.
 //
 // Claude Code ships a binary named claude, so argv[0] identifies it. omp
 // normally runs as `bun /Users/<user>/.bun/bin/omp`, where argv[0] is only the
-// runtime and the evidence sits in a later argument -- but only for a known
-// interpreter, so a path argument that happens to end in /omp (`cat /etc/omp`)
-// is not mistaken for the agent itself.
-//
-// ponytail: `ps -o args=` joins argv with spaces and gives no way to tell a
-// separator from a space inside a path, so an agent installed under
-// `/Users/me/My Tools/claude` splits into `/Users/me/My` and its session goes
-// unseen -- invisible to the dashboard and to --kill-ghosts. Scanning every
-// token for a `claude` basename would fix it and re-admit exactly the false
-// positives above (`cat /etc/claude`), which is the trade this function exists
-// to refuse. Living with the rarer, safer failure.
-func classifyProcess(argv string) Harness {
-	fields := strings.Fields(argv)
-	if len(fields) == 0 {
+// runtime and the evidence sits in a later element.
+func classifyProcess(argv []string) Harness {
+	if len(argv) == 0 {
 		return HarnessNone
 	}
 
-	argv0 := filepath.Base(fields[0])
-	if strings.HasSuffix(argv0, "claude") {
+	switch filepath.Base(argv[0]) {
+	case "claude":
 		return HarnessClaude
-	}
-	if argv0 == "omp" {
+	case "omp":
 		return HarnessOMP
 	}
-	if interpreters[argv0] {
-		for _, f := range fields[1:] {
-			// Runtime flags precede the script; the first non-flag argument is
-			// the program being run and the only one worth believing.
-			if strings.HasPrefix(f, "-") {
-				continue
-			}
-			if filepath.Base(f) == "omp" {
-				return HarnessOMP
-			}
-			break
+
+	if !interpreters[filepath.Base(argv[0])] {
+		return HarnessNone
+	}
+	// Which element holds the program is not knowable without the runtime's
+	// own flag table: `bun --smol prog` and `bun --cwd /proj prog` put it in
+	// different places, and stopping at the first non-flag would miss the
+	// second. So every non-flag element is considered, and the evidence
+	// required of one is raised instead -- see namesAgentExecutable.
+	for _, arg := range argv[1:] {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if namesAgentExecutable(arg, "omp") {
+			return HarnessOMP
 		}
 	}
 	return HarnessNone
 }
 
-// processArgs reads one process's full command line. A var so a test can supply
-// an argv without spawning anything.
-var processArgs = func(pid int) ([]byte, error) {
-	// ps directly, with no shell pipeline, to avoid shell injection risks.
-	return exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+// namesAgentExecutable reports whether an argv element names the agent's own
+// executable, rather than merely a path that happens to end in its name.
+//
+// A directory argument is the trap. `bun install /home/u/omp` and
+// `bun run --cwd /home/u/src/omp test` both end in /omp, and a checkout named
+// after the agent is exactly what someone running that agent is likely to
+// have. Skipping `-` prefixed elements does not help, because a flag's value is
+// its own element and carries no dash.
+//
+// What separates the real thing is where it lives: a program launched through
+// a runtime is a shim in a bin directory (~/.bun/bin/omp, node_modules/.bin/omp),
+// never a project directory. Requiring that errs toward not recognising an
+// agent, which costs a ghost that is listed but never killed -- where the
+// opposite error is a SIGTERM to something that was never an agent at all.
+//
+// ponytail: a flag value pointing into a bin directory
+// (`node --require /opt/omp/bin/omp app.js`) still matches. Excluding a flag's
+// value needs the runtime's own flag table.
+func namesAgentExecutable(arg, name string) bool {
+	if filepath.Base(arg) != name {
+		return false
+	}
+	// A bare "omp" has Dir "." and is rejected here too: it is a module name,
+	// as in `node -r omp server.js`, not a path to the agent.
+	switch filepath.Base(filepath.Dir(arg)) {
+	case "bin", ".bin":
+		return true
+	}
+	return false
 }
 
-// isHarnessProcess reports whether pid currently belongs to a process of the
-// given harness. It is the last check before SIGTERM: Discover ran earlier, and
-// a pid it named can have exited and had its number reissued since.
+// errProcessGone reports a pid that no longer names a live process. It is the
+// one recheck failure that needs no explanation: the ghost exited on its own
+// between the scan and the signal, which is the outcome --kill-ghosts wanted.
+var errProcessGone = errors.New("process is gone")
+
+// verifyGhostProcess reports whether pid still belongs to a process of the
+// given harness, and if not, why.
 //
-// The harness has to match the session's own. A weaker "is this any coding
-// agent" test would accept a recycled pid that now belongs to a different
-// harness, which is the same coin flip PIDConfident exists to refuse. An
-// unattributed session (HarnessNone) can never pass.
-func isHarnessProcess(pid int, h Harness) bool {
-	if h == HarnessNone {
-		return false
+// This is the last check before SIGTERM. Discover ran earlier, and a pid it
+// named can have exited and had its number reissued since. The harness has to
+// match the session's own: a weaker "is this any coding agent" test would
+// accept a recycled pid that now belongs to a different harness, which is the
+// same coin flip PIDConfident exists to refuse. An unattributed session
+// (HarnessNone) can never pass.
+//
+// It returns an error rather than a bool so the caller can tell a pid that
+// exited from one that now belongs to something else. Reporting both as "not
+// terminated" would leave a user unable to tell a finished ghost from a
+// process csm refused to touch.
+func verifyGhostProcess(pid int, want Harness) error {
+	if want == HarnessNone {
+		return errors.New("the session names no coding agent, so no process can be attributed to it")
 	}
-	out, err := processArgs(pid)
+
+	argv, err := processArgvFn(pid)
 	if err != nil {
-		return false
+		// Only a pid that is genuinely gone earns the silent path in
+		// killGhosts. A permission error, or a buffer that would not parse, is
+		// csm failing to look -- and reporting that as an exit reproduces the
+		// "listed a ghost, signalled nothing, called it a clean run" this
+		// guard exists to end. The SIGTERM below discriminates the same way,
+		// on ESRCH and ErrProcessDone rather than on any signal error.
+		//
+		// ENOENT is a pid whose /proc entry is gone; EINVAL is what
+		// kern.procargs2 returns for a pid macOS no longer has.
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EINVAL) {
+			return fmt.Errorf("%w: %w", errProcessGone, err)
+		}
+		return fmt.Errorf("could not read the command line for pid %d: %w", pid, err)
 	}
-	return classifyProcess(strings.TrimSpace(string(out))) == h
+	// A live process always has an argv. An empty one is a pid whose process
+	// has exited but whose entry has not been reaped, or a kernel thread.
+	if len(argv) == 0 {
+		return fmt.Errorf("%w: no command line", errProcessGone)
+	}
+
+	if got := classifyProcess(argv); got != want {
+		return fmt.Errorf("pid now belongs to %s, not to %s: %s",
+			got, want, strings.Join(argv, " "))
+	}
+	return nil
 }

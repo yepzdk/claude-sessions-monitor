@@ -11,7 +11,7 @@ decision, and that comment is the authority if the two ever disagree.
 ~/.claude/projects/<encoded-cwd>/<session>.jsonl  ──►  discoverClaude()  ─┐
 ~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl ─►  discoverOMP()  ───┤
                                                                           │
-ps ax -o pid=,ppid=,tty=,args=  ──►  classifyProcess()  ──►  both above  ──┤
+the OS process table  ──►  classifyProcess()  ──►  both above  ───────────┤
                                                     []session.Session  ◄──┘
                                                              │
                                     ┌────────────────────────┼────────────────────┐
@@ -49,22 +49,28 @@ auto-refreshes and the history view is throttled to once per 30s.
 
 ### The process scan (`harness.go`, `session.go`)
 
-`getRunningHarnessProcs()` runs `ps ax -o pid=,ppid=,tty=,args=` (no shell) and
-returns one `harnessProcess` per recognised agent, with its harness, cwd
-(`/proc/<pid>/cwd` on Linux, `lsof -p` on macOS), controlling terminal and
-whether it has been orphaned.
+`getRunningHarnessProcs()` returns one `harnessProcess` per recognised agent,
+with its harness, cwd, controlling terminal and whether it has been orphaned. It
+reads the OS process table (`listProcesses`, see
+[Platform code](#platform-code)) — not `ps` output, whose columns are a text
+table meant for people and are not stable across platforms.
 
-`args=`, not `comm=`, because an agent is not always its own `argv[0]`: omp runs
-as `bun /path/to/omp`, so `comm` is `bun`. `classifyProcess` therefore matches
-**argv token basenames, never command-line substrings**. This is not fussiness:
-a machine with omp installed runs a puppeteer Chrome under `~/.omp/puppeteer/`
-and a Python REPL out of `/var/folders/.../T/omp-python-runner/`, and
-`strings.Contains(argv, "omp")` claims both. `--kill-ghosts` would then SIGTERM
-a browser. Don't loosen it.
+Three reads, narrowing: `comm` from the table is the loose prefilter
+(`harnessCandidate`), the full argument vector decides
+(`classifyProcess(argv)`), and only then are cwd and controlling terminal
+resolved per pid. `comm` alone cannot decide — omp runs as `bun /path/to/omp`,
+so its `comm` is `bun`, and Claude Code's native installer produces a `comm` of
+the *version number* — and argv costs one read per pid, so the order matters.
 
-A failed `ps` scan aborts `Discover` with an error rather than returning an
-empty slice: empty is indistinguishable from "nothing running" and would mark
-every session Inactive.
+The controlling terminal is read from the process's **stdin**
+(`processTerminal`), because that is the descriptor omp itself calls
+`ttyname(3)` on to name its session breadcrumb. Reassembling a name from a
+device number would be a name csm then has to hope matches. Only omp pairing
+uses it, so it is a per-candidate read rather than a column on `procInfo`.
+
+A failed scan aborts `Discover` with an error rather than returning an empty
+slice: empty is indistinguishable from "nothing running" and would mark every
+session Inactive. An empty table with no error is rejected for the same reason.
 
 ### Claude Code discovery (`session.go`)
 
@@ -89,40 +95,49 @@ working directory is the `cwd` field inside the log, and `extractProjectName`
 
 ### Oh My Pi discovery (`omp.go`, `omp_terminal.go`)
 
-`OMPSessionsDir()` is `$HOME/.omp/agent/sessions`, overridable with
+`ompSessionsDir()` is `$HOME/.omp/agent/sessions`, overridable with
 `CSM_OMP_SESSIONS_DIR` — omp relocates its store for `--profile` and
 `--session-dir`, so unlike Claude Code the default path is not a guarantee.
 
 omp's bucket encoding is home-relative, has had several spellings, and is
-migrated best-effort on access, so csm does not reimplement it. Instead
-`ompHeaderCWD` reads the working directory out of the newest log's header (two
-lines, one file per bucket) and joins that to processes keyed by raw cwd.
-`findActiveLogs` is reused unchanged; it already skips directories, which is what
-excludes omp's per-session artifact directory sitting beside each log.
+migrated best-effort on access, so csm does not reimplement it. Instead the
+working directory is read from the newest log's header through the parse cache
+(one `listLogsByRecency` per bucket, no second scan) and joined to processes
+keyed by raw cwd. `selectActiveLogs` is shared with the Claude path; it already
+skips directories, which is what excludes omp's per-session artifact directory
+sitting beside each log.
 
 What the format demands of the parser:
 
 - The physical first line is a fixed-width 256-byte `{"type":"title"}` slot, not
   the header. A parser that assumed otherwise reads no `cwd` and every omp
-  session loses its project name and its process.
+  session loses its project name and its process. The slot also wins over the
+  header's `title`: it is the copy omp rewrites on rename.
 - Entries form an append-only **tree** (`id`/`parentId` + leaf pointer). csm
   reads the physical tail. Known ceiling: after a rewind or branch switch the
   tail may not be on the live branch. It is what the file's mtime reflects, and
   walking from the leaf would mean reading whole multi-MB files every tick.
-- `message.content` is either a block array or a bare string, so it stays
-  `json.RawMessage` and `ompMessage.text()` handles both. Same for `custom.data`,
-  whose shape depends on `customType`.
+- `message.content` is either a block array or a bare string, and `custom.data`'s
+  shape depends on `customType`, so both arrive as `json.RawMessage`.
+  `decodeOMPEntry` decodes the parts csm reads once, at parse time, and drops the
+  raw copies — the status rules run on every tick including cache hits.
 - An unparseable line costs one entry, not the session. omp's own loader is
   lenient here too.
 
 Pairing has no registry to work from — omp writes no pid anywhere. It does write
 a best-effort breadcrumb per terminal (`terminal-sessions/<terminal-id>` →
-cwd + log path), and the terminal id is the tty when the process has one, so
-`pairOMPProcess` joins breadcrumbs to the scan's `tty` column for an exact
-pairing. It degrades to running-with-no-pid (`PIDConfident` false) when omp used
-an env-derived id (`TMUX_PANE`, `CMUX_SURFACE_ID`, ...) that `ps` cannot see, or
-the process has no terminal. Two breadcrumbs naming one log drop the pairing
-rather than guess, the same rule `pairProcess` applies to a duplicated session id.
+cwd + log path), named after `ttyname(3)` of its stdin with the `/dev/` prefix
+dropped and the separators replaced. `ompTerminalID` applies the same
+transformation to the terminal the scan read, so `pairOMPProcess` can match them
+on both platforms — comparing raw paths matched on macOS and never on Linux,
+where `/dev/pts/3` is `pts-3` on disk. It degrades to running-with-no-pid
+(`PIDConfident` false) when omp used an env-derived id (`TMUX_PANE`,
+`CMUX_SURFACE_ID`, ...) that no descriptor exposes, or the process has no
+terminal. Two breadcrumbs naming one log drop the pairing rather than guess, the
+same rule `pairProcess` applies to a duplicated session id. When every process in
+a directory is confidently claimed by *another* log's breadcrumb, this log is
+reported not-running rather than falling back to the generous bias — the same
+"every pid accounted for" rule the registry path uses.
 
 Known ceiling: an omp store that exists but cannot be read is skipped silently.
 Failing the sweep would take the Claude Code half of the dashboard down with it.
@@ -199,19 +214,33 @@ log. If you add a column, blank it honestly rather than guessing.
 
 ### Processes, ghosts and the pairing pitfall
 
+A process is identified in two steps, in `harness.go`. `harnessCandidate`
+filters the process table on `comm` — cheap, already in hand, and deliberately
+loose, because missing an agent here means never reading the argv that would
+have identified it. `classifyProcess` then decides from the full argv, read
+from `/proc/<pid>/cmdline` or `kern.procargs2`, and returns a `Harness`
+(`claude`, `omp`, or none). It matches the basename of a whole argv element,
+never a substring: `~/.omp/puppeteer/.../Google Chrome for Testing` and
+`Python -u /var/.../omp-python-runner/runner.py` both contain "omp" and are a
+browser and a REPL. Taking argv as the kernel stored it, rather than
+re-splitting a printed command line, is what keeps `/Volumes/My Disk/bin/claude`
+one element. Discovery and the pre-`SIGTERM` recheck call the same function, so
+a pid one lists can only fail the other by having been recycled. `Session` and
+`GhostProcess` both carry the harness, serialized as `harness`.
+
 Claude Code (2.1.x) keeps a registry at `~/.claude/sessions/<pid>.json` with
 the pid, session id and cwd of every live session; `registry.go` reads it.
-Every entry is validated against the set of `claude` pids `ps` found —
+Every entry is validated against the set of `claude` pids the scan found,
 never against the bare pid — because a crash or reboot leaves files behind
 and the pid gets reused. `pairProcess` then decides, per log: registry hit →
 that session's own pid, confident; registry present and every pid in the
 directory accounted for → not running; a pid the registry cannot name →
 running, no pid. Two files carrying one session id (`--resume` in two tabs)
 drop the id rather than guess. The registry snapshot is taken under the same
-lock and TTL as the `ps` scan so the two views cannot disagree mid-tick.
+lock and TTL as the process scan so the two views cannot disagree mid-tick.
 
 Without a registry (older Claude Code) the pairing is positional: logs are
-sorted newest-first, pids arrive in `ps` order, the two are unrelated, and
+sorted newest-first, pids arrive in scan order, the two are unrelated, and
 pairing log *i* with pid *i* is a guess. Everything downstream is built to
 survive that:
 
@@ -228,11 +257,15 @@ survive that:
   headless `claude -p` whose shell has exited. Known ceiling: a Linux
   subreaper adopts orphans instead of pid 1 and this misses them.
 - `ghostsFrom` refuses any session that is not `PIDConfident`, and
-  `KillGhostProcesses` re-checks the pid with `isHarnessProcess(pid, ghost.Harness)`
-  before `SIGTERM` — the *session's* harness, not "any known agent", because pids
-  are unique per machine and not per agent. An unconfident pairing, or an
-  unattributed one, would be a coin flip over which session dies. `jump` applies
-  the same rule before trusting a pid's tty.
+  `KillGhostProcesses` re-checks, through `verifyGhostProcess`, that the pid
+  still belongs to *the session's own* harness before `SIGTERM` — not merely to
+  some coding agent, which would accept a recycled pid that now belongs to the
+  other one. A session with no harness can never name a process to kill. An
+  unconfident pairing would be a coin flip over which session dies. `jump`
+  applies the same rule before trusting a pid's tty.
+- A ghost that fails that recheck for any reason but having exited is reported
+  as a failure rather than dropped, so "csm listed it and refused to signal it"
+  cannot read as "it had already exited".
 
 The omp side has no registry at all; see
 [Oh My Pi discovery](#oh-my-pi-discovery-ompgo-omp_terminalgo) for the
@@ -255,7 +288,7 @@ that shows counts needs the same.
 | Cache | Key / TTL | Why |
 |---|---|---|
 | `parseCache` / `ompParseCache` | log path; valid while `(mtime, size)` unchanged | skip re-parsing multi-MB logs every tick. One generic `cachedParse[T]` policy, two maps, because the formats parse into different shapes |
-| `processScanCache` | 2s | one `ps`/`lsof` round per tick, not per caller. Guarded by `processScanValid`, not a nil check: no agent running is a legitimate result |
+| `processScanCache` | 2s | one read of the process table per tick, not per caller. Guarded by `processScanValid`, not a nil check: no agent running is a legitimate result |
 | `resultCache` | 1s | TUI loop, SSE hub and HTTP handlers collapse to one scan |
 | `apiQuotaCache` | 60s | the quota endpoint rate-limits hard |
 | `claudeStatusCache` | 60s | status page, fetched on demand only |
@@ -288,20 +321,38 @@ Network (`http.Client` with 5s timeout, both):
   greppable rather than imitating another client. Keep it that way.
 - `https://status.claude.com/api/v2/status.json` — service health.
 
-Subprocesses: `ps` (all platforms), `lsof` and `security` (macOS),
-`osascript` (macOS, jump only).
+Subprocesses, all macOS-only: `lsof` (a process's cwd), `ps` (origin
+detection, and the tty lookup in jump), `security` (Keychain) and `osascript`
+(jump). The native calls for the first and last are libproc and
+Security.framework, both cgo, and the release workflow cross-builds the darwin
+targets from a Linux runner in one job. On Linux csm spawns nothing except
+`xdg-open`.
 
 ### Platform code
 
-Build-tagged pairs, one file per OS with identical function signatures:
+Build tags, one file per OS with identical function signatures. That is the
+default here: with a `runtime.GOOS` switch every branch must compile on every
+platform, so an unhandled OS is only found at runtime, while a missing
+build-tagged file is a build error.
 
-- `session/origin_detect_darwin.go` / `origin_detect_linux.go` — read a
-  process's environment and parent chain (`ps -E` vs `/proc`).
-- `jump/jump_darwin.go` / `jump_other.go` — focus a terminal tab, or report
+- `session/listprocs_linux.go` / `listprocs_darwin.go`: the process table and
+  one pid's name and cwd. Linux reads `/proc`; macOS calls `sysctl kern.proc.all`
+  and spawns `lsof` for the cwd. The `getProcessCwd` comment there says why.
+- `session/origin_detect_darwin.go` / `origin_detect_linux.go`: read a
+  process's environment and parent chain (`ps -E` vs `/proc`). There is no
+  windows file and no catch-all, so `GOOS=windows go build` fails here.
+- `session/oauth_darwin.go` / `oauth_linux.go`: read the Claude Code OAuth
+  token from the macOS Keychain or `~/.claude/.credentials.json`. Each reports
+  why it failed, so a platform csm cannot read is not reported as "no token
+  found".
+- `browser.go` holds `openBrowser`; `browser_darwin.go` and `browser_linux.go`
+  each supply only the `browserOpener` constant (`open`, `xdg-open`). Splitting
+  a shared body from a per-OS constant beats copying the body once per OS.
+- `jump/jump_darwin.go` / `jump_other.go`: focus a terminal tab, or report
   that we can't.
 
-Runtime `runtime.GOOS` switches, not build tags: `getProcessCwd`,
-`GetOAuthToken`, `openBrowser` in `main.go`.
+`runtime.GOOS` appears once in the codebase: the port-conflict hint in
+`web/server.go`, which picks between two format strings and is not dispatch.
 
 There is no `origin_detect_*.go` for other systems, so `internal/session`
 does not build on Windows or BSD. That is known; don't fix it in passing.
@@ -476,8 +527,9 @@ Fixture helpers already exist; use them rather than hand-rolling JSONL:
 | `userLine` | `session/history_test.go` | a single user entry |
 | `timelineFixture` | `web/handlers_test.go` | a log under a fake `$HOME` for the handlers |
 
-Seams for the things you can't drive from a test: `listProcesses` (the `ps`
-scan), `processArgs` (the pre-SIGTERM pid recheck), `originStoreDirFn`,
+Seams for the things you can't drive from a test: `listProcesses` (the process
+scan), `getProcessCwdFn`, `processArgvFn`, `processTerminalFn`, `procRoot`
+(procfs, Linux only), `browserCommand`, `originStoreDirFn`,
 `parseLogFileWithLimit` / `parseOMPLogFileWithLimit` (trigger the oversized-line
 path without writing 10 MB), `web.discoverSessions`, and the
 `CSM_OMP_SESSIONS_DIR` env override (point omp discovery at a fixture tree).

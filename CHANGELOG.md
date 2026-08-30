@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `install.sh`, a one-line installer (`curl -fsSL .../install.sh | sh`) that detects OS/arch, verifies the download, and installs to `~/.local/bin` without sudo
+- `csm -upgrade` replaces a directly-installed csm in place; installs owned by Homebrew, mise, dpkg, rpm, pacman or `go install` get that tool's upgrade command instead
+- The live dashboard checks for a newer release once a day in the background; set `CSM_NO_UPDATE_CHECK` to disable
+- An AUR package, `csm-bin`, published automatically on release
+- Releases now ship a `checksums.txt` asset, which `install.sh`, `csm -upgrade` and the Homebrew formula all verify against
 - Oh My Pi sessions appear alongside Claude Code sessions in one list, auto-detected from `~/.omp/agent/sessions/` with no flag to set. When both are on screen the origin column carries a `[cc]` / `[omp]` badge
 - `f` in the live view cycles which agent's rows are shown: all, Claude Code, Oh My Pi. A reading aid over an always-complete scan, not a discovery switch
 - `CSM_OMP_SESSIONS_DIR` points csm at a non-default Oh My Pi session store, for `--profile` and `--session-dir` setups
@@ -16,12 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The scan for running agent processes reads the kernel's process table directly (`/proc` on Linux, `sysctl kern.proc.all` on macOS) instead of parsing `ps` output. On Linux csm no longer spawns any subprocess except `xdg-open`
+- Platform-specific code (`getProcessCwd`, `GetOAuthToken`, `openBrowser`) moved from `runtime.GOOS` switches to build-tagged files, so an unsupported platform is a build error rather than a silent no-op
+- A process is identified from its full argument vector, read from the kernel (`/proc/<pid>/cmdline`, `kern.procargs2`), instead of from the truncated name the OS accounts it under. Session discovery and the `--kill-ghosts` recheck now apply the same rule, so a process one of them finds cannot be silently rejected by the other
 - csm is now the *Coding* Sessions Monitor: it watches more than Claude Code. Same binary, same install, nothing to migrate
-- `--kill-ghosts` identifies a ghost's process from its full command line and requires it to belong to the same coding agent as the session, instead of only checking that the command is named `claude`
 - The history and usage views are labelled *(Claude Code)*. Both read Claude Code's logs and the quota comes from Anthropic's OAuth endpoint, so Oh My Pi sessions do not appear in them
 
 ### Fixed
 
+- On macOS, a session whose working directory contains a space was dropped from the dashboard: the path was read as the last space-separated field of `lsof` output
+- A scan that found Claude processes but could not resolve any of their working directories (macOS without `lsof` on `PATH`) reported "no running sessions" with no error. It now reports the failure
+- The usage view said "OAuth token not found" for every credential failure. It now reports the actual reason, and rejects credentials with an empty access token instead of sending an empty `Bearer` header
+- Pressing `w` said nothing when the browser could not be launched (e.g. Linux without `xdg-utils`). The live view now confirms the launch or shows the error
+- The amd64 release binary no longer requires a glibc as new as the CI runner's; release builds are now statically linked (`CGO_ENABLED=0`)
+- `--kill-ghosts` printed "No processes were terminated (they may have already exited)" for a ghost it had listed and then declined to signal. It now names what the pid belongs to instead, so a refusal cannot read as a clean run
+- The `--kill-ghosts` recheck accepted any process whose name merely ended in "claude", so a recycled pid belonging to something like `wrap-claude` could be signalled on a session's behalf
+- A session whose Claude Code is installed under a version-named path (`~/.local/share/claude/versions/<version>`, which the native installer uses) was reported Inactive while it ran, and could never be found as a ghost: the process scan filtered on a name the kernel takes from the executable, and that name is the version
 - A log that could only be read partway now keeps its `[?]` incomplete-data marker on every refresh. The marker previously appeared only on the tick that parsed the file and vanished while the parse was served from cache
 
 ## [0.7.0] - 2026-08-28

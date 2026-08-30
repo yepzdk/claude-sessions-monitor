@@ -33,7 +33,7 @@ import (
 // breadcrumbs. It sits beside the sessions directory, so an overridden sessions
 // path moves it too.
 func ompTerminalSessionsDir() (string, error) {
-	sessionsDir, err := OMPSessionsDir()
+	sessionsDir, err := ompSessionsDir()
 	if err != nil {
 		return "", err
 	}
@@ -46,21 +46,25 @@ func ompTerminalSessionsDir() (string, error) {
 // rule pairProcess applies when two logs claim one session id.
 const ompAmbiguousTerminal = ""
 
-// ompTerminalID converts a controlling terminal as ps reports it into the id omp
+// ompTerminalID converts a controlling terminal's device path into the id omp
 // builds its breadcrumb filename from.
 //
-// omp takes ttyname(3) and drops the `/dev/` prefix, then replaces the remaining
-// separators because a filename cannot hold them:
+// omp takes ttyname(3) of stdin, drops the `/dev/` prefix, then replaces the
+// remaining separators because a filename cannot hold them:
 //
 //	if (a?.startsWith("/dev/")) return a.slice(5).replace(/\//g, "-")
 //
-// So Linux `/dev/pts/3`, which `ps -o tty=` prints as `pts/3`, is `pts-3` on
-// disk. macOS `/dev/ttys003` survives unchanged, which is why comparing the two
-// byte-for-byte passed every test on this machine and would still have failed
-// for every session on the Linux binaries the release workflow ships: no jump,
-// and --kill-ghosts silently skipping every omp ghost forever.
-func ompTerminalID(tty string) string {
-	return strings.ReplaceAll(tty, "/", "-")
+// This is the same transformation over the same descriptor, so it holds on both
+// platforms: `/dev/ttys003` is `ttys003`, and Linux `/dev/pts/3` is `pts-3`.
+// Comparing a raw device path against a breadcrumb name would have matched on
+// macOS and never on Linux -- no jump, and --kill-ghosts skipping every omp
+// ghost on the binaries the release workflow ships.
+func ompTerminalID(terminal string) string {
+	name, ok := strings.CutPrefix(terminal, "/dev/")
+	if !ok {
+		return ""
+	}
+	return strings.ReplaceAll(name, "/", "-")
 }
 
 // ompBreadcrumbs is omp's terminal <-> session mapping, in both directions.
@@ -143,7 +147,7 @@ func pairOMPProcess(logFile string, pids []int, crumbs ompBreadcrumbs,
 	mine := crumbs.terminalOf[logFile]
 	claimedElsewhere := 0
 	for _, candidate := range pids {
-		terminal := ompTerminalID(procByPID[candidate].tty)
+		terminal := ompTerminalID(procByPID[candidate].terminal)
 		if terminal != ompAmbiguousTerminal && terminal == mine {
 			return true, candidate, true
 		}

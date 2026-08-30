@@ -175,8 +175,11 @@ type LiveView struct {
 	ClaudeStatus *session.ClaudeStatus
 	// Selected indexes ActiveSessions(Sessions), or -1 for no selection.
 	Selected int
-	// JumpMsg is one line of feedback from the last jump attempt, or "".
-	JumpMsg string
+	// ActionMsg is one line of feedback from the last key the user pressed,
+	// or "" for none.
+	ActionMsg string
+	// UpdateNotice announces a newer csm release, or "" for none.
+	UpdateNotice string
 	// Filter is the harness the view is restricted to, or "" for all.
 	Filter session.Harness
 	// Mixed reports whether both agents were present *before* filtering, which
@@ -257,8 +260,14 @@ func RenderLive(v LiveView) {
 
 	// Feedback from the last jump attempt, on its own line so it never shifts
 	// the table.
-	if v.JumpMsg != "" {
-		fmt.Fprintf(&buf, "%s%s%s%s", Dim, sanitizeForTerminal(v.JumpMsg), Reset, rawNewline)
+	if v.ActionMsg != "" {
+		fmt.Fprintf(&buf, "%s%s%s%s", Dim, sanitizeForTerminal(v.ActionMsg), Reset, rawNewline)
+	}
+
+	// A newer release, if one was found. Above the help line so it reads as
+	// part of the footer rather than as a row of the table.
+	if v.UpdateNotice != "" {
+		fmt.Fprintf(&buf, "%s%s%s%s", Yellow, sanitizeForTerminal(v.UpdateNotice), Reset, rawNewline)
 	}
 
 	// Show help footer. The harness filter is only offered when there is

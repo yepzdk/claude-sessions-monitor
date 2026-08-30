@@ -240,12 +240,12 @@ func TestOMPSessionIDFromLogFile(t *testing.T) {
 // is not a guarantee and csm would otherwise report nothing while sessions ran.
 func TestOMPSessionsDirHonoursEnvOverride(t *testing.T) {
 	t.Setenv(ompSessionsDirEnv, "/tmp/elsewhere")
-	dir, err := OMPSessionsDir()
+	dir, err := ompSessionsDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dir != "/tmp/elsewhere" {
-		t.Errorf("OMPSessionsDir = %q, want the override", dir)
+		t.Errorf("ompSessionsDir = %q, want the override", dir)
 	}
 }
 
@@ -255,8 +255,8 @@ func TestOMPSessionsDirHonoursEnvOverride(t *testing.T) {
 func TestPairOMPProcessConfidentOnlyOnTerminalMatch(t *testing.T) {
 	const logFile = "/omp/sessions/-work-api/2026_abc.jsonl"
 	procs := map[int]harnessProcess{
-		41: {pid: 41, harness: HarnessOMP, tty: "ttys003"},
-		42: {pid: 42, harness: HarnessOMP, tty: "ttys009"},
+		41: {pid: 41, harness: HarnessOMP, terminal: "/dev/ttys003"},
+		42: {pid: 42, harness: HarnessOMP, terminal: "/dev/ttys009"},
 	}
 	crumbs := func(terminal string) ompBreadcrumbs {
 		return ompBreadcrumbs{
@@ -342,7 +342,7 @@ func TestOMPProjectName(t *testing.T) {
 // and --kill-ghosts skipping every omp ghost.
 func TestPairOMPProcessMatchesLinuxTerminalNames(t *testing.T) {
 	const logFile = "/omp/sessions/-work-api/2026_abc.jsonl"
-	procs := map[int]harnessProcess{55: {pid: 55, harness: HarnessOMP, tty: "pts/3"}}
+	procs := map[int]harnessProcess{55: {pid: 55, harness: HarnessOMP, terminal: "/dev/pts/3"}}
 	crumbs := ompBreadcrumbs{
 		terminalOf: map[string]string{logFile: "pts-3"},
 		logOf:      map[string]string{"pts-3": logFile},
@@ -363,7 +363,7 @@ func TestPairOMPProcessMatchesLinuxTerminalNames(t *testing.T) {
 func TestPairOMPProcessRefusesFullyClaimedProcesses(t *testing.T) {
 	const live = "/omp/sessions/-work-api/live.jsonl"
 	const exited = "/omp/sessions/-work-api/exited.jsonl"
-	procs := map[int]harnessProcess{7: {pid: 7, harness: HarnessOMP, tty: "ttys003"}}
+	procs := map[int]harnessProcess{7: {pid: 7, harness: HarnessOMP, terminal: "/dev/ttys003"}}
 	crumbs := ompBreadcrumbs{
 		terminalOf: map[string]string{live: "ttys003"},
 		logOf:      map[string]string{"ttys003": live},
@@ -439,9 +439,9 @@ func TestDiscoverOMPFindsSessionsInBuckets(t *testing.T) {
 	}
 
 	procs := []harnessProcess{
-		{pid: 77, harness: HarnessOMP, cwd: "/work/api", tty: "ttys003"},
+		{pid: 77, harness: HarnessOMP, cwd: "/work/api", terminal: "/dev/ttys003"},
 		// Another agent in the same directory must not be counted here.
-		{pid: 78, harness: HarnessClaude, cwd: "/work/api", tty: "ttys004"},
+		{pid: 78, harness: HarnessClaude, cwd: "/work/api", terminal: "/dev/ttys004"},
 	}
 
 	liveFiles := map[string]struct{}{}
@@ -522,9 +522,9 @@ func TestDiscoverReportsOMPSessionsWithoutClaudeDirectory(t *testing.T) {
 		assistant(ts(-2*time.Minute), "stop", "Done."),
 	)
 
-	original := listProcesses
-	t.Cleanup(func() { listProcesses = original })
-	listProcesses = func() ([]byte, error) { return nil, nil }
+	// A table with no agent in it: the omp session is listed, Inactive. An empty
+	// table is rejected as a broken read, which is a different test.
+	fakeProcesses(t, []procInfo{{pid: 1, ppid: 0, comm: "launchd"}})
 
 	got, err := Discover()
 	if err != nil {
