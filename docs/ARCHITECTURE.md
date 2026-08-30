@@ -36,10 +36,13 @@ It is not decoration: `--kill-ghosts` verifies a pid against it before sending
 SIGTERM, and `ui` decides the row tag from it.
 
 `main.go` dispatches on flags in this order: `-v`, `-kill-ghosts`, `-history`,
-`-l` (with `-json`), `-web-only`, then the default live view. `-only` filters
-the result by harness for every one of them; `f` cycles the same filter live.
-The live loop owns the `ViewMode` (live / history / usage); `ui` only exposes
-the three renderers. The ticker runs at `-interval` (2s); the usage view never
+`-l` (with `-json`), `-web-only`, then the default live view. The harness filter
+is view state owned by the live loop and cycled with `f`, deliberately not a
+flag: discovery always covers every agent, and a flag would have had to mean
+something for the web dashboard, which serves several clients and has no key to
+undo it. The live loop also owns the `ViewMode` (live / history / usage); `ui`
+only exposes the three renderers.
+The ticker runs at `-interval` (2s); the usage view never
 auto-refreshes and the history view is throttled to once per 30s.
 
 ## `internal/session`
@@ -350,7 +353,7 @@ Reuse these instead of writing new ones:
 - `MixedHarnesses` / `FilterByHarness` — the harness tag renders only in mixed
   company, decided *before* the filter is applied so narrowing to one agent
   still says which one is on screen and the rows don't re-flow when `f` is
-  pressed. `-only` and `f` are display filters; both agents are always scanned.
+  pressed. `f` is a display filter; both agents are always scanned.
 - `calcSessionLayout` / `calcHistoryLayout` / `calcUsageLayout` in `layout.go`
   — every column width is a named constant there.
 - Pad by `utf8.RuneCountInString`, never `len()`; the row gutter for the

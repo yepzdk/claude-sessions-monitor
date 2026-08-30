@@ -46,21 +46,49 @@ func ompTerminalSessionsDir() (string, error) {
 // rule pairProcess applies when two logs claim one session id.
 const ompAmbiguousTerminal = ""
 
-// ompTerminalSessions maps a session's log path to the terminal id whose
-// breadcrumb points at it. A missing or unreadable directory yields an empty map
-// and, with it, unconfident pairings; it is not an error worth failing a sweep
-// over.
-func ompTerminalSessions() map[string]string {
+// ompTerminalID converts a controlling terminal as ps reports it into the id omp
+// builds its breadcrumb filename from.
+//
+// omp takes ttyname(3) and drops the `/dev/` prefix, then replaces the remaining
+// separators because a filename cannot hold them:
+//
+//	if (a?.startsWith("/dev/")) return a.slice(5).replace(/\//g, "-")
+//
+// So Linux `/dev/pts/3`, which `ps -o tty=` prints as `pts/3`, is `pts-3` on
+// disk. macOS `/dev/ttys003` survives unchanged, which is why comparing the two
+// byte-for-byte passed every test on this machine and would still have failed
+// for every session on the Linux binaries the release workflow ships: no jump,
+// and --kill-ghosts silently skipping every omp ghost forever.
+func ompTerminalID(tty string) string {
+	return strings.ReplaceAll(tty, "/", "-")
+}
+
+// ompBreadcrumbs is omp's terminal <-> session mapping, in both directions.
+// Pairing needs both: which terminal claims this log, and whether some *other*
+// log's terminal already accounts for a process.
+type ompBreadcrumbs struct {
+	// terminalOf maps a session's log path to the terminal claiming it, or
+	// ompAmbiguousTerminal when more than one does.
+	terminalOf map[string]string
+	// logOf maps a terminal id to the log it claims.
+	logOf map[string]string
+}
+
+// ompTerminalSessions reads the breadcrumb directory. A missing or unreadable
+// one yields empty maps and, with them, unconfident pairings; it is not an error
+// worth failing a sweep over.
+func ompTerminalSessions() ompBreadcrumbs {
+	crumbs := ompBreadcrumbs{terminalOf: map[string]string{}, logOf: map[string]string{}}
+
 	dir, err := ompTerminalSessionsDir()
 	if err != nil {
-		return nil
+		return crumbs
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return crumbs
 	}
 
-	byLog := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -79,37 +107,53 @@ func ompTerminalSessions() map[string]string {
 		if logPath == "" {
 			continue
 		}
-		if _, seen := byLog[logPath]; seen {
-			byLog[logPath] = ompAmbiguousTerminal
+
+		crumbs.logOf[entry.Name()] = logPath
+		if _, seen := crumbs.terminalOf[logPath]; seen {
+			crumbs.terminalOf[logPath] = ompAmbiguousTerminal
 			continue
 		}
-		byLog[logPath] = entry.Name()
+		crumbs.terminalOf[logPath] = entry.Name()
 	}
-	return byLog
+	return crumbs
 }
 
 // pairOMPProcess decides, for one log file, whether its session is running,
 // which pid is its own, and whether that pid is certain.
 //
-//   - The log's breadcrumb names a terminal, and one of the directory's omp
-//     processes is attached to that terminal: that process, confident.
-//   - Some omp process is running in the directory but none can be tied to this
-//     log: running, no pid. Deliberately generous, exactly as the Claude Code
-//     path is -- a wrong "running" self-corrects to Waiting through content
+//   - The log's breadcrumb names a terminal and one of the directory's omp
+//     processes is attached to it: that process, confident.
+//   - Every process in the directory is claimed by a *different* log's
+//     breadcrumb: not running. csm has exact evidence those processes belong
+//     elsewhere, so the generous fallback below would keep an exited session in
+//     the active list until its log aged out of the freshness window. This
+//     mirrors pairProcess's "registry present and every pid accounted for ->
+//     not running".
+//   - Otherwise, some process is running here and none can be tied to this log:
+//     running, no pid. Deliberately generous, exactly as the Claude Code path
+//     is -- a wrong "running" self-corrects to Waiting through content
 //     staleness, whereas a wrong "inactive" hides a live session entirely.
-//   - No omp process in the directory: not running.
-func pairOMPProcess(logFile string, pids []int, breadcrumbs map[string]string,
+//   - No omp process in the directory at all: not running.
+func pairOMPProcess(logFile string, pids []int, crumbs ompBreadcrumbs,
 	procByPID map[int]harnessProcess) (isRunning bool, pid int, confident bool) {
 	if len(pids) == 0 {
 		return false, 0, false
 	}
 
-	if terminal := breadcrumbs[logFile]; terminal != ompAmbiguousTerminal {
-		for _, candidate := range pids {
-			if procByPID[candidate].tty == terminal {
-				return true, candidate, true
-			}
+	mine := crumbs.terminalOf[logFile]
+	claimedElsewhere := 0
+	for _, candidate := range pids {
+		terminal := ompTerminalID(procByPID[candidate].tty)
+		if terminal != ompAmbiguousTerminal && terminal == mine {
+			return true, candidate, true
 		}
+		if claimed, ok := crumbs.logOf[terminal]; ok && claimed != logFile {
+			claimedElsewhere++
+		}
+	}
+
+	if claimedElsewhere == len(pids) {
+		return false, 0, false
 	}
 
 	return true, 0, false

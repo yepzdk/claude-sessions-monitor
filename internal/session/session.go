@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -377,7 +378,7 @@ func encodeProjectPath(path string) string {
 	}, path)
 }
 
-// Discover finds all active Claude sessions
+// Discover finds every live and recently-live session, from both agents.
 func Discover() ([]Session, error) {
 	// Serve a recent result if the TUI loop, SSE hub, and/or HTTP handlers are
 	// all refreshing within the same tick.
@@ -390,8 +391,14 @@ func Discover() ([]Session, error) {
 		return nil, err
 	}
 
+	// A missing projects directory means Claude Code has never run here, which
+	// is an ordinary state now that csm watches a second agent: aborting on it
+	// meant an omp-only machine got "Cannot read sessions: no such file or
+	// directory" on every tick and never reached discoverOMP below. Any other
+	// read error still aborts — that one is a real fault, and reporting no
+	// sessions would be indistinguishable from having none.
 	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
 
@@ -558,23 +565,28 @@ func statusPriority(s Status) int {
 // excluding logs from sessions that ended hours or days ago.
 const activeLogFreshnessWindow = 30 * time.Minute
 
-// findActiveLogs returns all active JSONL log files for a project directory.
-// If runningCount > 0, returns at least that many files (the most recently
-// modified), plus any additional files modified within activeLogFreshnessWindow.
-// If runningCount == 0, returns only the single most recent file.
-func findActiveLogs(dir string, runningCount int) ([]string, error) {
+// logCandidate is one session log a directory holds, with the stat fields the
+// selection and the parse cache both need.
+type logCandidate struct {
+	path    string
+	modTime time.Time
+	size    int64
+}
+
+// listLogsByRecency returns a project directory's session logs, newest first.
+//
+// Split out from findActiveLogs so a caller that needs to look at the newest log
+// before it knows how many processes are running -- discoverOMP, which reads the
+// bucket's working directory out of that log -- does not have to scan the
+// directory twice per tick. It also hands back modTime and size, so that caller
+// can go straight to the parse cache instead of stat-ing again.
+func listLogsByRecency(dir string) ([]logCandidate, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	type logEntry struct {
-		path    string
-		modTime time.Time
-		size    int64
-	}
-
-	var logs []logEntry
+	var logs []logCandidate
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -590,21 +602,27 @@ func findActiveLogs(dir string, runningCount int) ([]string, error) {
 		if err != nil {
 			continue
 		}
-		logs = append(logs, logEntry{
+		logs = append(logs, logCandidate{
 			path:    filepath.Join(dir, entry.Name()),
 			modTime: info.ModTime(),
 			size:    info.Size(),
 		})
 	}
 
-	if len(logs) == 0 {
-		return nil, nil
-	}
-
-	// Sort by modification time, newest first
 	sort.Slice(logs, func(i, j int) bool {
 		return logs[i].modTime.After(logs[j].modTime)
 	})
+	return logs, nil
+}
+
+// selectActiveLogs picks which of a directory's logs are worth parsing.
+// If runningCount > 0, it returns at least that many (the most recently
+// modified), plus any additional file modified within activeLogFreshnessWindow.
+// If runningCount == 0, it returns only the single most recent file.
+func selectActiveLogs(logs []logCandidate, runningCount int) []string {
+	if len(logs) == 0 {
+		return nil
+	}
 
 	if runningCount == 0 {
 		// No running processes: return only the most recent file
@@ -613,13 +631,13 @@ func findActiveLogs(dir string, runningCount int) ([]string, error) {
 			if l.size > 0 {
 				// Check if there's an even newer empty file
 				if logs[0].size == 0 && logs[0].modTime.After(l.modTime) {
-					return []string{logs[0].path}, nil
+					return []string{logs[0].path}
 				}
-				return []string{l.path}, nil
+				return []string{l.path}
 			}
 		}
 		// All empty, return newest
-		return []string{logs[0].path}, nil
+		return []string{logs[0].path}
 	}
 
 	// Running processes: collect active logs
@@ -640,7 +658,16 @@ func findActiveLogs(dir string, runningCount int) ([]string, error) {
 		}
 	}
 
-	return result, nil
+	return result
+}
+
+// findActiveLogs returns all active JSONL log files for a project directory.
+func findActiveLogs(dir string, runningCount int) ([]string, error) {
+	logs, err := listLogsByRecency(dir)
+	if err != nil {
+		return nil, err
+	}
+	return selectActiveLogs(logs, runningCount), nil
 }
 
 // parsedLog holds everything a single pass over a JSONL log file yields.

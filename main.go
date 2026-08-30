@@ -44,14 +44,7 @@ func main() {
 	webMode := flag.Bool("web", false, "Start web dashboard server")
 	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
 	webPort := flag.Int("port", 9847, "Port for web dashboard")
-	only := flag.String("only", "", "Show only one agent's sessions: claude or omp")
 	flag.Parse()
-
-	filter, err := parseHarnessFilter(*only)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
 
 	// Check for conflicting flags
 	if *webMode && *webOnly {
@@ -81,7 +74,6 @@ func main() {
 		ui.RenderHistory(sessions, *historyDays, false, "")
 		return
 	}
-
 	// Handle list mode
 	if *listOnce {
 		sessions, err := session.Discover()
@@ -89,7 +81,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error discovering sessions: %v\n", err)
 			os.Exit(1)
 		}
-		sessions = ui.FilterByHarness(sessions, filter)
 
 		if *jsonOutput {
 			if err := ui.RenderJSON(sessions); err != nil {
@@ -108,27 +99,17 @@ func main() {
 	}
 
 	// Live view mode
-	os.Exit(runLiveView(*interval, *webMode, *webPort, filter))
+	os.Exit(runLiveView(*interval, *webMode, *webPort))
 }
 
-// parseHarnessFilter turns the -only flag into a harness. An unknown value is an
-// error rather than a silent "show everything": a typo that quietly widened the
-// view would be indistinguishable from the flag working.
-func parseHarnessFilter(only string) (session.Harness, error) {
-	switch only {
-	case "":
-		return "", nil
-	case string(session.HarnessClaude):
-		return session.HarnessClaude, nil
-	case string(session.HarnessOMP):
-		return session.HarnessOMP, nil
-	default:
-		return "", fmt.Errorf("unknown -only value %q; want claude or omp", only)
-	}
-}
-
-// nextHarnessFilter cycles the live view's filter: everything, then each agent
-// in turn.
+// nextHarnessFilter cycles the live view's harness filter: everything, then each
+// agent in turn.
+//
+// This is a view filter and deliberately not a CLI flag. Discovery always covers
+// every agent on the machine -- that is the point of the tool -- and which rows
+// you want to read right now is a property of the moment, not of how csm was
+// started. A flag would also have had to mean something for the web dashboard,
+// which has no key to press to undo it and serves more than one client.
 func nextHarnessFilter(current session.Harness) session.Harness {
 	switch current {
 	case "":
@@ -153,7 +134,7 @@ const (
 // the terminal is on the alternate screen with echo off from the moment the
 // defer below is registered, and an exit that skipped it would leave the user
 // at an invisible prompt.
-func runLiveView(interval time.Duration, webEnabled bool, webPort int, filter session.Harness) (code int) {
+func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int) {
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -211,6 +192,13 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, filter se
 	// Sessions as of the last render, so a keypress acts on exactly the rows
 	// the user can see rather than re-discovering and racing the ticker.
 	var visible []session.Session
+	// Harness filter, cycled with `f`. Starts at "" — every agent — because
+	// tracking all of them is the default and the filter is only a reading aid.
+	var filter session.Harness
+	// Whether the last render saw more than one agent among the *visible* rows.
+	// The `f` handler reads it so the key is inert on a single-agent machine,
+	// which is what the footer promises by not advertising it there.
+	mixed := false
 
 	// Claude status: fetch on-demand (user interaction), use cached on ticker
 	var lastClaudeStatus *session.ClaudeStatus
@@ -266,9 +254,13 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, filter se
 			if err != nil {
 				msg = "Cannot read sessions: " + err.Error()
 			}
-			// Whether to tag rows with their agent is decided before filtering,
-			// so narrowing to one agent still says which one is on screen.
-			mixed := ui.MixedHarnesses(sessions)
+			// Decided over the rows the frame will actually draw, and before the
+			// filter: RenderLive only shows ActiveSessions, so counting the
+			// Inactive ones tagged every row `[cc]` and advertised `f` on a
+			// Claude-only machine that merely had one stale omp bucket on disk.
+			// Taking it before the filter keeps the tag stable while `f` cycles,
+			// so the rows do not re-flow under the user.
+			mixed = ui.MixedHarnesses(ui.ActiveSessions(sessions))
 			sessions = ui.FilterByHarness(sessions, filter)
 			// Sessions come and go between frames, so the selection is clamped
 			// on every render rather than only when a key moves it.
@@ -366,7 +358,11 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int, filter se
 					render()
 				}
 			case 'f', 'F':
-				if viewMode == ViewModeLive {
+				// Only where the footer offers it. On a single-agent machine the
+				// key used to cycle anyway, landing the user on "No active
+				// sessions." with no footer entry naming the key that gets them
+				// back out.
+				if viewMode == ViewModeLive && mixed {
 					filter = nextHarnessFilter(filter)
 					// The row count changes with the filter, so a selection
 					// carried over would point at a different session.

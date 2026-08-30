@@ -124,13 +124,19 @@ func discoverSubagents(logFile string, pending map[string]bool, isRunning bool) 
 			Blocking:     blocking,
 		}
 
-		if pl, err := cachedParseLogFile(path, info.ModTime(), info.Size(), 100); err == nil {
-			if pl.lastMessage != "" {
-				sa.Task = pl.lastMessage
-			}
-			if !pl.lastEntryTime.IsZero() {
-				sa.LastActivity = pl.lastEntryTime
-			}
+		// A partial parse is still worth reading. cachedParseLogFile returns the
+		// non-fatal error alongside whatever it recovered -- a log with one line
+		// over maxLogLineBytes after N good entries -- and gating on err == nil
+		// discarded those entries. Since the error is cached with the parse and
+		// the oversized line never leaves the file, that discarded this
+		// subagent's Task and LastActivity on every tick, not just the first.
+		// A fatal parse returns a zero parsedLog, and the checks below skip it.
+		pl, _ := cachedParseLogFile(path, info.ModTime(), info.Size(), 100)
+		if pl.lastMessage != "" {
+			sa.Task = pl.lastMessage
+		}
+		if !pl.lastEntryTime.IsZero() {
+			sa.LastActivity = pl.lastEntryTime
 		}
 
 		subagents = append(subagents, sa)

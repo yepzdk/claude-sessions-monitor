@@ -90,6 +90,14 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 			if s.Status != session.StatusInactive {
 				continue
 			}
+			// DiscoverHistory reads Claude Code's projects directory only, and
+			// QuickSessionStats below counts Claude Code's entry shapes
+			// (`"type":"user"`, `"gitBranch":"`), so an omp log yields a row
+			// with no first prompt and zero messages. The terminal's -history
+			// heading says "(Claude Code)"; this list has to mean the same.
+			if s.Harness != session.HarnessClaude {
+				continue
+			}
 			if s.LastActivity.Before(cutoff) {
 				continue
 			}

@@ -258,9 +258,14 @@ func TestPairOMPProcessConfidentOnlyOnTerminalMatch(t *testing.T) {
 		41: {pid: 41, harness: HarnessOMP, tty: "ttys003"},
 		42: {pid: 42, harness: HarnessOMP, tty: "ttys009"},
 	}
+	crumbs := func(terminal string) ompBreadcrumbs {
+		return ompBreadcrumbs{
+			terminalOf: map[string]string{logFile: terminal},
+			logOf:      map[string]string{terminal: logFile},
+		}
+	}
 
-	running, pid, confident := pairOMPProcess(logFile, []int{41, 42},
-		map[string]string{logFile: "ttys009"}, procs)
+	running, pid, confident := pairOMPProcess(logFile, []int{41, 42}, crumbs("ttys009"), procs)
 	if !running || pid != 42 || !confident {
 		t.Errorf("got (%v, %d, %v), want (true, 42, true) for a matching terminal",
 			running, pid, confident)
@@ -268,17 +273,111 @@ func TestPairOMPProcessConfidentOnlyOnTerminalMatch(t *testing.T) {
 
 	// A session under tmux or zellij gets an env-derived terminal id that ps
 	// cannot see, and a headless process has no terminal at all.
-	running, pid, confident = pairOMPProcess(logFile, []int{41, 42},
-		map[string]string{logFile: "%pane-7"}, procs)
+	running, pid, confident = pairOMPProcess(logFile, []int{41, 42}, crumbs("%pane-7"), procs)
 	if !running || pid != 0 || confident {
 		t.Errorf("got (%v, %d, %v), want (true, 0, false) when no process owns that terminal",
 			running, pid, confident)
 	}
 
-	running, pid, confident = pairOMPProcess(logFile, nil, nil, procs)
+	running, pid, confident = pairOMPProcess(logFile, nil, ompBreadcrumbs{}, procs)
 	if running || pid != 0 || confident {
 		t.Errorf("got (%v, %d, %v), want (false, 0, false) with no process in the directory",
 			running, pid, confident)
+	}
+}
+
+// The title slot is what omp rewrites on rename; the header keeps whatever the
+// session was first called. Two real files on the machine this was written on
+// already disagree, and they only showed the right title because a later
+// title_change happened to land in the kept tail.
+func TestParseOMPLogFilePrefersTitleSlotOverHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "2026-08-29T07-16-43-905Z_01a04c60.jsonl")
+	lines := []string{
+		`{"type":"title","v":1,"title":"Renamed later","source":"auto","pad":"   "}`,
+		`{"type":"session","version":3,"id":"01a04c60","timestamp":"` + ts(-time.Hour) +
+			`","cwd":"/work/api","title":"Original name"}`,
+		assistant(ts(-time.Minute), "stop", "Done."),
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pl, err := parseOMPLogFile(path, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.title != "Renamed later" {
+		t.Errorf("title = %q, want the slot's value; the header's is stale", pl.title)
+	}
+}
+
+// A session whose own log cannot be read still needs a project name and a
+// directory. discoverOMP knows the bucket's cwd from its newest log, so it is
+// passed in; the fallback shows the bucket verbatim rather than running it
+// through Claude Code's decoder, which turns
+// `-Projects-personal-claude-sessions-monitor` into
+// `Projects/personal/claude/sessions/monitor`.
+func TestOMPProjectName(t *testing.T) {
+	const bucket = "-Projects-personal-claude-sessions-monitor"
+
+	if got := ompProjectName("/Users/dev/Projects/personal/claude-sessions-monitor", bucket); got !=
+		"personal/claude-sessions-monitor" {
+		t.Errorf("with a cwd: got %q", got)
+	}
+
+	got := ompProjectName("", bucket)
+	if strings.Contains(got, "claude/sessions/monitor") {
+		t.Errorf("fallback mangled the bucket name into a fake path: %q", got)
+	}
+	if got != "Projects-personal-claude-sessions-monitor" {
+		t.Errorf("fallback = %q, want the bucket name verbatim", got)
+	}
+}
+
+// omp names the breadcrumb after ttyname(3) minus /dev/, with the separators
+// replaced: /dev/pts/3 is `pts-3` on disk while Linux ps prints `pts/3`.
+// Comparing the two raw matches on macOS and never on Linux, so every omp
+// session on the shipped Linux binaries paired as running-with-no-pid: no jump,
+// and --kill-ghosts skipping every omp ghost.
+func TestPairOMPProcessMatchesLinuxTerminalNames(t *testing.T) {
+	const logFile = "/omp/sessions/-work-api/2026_abc.jsonl"
+	procs := map[int]harnessProcess{55: {pid: 55, harness: HarnessOMP, tty: "pts/3"}}
+	crumbs := ompBreadcrumbs{
+		terminalOf: map[string]string{logFile: "pts-3"},
+		logOf:      map[string]string{"pts-3": logFile},
+	}
+
+	running, pid, confident := pairOMPProcess(logFile, []int{55}, crumbs, procs)
+	if !running || pid != 55 || !confident {
+		t.Errorf("got (%v, %d, %v), want (true, 55, true): ps says pts/3, omp writes pts-3",
+			running, pid, confident)
+	}
+}
+
+// The generous "some process is running here" fallback must not fire when csm
+// has exact evidence that every process in the directory belongs to another log.
+// One process, two candidate logs, a breadcrumb naming the live one: the other
+// log exited and must leave the active list now, not when its file ages out of
+// activeLogFreshnessWindow.
+func TestPairOMPProcessRefusesFullyClaimedProcesses(t *testing.T) {
+	const live = "/omp/sessions/-work-api/live.jsonl"
+	const exited = "/omp/sessions/-work-api/exited.jsonl"
+	procs := map[int]harnessProcess{7: {pid: 7, harness: HarnessOMP, tty: "ttys003"}}
+	crumbs := ompBreadcrumbs{
+		terminalOf: map[string]string{live: "ttys003"},
+		logOf:      map[string]string{"ttys003": live},
+	}
+
+	if running, pid, confident := pairOMPProcess(live, []int{7}, crumbs, procs); !running ||
+		pid != 7 || !confident {
+		t.Errorf("live log: got (%v, %d, %v), want (true, 7, true)", running, pid, confident)
+	}
+
+	running, pid, confident := pairOMPProcess(exited, []int{7}, crumbs, procs)
+	if running || pid != 0 || confident {
+		t.Errorf("exited log: got (%v, %d, %v), want (false, 0, false); the only process "+
+			"is confidently another log's", running, pid, confident)
 	}
 }
 
@@ -309,11 +408,14 @@ func TestOMPTerminalSessionsDropsAmbiguousLog(t *testing.T) {
 
 	got := ompTerminalSessions()
 
-	if got[shared] != ompAmbiguousTerminal {
-		t.Errorf("shared log resolved to %q; two terminals claim it", got[shared])
+	if got.terminalOf[shared] != ompAmbiguousTerminal {
+		t.Errorf("shared log resolved to %q; two terminals claim it", got.terminalOf[shared])
 	}
-	if got[own] != "ttys003" {
-		t.Errorf("own log resolved to %q, want ttys003", got[own])
+	if got.terminalOf[own] != "ttys003" {
+		t.Errorf("own log resolved to %q, want ttys003", got.terminalOf[own])
+	}
+	if got.logOf["ttys003"] != own {
+		t.Errorf("reverse map missing ttys003 -> %q", own)
 	}
 }
 
@@ -400,4 +502,38 @@ func mustEntries(t *testing.T, lines ...string) []ompEntry {
 			len(pl.entries), len(lines))
 	}
 	return pl.entries
+}
+
+// An omp-only machine has no ~/.claude/projects. Discover used to abort on the
+// ENOENT before it ever reached discoverOMP, so the dashboard showed "Cannot
+// read sessions" on every tick and not one of the sessions it was pointed at.
+func TestDiscoverReportsOMPSessionsWithoutClaudeDirectory(t *testing.T) {
+	resetParseCache()
+	clearScanCaches()
+	t.Cleanup(clearScanCaches)
+
+	// A home with no .claude directory at all.
+	t.Setenv("HOME", t.TempDir())
+
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	t.Setenv(ompSessionsDirEnv, sessions)
+	ompLog(t, filepath.Join(sessions, "-work-api"), "2026-08-29T07-16-43-905Z_01a04c60.jsonl",
+		assistant(ts(-2*time.Minute), "stop", "Done."),
+	)
+
+	original := listProcesses
+	t.Cleanup(func() { listProcesses = original })
+	listProcesses = func() ([]byte, error) { return nil, nil }
+
+	got, err := Discover()
+	if err != nil {
+		t.Fatalf("Discover failed with no Claude projects directory: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sessions, want the 1 omp session: %+v", len(got), got)
+	}
+	if got[0].Harness != HarnessOMP {
+		t.Errorf("Harness = %q, want %q", got[0].Harness, HarnessOMP)
+	}
 }

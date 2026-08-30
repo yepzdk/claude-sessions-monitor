@@ -117,7 +117,7 @@ func TestApplyParsedLogDerivesIsGhost(t *testing.T) {
 func TestParsePSOutputReadsColumns(t *testing.T) {
 	out := []byte(`  101     1 ttys003 /opt/homebrew/bin/claude --resume
   202  4321 ttys004 claude
-  303     1 ?? bun /Users/dev/.bun/bin/omp
+  303     1 pts/3 bun /Users/dev/.bun/bin/omp
   404   303 ?? /bin/zsh -l
 garbage line
   505     1 ttys009
@@ -126,7 +126,10 @@ garbage line
 	want := []psLine{
 		{pid: 101, ppid: 1, tty: "ttys003", argv: "/opt/homebrew/bin/claude --resume"},
 		{pid: 202, ppid: 4321, tty: "ttys004", argv: "claude"},
-		{pid: 303, ppid: 1, tty: "??", argv: "bun /Users/dev/.bun/bin/omp"},
+		// Linux prints pts/3; omp's breadcrumb for the same terminal is pts-3.
+		// The tty is kept as ps reports it and normalised where it is compared
+		// (ompTerminalID), so this column stays the real device name.
+		{pid: 303, ppid: 1, tty: "pts/3", argv: "bun /Users/dev/.bun/bin/omp"},
 		{pid: 404, ppid: 303, tty: "??", argv: "/bin/zsh -l"},
 	}
 	if len(rows) != len(want) {

@@ -31,6 +31,49 @@ func resetParseCache() {
 	parseCacheMu.Unlock()
 }
 
+// The cache returns the non-fatal error on every hit, not just the parse that
+// produced it, so the Degraded marker stays put instead of flickering. Callers
+// must therefore read the partial result rather than gate on err == nil --
+// subagent.go did, and a log with one oversized line lost its Task and
+// LastActivity permanently, since the oversized line never leaves the file.
+func TestCachedParseKeepsPartialResultWithItsError(t *testing.T) {
+	resetParseCache()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	// One good entry, then a line past the limit passed below.
+	content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}` +
+		"\n" + `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` +
+		strings.Repeat("x", 4096) + `"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pl, parseErr := parseLogFileWithLimit(path, 100, 1024)
+	if parseErr == nil {
+		t.Fatal("expected a scan error for the oversized line")
+	}
+	if len(pl.entries) == 0 {
+		t.Fatal("expected the entries before the oversized line to survive")
+	}
+
+	// Both the miss and the subsequent hit must carry the partial result.
+	for _, pass := range []string{"miss", "hit"} {
+		got, err := cachedParseFile(parseCache, path, info.ModTime(), info.Size(),
+			func() (parsedLog, error) { return parseLogFileWithLimit(path, 100, 1024) },
+			func(pl parsedLog) int { return len(pl.entries) })
+		if err == nil {
+			t.Errorf("%s: error dropped; the row would lose its [?] marker", pass)
+		}
+		if len(got.entries) == 0 {
+			t.Errorf("%s: partial result dropped; the caller has nothing to show", pass)
+		}
+	}
+}
+
 const sampleLog = `{"type":"summary","summary":"Fix the bug"}
 {"type":"user","cwd":"/Users/me/Projects/org/proj","gitBranch":"main","timestamp":"2026-06-01T10:00:00Z","message":{"role":"user","content":"do the thing"}}
 {"type":"assistant","timestamp":"2026-06-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"On it"}]}}

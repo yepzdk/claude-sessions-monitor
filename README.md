@@ -121,10 +121,6 @@ csm -l
 # Output as JSON
 csm -l -json
 
-# Show only one agent's sessions
-csm -only omp
-csm -l -only claude
-
 # Show session history (last 7 days)
 csm -history
 
@@ -174,9 +170,12 @@ Discovery needs no configuration: csm looks for `~/.claude/projects/` and
 in one list, sorted by who needs you soonest, and rows are tagged `[cc]` or
 `[omp]` when both agents appear together.
 
-`-only claude` / `-only omp` narrows the list, and `f` cycles the same filter in
-the live view. It is a display filter — both agents are always scanned, so
-toggling it can never hide a session csm failed to find.
+Press `f` in the live view to cycle which agent's rows you are reading: all →
+Claude Code → Oh My Pi. It is a reading aid, not a discovery switch — both
+agents are always scanned, so a filter can never hide a session csm failed to
+find, and it resets when csm restarts. There is no flag for it: tracking every
+agent on the machine is the point, and the web dashboard has no key to press to
+undo a filter you forgot you set.
 
 Oh My Pi relocates its session store for `--profile` and `--session-dir`. Point
 csm at a non-default store with:

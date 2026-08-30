@@ -205,7 +205,11 @@ func parseOMPLogFileWithLimit(logFile string, keep int, maxLineBytes int) (ompPa
 			continue
 		case "session":
 			pl.cwd, pl.sessionID = entry.CWD, entry.ID
-			if entry.Title != "" {
+			// The slot is the copy omp rewrites on rename; the header keeps the
+			// original. Letting the header win showed a stale title whenever the
+			// rename was recorded outside the kept tail -- two files on the
+			// machine this was written on already disagree.
+			if pl.title == "" && entry.Title != "" {
 				pl.title = entry.Title
 			}
 			continue
@@ -255,37 +259,6 @@ func ompLastAssistant(entries []ompEntry) (text, model string) {
 	return "", model
 }
 
-// ompHeaderCWD reads the working directory from a log's header without parsing
-// the whole file.
-//
-// omp encodes the directory into the bucket name, but that encoding is
-// home-relative, has had several spellings across versions, and is migrated
-// best-effort on access. The header is the authoritative copy, and reading the
-// first couple of lines of one file per bucket is cheaper than tracking an
-// encoding csm does not own.
-func ompHeaderCWD(logFile string) string {
-	file, err := os.Open(logFile)
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = file.Close() }()
-
-	scanner := bufio.NewScanner(file)
-	// The title slot is a fixed 256 bytes and the header is short; a handful of
-	// lines is enough to find it without the multi-MB line allowance.
-	scanner.Buffer(make([]byte, 0, 8*1024), 64*1024)
-	for i := 0; scanner.Scan() && i < 4; i++ {
-		var entry ompEntry
-		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
-			continue
-		}
-		if entry.Type == "session" {
-			return entry.CWD
-		}
-	}
-	return ""
-}
-
 // discoverOMP returns the omp sessions worth showing, given the process scan
 // Discover already made. liveFiles collects the logs it parsed so the caller can
 // prune the parse cache.
@@ -307,10 +280,16 @@ func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Sessio
 
 	// omp buckets logs by its own encoding of the working directory, so the
 	// processes are keyed by the raw cwd and joined to a bucket through the cwd
-	// recorded in that bucket's header.
+	// recorded in that bucket's newest log.
 	pidsByCWD := pidsByDir(procs, HarnessOMP, func(cwd string) string { return cwd })
 	procByPID := procsByPID(procs)
-	breadcrumbs := ompTerminalSessions()
+	// Breadcrumbs only matter for pairing a log to a pid, so with no omp process
+	// running there is nothing for them to decide and the directory read is pure
+	// cost on every tick.
+	var breadcrumbs ompBreadcrumbs
+	if len(pidsByCWD) > 0 {
+		breadcrumbs = ompTerminalSessions()
+	}
 
 	var sessions []Session
 	for _, bucket := range buckets {
@@ -319,25 +298,21 @@ func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Sessio
 		}
 		dir := filepath.Join(sessionsDir, bucket.Name())
 
-		// The newest log identifies the bucket's directory, which is what says
-		// how many processes are running in it. Only then can findActiveLogs
-		// decide how many logs are candidates.
-		newest, err := findActiveLogs(dir, 0)
-		if err != nil || len(newest) == 0 {
+		// One directory scan. The newest log names the working directory this
+		// bucket belongs to, which is what says how many processes are running
+		// in it -- and only then can the selection know how many logs count as
+		// candidates. Reading the cwd through the parse cache means the header
+		// costs nothing: it is the same entry the full parse below reuses.
+		logs, err := listLogsByRecency(dir)
+		if err != nil || len(logs) == 0 {
 			continue
 		}
-		cwd := ompHeaderCWD(newest[0])
+		newest := logs[0]
+		header, _ := cachedParseOMPLogFile(newest.path, newest.modTime, newest.size)
+		cwd := header.cwd
 		pids := pidsByCWD[cwd]
 
-		logFiles := newest
-		if len(pids) > 0 {
-			logFiles, err = findActiveLogs(dir, len(pids))
-			if err != nil || len(logFiles) == 0 {
-				continue
-			}
-		}
-
-		for _, logFile := range logFiles {
+		for _, logFile := range selectActiveLogs(logs, len(pids)) {
 			liveFiles[logFile] = struct{}{}
 
 			isRunning, pid, pidConfident := pairOMPProcess(logFile, pids, breadcrumbs, procByPID)
@@ -345,7 +320,7 @@ func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Sessio
 			// pid the session cannot be a ghost, which is the safe side.
 			orphaned := procByPID[pid].orphan
 
-			session, err := parseOMPSession(bucket.Name(), logFile, isRunning, pid, orphaned)
+			session, err := parseOMPSession(bucket.Name(), cwd, logFile, isRunning, pid, orphaned)
 			if err != nil {
 				continue
 			}
@@ -358,10 +333,32 @@ func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Sessio
 	return sessions
 }
 
-// parseOMPSession parses an omp session from its log file.
-func parseOMPSession(bucketName, logFile string, isRunning bool, pid int, orphaned bool) (Session, error) {
+// ompProjectName labels a session.
+//
+// The cwd from the log header is authoritative. When it could not be read, the
+// bucket name is shown verbatim rather than decoded: omp's bucket encoding is
+// lossy -- a dash inside a directory name is indistinguishable from a separator
+// -- and decodeProjectName is Claude Code's decoder, which finds none of its
+// markers in a home-relative omp bucket and turns
+// `-Projects-personal-claude-sessions-monitor` into
+// `Projects/personal/claude/sessions/monitor`. A verbatim bucket name is at
+// least true.
+func ompProjectName(cwd, bucketName string) string {
+	if cwd != "" {
+		return extractProjectName(cwd)
+	}
+	return strings.TrimPrefix(bucketName, "-")
+}
+
+// parseOMPSession parses an omp session from its log file. cwd is the working
+// directory discoverOMP resolved for the bucket, passed in so a session whose
+// own log cannot be read still carries a real project name and a directory jump
+// can use.
+func parseOMPSession(bucketName, cwd, logFile string, isRunning bool, pid int,
+	orphaned bool) (Session, error) {
 	session := Session{
-		Project:     decodeProjectName(bucketName),
+		Project:     ompProjectName(cwd, bucketName),
+		CWD:         cwd,
 		LogFile:     logFile,
 		Status:      StatusInactive,
 		ProjectPath: bucketName,
