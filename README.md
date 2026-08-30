@@ -17,7 +17,7 @@ Oh My Pi — across multiple projects.
 ## Features
 
 - **Live dashboard** showing all active sessions from Claude Code and Oh My Pi in one list
-- **Both agents, auto-detected** — no flag to set. csm reads `~/.claude/projects/` and `~/.omp/agent/sessions/`, and skips whichever it doesn't find. Rows carry a `[cc]` / `[omp]` tag only when both agents are on screen
+- **Both agents, auto-detected** — no flag to set. csm reads `~/.claude/projects/` and `~/.omp/agent/sessions/`, and skips whichever it doesn't find. The origin column names the agent alongside what launched it (`omp Ghostty`, `cc Zed`) when both are on screen
 - **Web dashboard** with `--web` flag for rich session inspection in the browser
 - **History view** to browse past sessions with activity summaries
 - **Process detection** distinguishes running vs inactive sessions
@@ -27,8 +27,8 @@ Oh My Pi — across multiple projects.
 - **Status indicators**: Working, Needs Input, Waiting
 - **Usage and history views** with API quota bars and per-session token breakdown (press `u`). Both are labelled *(Claude Code)*: the quota comes from Anthropic's OAuth endpoint and both read Claude Code's logs, so Oh My Pi sessions do not appear in them
 - **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal tab to the front (macOS + Ghostty)
-- **Origin column** showing whether each session was launched from a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the agent process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end
-- **Session badges**: Agent [cc] / [omp], Unsandboxed [!S], Ghost [ghost], Incomplete data [?]
+- **Origin column** naming which agent a session belongs to and what launched it: a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains); detected from the agent process's parent chain + environment and cached to `~/.claude-monitor/origins/` so the badge survives session end. The agent prefix appears only when both are on screen, and falls back to the project column on terminals too narrow for the origin column
+- **Session badges**: Unsandboxed [!S], Ghost [ghost], Incomplete data [?]
 - **Single static binary** - no runtime dependencies, easy to install
 - **Cross-platform** - macOS and Linux
 
@@ -167,8 +167,11 @@ disappears — no configuration needed.
 
 Discovery needs no configuration: csm looks for `~/.claude/projects/` and
 `~/.omp/agent/sessions/` and reports whichever exist. Both kinds of session land
-in one list, sorted by who needs you soonest, and rows are tagged `[cc]` or
-`[omp]` when both agents appear together.
+in one list, sorted by who needs you soonest. When both are on screen, the
+origin column names the agent next to what launched it — `omp Ghostty`,
+`cc Zed` — because both answer the same question about where a session came
+from. On a terminal too narrow for that column the agent moves into the project
+column instead of disappearing.
 
 Press `f` in the live view to cycle which agent's rows you are reading: all →
 Claude Code → Oh My Pi. It is a reading aid, not a discovery switch — both
@@ -228,12 +231,12 @@ Coding Sessions
 
 ● Working: 1  ▲ Needs Input: 1  ◉ Waiting: 0
 
-STATUS          PROJECT                                  ORIGIN     CONTEXT          LAST ACTIVITY
-──────────────────────────────────────────────────────────────────────────────────────────────────
-● Working       myorg/api-server [cc] @main              Ghostty    ███████░░░ 68%   Now
+STATUS          PROJECT                                  ORIGIN         CONTEXT          LAST ACTIVITY
+──────────────────────────────────────────────────────────────────────────────────────────────────────
+● Working       myorg/api-server @main                   cc  Ghostty    ███████░░░ 68%   Now
   Implementing auth middleware
 
-▲ Needs Input   work/api-gateway [omp] "Rate limiting"   Ghostty    -                12s ago
+▲ Needs Input   work/api-gateway "Rate limiting"         omp Ghostty    -                12s ago
   Using: bash
 
 ↑↓: select | Enter: jump | h: history | u: usage | f: filter | Ctrl+C: quit

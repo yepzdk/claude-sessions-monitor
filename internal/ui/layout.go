@@ -2,8 +2,12 @@ package ui
 
 // Column width constraints for session table
 const (
-	fixedStatusWidth   = 14 // "● Needs Input" = 13 chars + 1 padding
-	fixedOriginWidth   = 10 // "Claude Desktop" truncated; most origins fit in 9
+	fixedStatusWidth = 14 // "● Needs Input" = 13 chars + 1 padding
+	// "omp " / "cc  " prefix (4) + the origin name. 10 truncated "Claude
+	// Desktop" and "GNOME Terminal" already; the harness sits here rather than
+	// in the project column because it is provenance too -- which agent, and
+	// what launched it, read as one fact.
+	fixedOriginWidth   = 14
 	fixedContextWidth  = 21 // progress bar (10) + " 100%" (5) + " (1M)" suffix (5) + 1 padding
 	fixedActivityWidth = 15 // "LAST ACTIVITY" header + padding
 	minProjectWidth    = 15

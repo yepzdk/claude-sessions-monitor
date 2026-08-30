@@ -7,9 +7,8 @@ import (
 	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
 
-// visibleWidth counts the runes a terminal actually draws, ignoring ANSI
-// colour codes.
-func visibleWidth(s string) int {
+// stripANSI returns what a terminal actually draws, without the colour codes.
+func stripANSI(s string) string {
 	var out []rune
 	inEscape := false
 	for _, r := range s {
@@ -22,7 +21,13 @@ func visibleWidth(s string) int {
 			out = append(out, r)
 		}
 	}
-	return len(out)
+	return string(out)
+}
+
+// visibleWidth counts the runes a terminal actually draws, ignoring ANSI
+// colour codes.
+func visibleWidth(s string) int {
+	return len([]rune(stripANSI(s)))
 }
 
 // The project column is padded to a fixed width. Measuring that padding in
@@ -46,11 +51,81 @@ func TestFormatProjectPadsToRuneWidth(t *testing.T) {
 }
 
 func TestFormatOriginPadsToRuneWidth(t *testing.T) {
-	const width = 10
+	const width = 14
 	for _, display := range []string{"Ghostty", "", "iTerm", "Zed", "Ünicode", "非常長的名字"} {
-		got := visibleWidth(formatOrigin(session.Origin{Display: display}, width))
-		if got != width {
-			t.Errorf("origin %q: visible width = %d, want %d", display, got, width)
+		for _, showHarness := range []bool{false, true} {
+			s := session.Session{
+				Origin:  session.Origin{Display: display},
+				Harness: session.HarnessOMP,
+			}
+			got := visibleWidth(formatOrigin(s, width, showHarness))
+			if got != width {
+				t.Errorf("origin %q (harness=%v): visible width = %d, want %d",
+					display, showHarness, got, width)
+			}
+		}
+	}
+}
+
+// The agent belongs with the origin: both answer "where did this come from".
+// The prefix is padded to a fixed width so a `cc` row and an `omp` row line
+// their origin names up down the column.
+func TestFormatOriginCarriesHarness(t *testing.T) {
+	const width = 14
+	omp := formatOrigin(session.Session{
+		Origin:  session.Origin{Display: "Ghostty", Category: session.OriginTerminal},
+		Harness: session.HarnessOMP,
+	}, width, true)
+	claude := formatOrigin(session.Session{
+		Origin:  session.Origin{Display: "Ghostty", Category: session.OriginTerminal},
+		Harness: session.HarnessClaude,
+	}, width, true)
+
+	if !strings.Contains(omp, "omp") || !strings.Contains(omp, "Ghostty") {
+		t.Errorf("omp cell = %q, want both the agent and the origin", omp)
+	}
+	if !strings.Contains(claude, "cc") {
+		t.Errorf("claude cell = %q, want the agent label", claude)
+	}
+	// Same origin, same column position for the name.
+	if strings.Index(stripANSI(omp), "Ghostty") != strings.Index(stripANSI(claude), "Ghostty") {
+		t.Errorf("origin names do not align: %q vs %q", stripANSI(omp), stripANSI(claude))
+	}
+
+	plain := formatOrigin(session.Session{
+		Origin:  session.Origin{Display: "Ghostty"},
+		Harness: session.HarnessOMP,
+	}, width, false)
+	if strings.Contains(plain, "omp") {
+		t.Errorf("agent shown on a single-agent dashboard: %q", plain)
+	}
+}
+
+// Below originColumnMinTTY the origin column is dropped, and with it the cell
+// the agent now lives in. It has to fall back to the project cell: on a mixed
+// dashboard an untagged row is an ambiguous row, whatever the terminal width.
+func TestRenderSessionRowKeepsHarnessOnNarrowTerminal(t *testing.T) {
+	s := session.Session{
+		Project: "work/api",
+		Status:  session.StatusWorking,
+		Harness: session.HarnessOMP,
+		Origin:  session.Origin{Display: "Ghostty", Category: session.OriginTerminal},
+	}
+
+	wide := calcSessionLayout(120)
+	if wide.origin == 0 {
+		t.Fatal("120 columns should keep the origin column")
+	}
+	narrow := calcSessionLayout(originColumnMinTTY - 1)
+	if narrow.origin != 0 {
+		t.Fatal("below originColumnMinTTY the origin column should be dropped")
+	}
+
+	for name, l := range map[string]sessionLayout{"wide": wide, "narrow": narrow} {
+		var buf strings.Builder
+		renderSessionRow(&buf, s, l, "\n", "  ", true)
+		if !strings.Contains(stripANSI(buf.String()), "omp") {
+			t.Errorf("%s layout lost the agent label:\n%s", name, stripANSI(buf.String()))
 		}
 	}
 }

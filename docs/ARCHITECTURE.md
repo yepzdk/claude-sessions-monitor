@@ -350,10 +350,15 @@ Reuse these instead of writing new ones:
   inject ANSI into the dashboard.
 - `ActiveSessions` — the one filter that decides which rows are shown. Any
   code that addresses a row by index (selection, jump) must use it too.
-- `MixedHarnesses` / `FilterByHarness` — the harness tag renders only in mixed
+- `MixedHarnesses` / `FilterByHarness` — the agent label renders only in mixed
   company, decided *before* the filter is applied so narrowing to one agent
   still says which one is on screen and the rows don't re-flow when `f` is
   pressed. `f` is a display filter; both agents are always scanned.
+- The agent label lives in the origin cell (`formatOrigin`), not the project
+  cell: which agent and what launched it are one fact about where a session came
+  from. `renderSessionRow` moves it back into `formatProject` when the terminal
+  is too narrow for the origin column, because an untagged row on a mixed
+  dashboard is an ambiguous row at any width.
 - `calcSessionLayout` / `calcHistoryLayout` / `calcUsageLayout` in `layout.go`
   — every column width is a named constant there.
 - Pad by `utf8.RuneCountInString`, never `len()`; the row gutter for the

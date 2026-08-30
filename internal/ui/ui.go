@@ -517,26 +517,53 @@ func formatContext(s session.Session, width int) string {
 	return bar
 }
 
-// formatOrigin renders the session origin cell, padded to exactly width visible chars.
-// Returns an empty string when the column is disabled (width == 0).
-func formatOrigin(o session.Origin, width int) string {
+// harnessCellWidth is the room formatOrigin reserves for the agent prefix:
+// the widest label plus a separating space, so origin names stay aligned down
+// the column whichever agent a row belongs to.
+const harnessCellWidth = 4
+
+// formatOrigin renders the session's provenance cell — which agent, and what
+// launched it — padded to exactly width visible chars. Returns an empty string
+// when the column is disabled (width == 0).
+//
+// The agent prefix is dim so the origin name still reads first: the origin is
+// the more variable fact, and the prefix repeats down the column.
+func formatOrigin(s session.Session, width int, showHarness bool) string {
 	if width <= 0 {
 		return ""
 	}
-	text := o.Display
+
+	prefix, prefixLen := "", 0
+	if showHarness && s.Harness != "" {
+		label := harnessLabel(s.Harness)
+		// Padded to a fixed width rather than joined with a single space, so
+		// `cc` and `omp` rows line their origin names up.
+		if pad := harnessCellWidth - 1 - len([]rune(label)); pad > 0 {
+			label += strings.Repeat(" ", pad)
+		}
+		prefix = Dim + label + Reset + " "
+		prefixLen = harnessCellWidth
+	}
+
+	text := s.Origin.Display
 	if text == "" {
 		text = "-"
 	}
 	// Runes, not bytes: slicing by byte can split a multi-byte character in
 	// half and mis-measures the padding.
+	nameWidth := width - prefixLen
+	if nameWidth < 1 {
+		nameWidth = 1
+	}
 	runes := []rune(text)
-	if len(runes) > width {
-		runes = runes[:width]
+	if len(runes) > nameWidth {
+		runes = runes[:nameWidth]
 		text = string(runes)
 	}
-	padding := strings.Repeat(" ", width-len(runes))
+	padding := strings.Repeat(" ", nameWidth-len(runes))
+
 	var color string
-	switch o.Category {
+	switch s.Origin.Category {
 	case session.OriginTerminal:
 		color = Gray
 	case session.OriginIDE:
@@ -546,7 +573,7 @@ func formatOrigin(o session.Origin, width int) string {
 	default:
 		color = Dim
 	}
-	return color + text + Reset + padding
+	return prefix + color + text + Reset + padding
 }
 
 // renderSessionRow renders a single session row using the given layout.
@@ -572,11 +599,15 @@ func renderSessionRow(buf *strings.Builder, s session.Session, l sessionLayout, 
 
 	var row string
 	if l.origin > 0 {
+		// The agent rides in the origin cell: both answer "where did this come
+		// from". When the terminal is too narrow for that column it falls back
+		// to the project cell rather than disappearing -- on a mixed dashboard
+		// an untagged row is an ambiguous row, whatever the width.
 		row = fmt.Sprintf("%s%s %s %s %s %-*s",
 			marker,
 			formatStatus(s.Status, l.status),
-			formatProject(s, l.project, showHarness),
-			formatOrigin(s.Origin, l.origin),
+			formatProject(s, l.project, false),
+			formatOrigin(s, l.origin, showHarness),
 			formatContext(s, l.context),
 			activityWidth, activity)
 	} else {
