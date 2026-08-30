@@ -65,12 +65,21 @@ func isFatalParseError(err error, entryCount int) bool {
 	return err != nil && entryCount == 0
 }
 
+// parsedEntries is what cachedParseFile needs of a parse result: how much of it
+// survived. It exists so the shared cache policy does not take an accessor
+// closure from every caller that would only ever be `len(pl.entries)`.
+type parsedEntries interface {
+	entryCount() int
+}
+
+func (pl parsedLog) entryCount() int    { return len(pl.entries) }
+func (pl ompParsedLog) entryCount() int { return len(pl.entries) }
+
 // cachedParseLogFile returns the parsed log for logFile, reusing a cached parse
 // when the file's (modTime, size) is unchanged since it was last parsed.
 func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int) (parsedLog, error) {
 	return cachedParseFile(parseCache, logFile, modTime, size,
-		func() (parsedLog, error) { return parseLogFile(logFile, keep) },
-		func(pl parsedLog) int { return len(pl.entries) })
+		func() (parsedLog, error) { return parseLogFile(logFile, keep) })
 }
 
 // cachedParseOMPLogFile is cachedParseLogFile for omp's session logs.
@@ -81,15 +90,13 @@ func cachedParseLogFile(logFile string, modTime time.Time, size int64, keep int)
 func cachedParseOMPLogFile(logFile string, modTime time.Time, size int64) (ompParsedLog, error) {
 	const keep = 100
 	return cachedParseFile(ompParseCache, logFile, modTime, size,
-		func() (ompParsedLog, error) { return parseOMPLogFile(logFile, keep) },
-		func(pl ompParsedLog) int { return len(pl.entries) })
+		func() (ompParsedLog, error) { return parseOMPLogFile(logFile, keep) })
 }
 
 // cachedParseFile is the shared cache policy: serve an unchanged file from the
-// map, otherwise parse outside the lock and store. entryCount lets the caller
-// say how much survived a parse error, which is what isFatalParseError needs.
-func cachedParseFile[T any](cache map[string]cachedParse[T], logFile string, modTime time.Time,
-	size int64, parse func() (T, error), entryCount func(T) int) (T, error) {
+// map, otherwise parse outside the lock and store.
+func cachedParseFile[T parsedEntries](cache map[string]cachedParse[T], logFile string,
+	modTime time.Time, size int64, parse func() (T, error)) (T, error) {
 	parseCacheMu.Lock()
 	if c, ok := cache[logFile]; ok && c.size == size && c.modTime.Equal(modTime) {
 		parseCacheMu.Unlock()
@@ -99,7 +106,7 @@ func cachedParseFile[T any](cache map[string]cachedParse[T], logFile string, mod
 
 	// Miss: parse outside the lock (file I/O should not block other lookups).
 	pl, err := parse()
-	if isFatalParseError(err, entryCount(pl)) {
+	if isFatalParseError(err, pl.entryCount()) {
 		var zero T
 		return zero, err
 	}

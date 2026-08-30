@@ -259,15 +259,13 @@ func parsePSOutput(output []byte) []psLine {
 		if err != nil {
 			continue
 		}
-		argv := make([]string, 0, len(fields)-3)
-		for _, f := range fields[3:] {
-			argv = append(argv, string(f))
-		}
 		rows = append(rows, psLine{
 			pid:  pid,
 			ppid: ppid,
 			tty:  string(fields[2]),
-			argv: strings.Join(argv, " "),
+			// One allocation. This runs over every process on the machine,
+			// twice a second.
+			argv: string(bytes.Join(fields[3:], []byte(" "))),
 		})
 	}
 	return rows
@@ -708,6 +706,24 @@ func parseLogFile(logFile string, keep int) (parsedLog, error) {
 	return parseLogFileWithLimit(logFile, keep, maxLogLineBytes)
 }
 
+// newLogScanner returns a line scanner for a JSONL session log, bounded at
+// maxLineBytes.
+//
+// The initial buffer's capacity must not exceed maxLineBytes: bufio.Scanner only
+// grows a token buffer when it needs to, so a capacity already bigger than
+// maxLineBytes would let a token past that limit through untouched. Both
+// harnesses' parsers want exactly this, and a second copy of the reasoning is a
+// second place for it to rot.
+func newLogScanner(file *os.File, maxLineBytes int) *bufio.Scanner {
+	scanner := bufio.NewScanner(file)
+	initialBufSize := 64 * 1024
+	if maxLineBytes < initialBufSize {
+		initialBufSize = maxLineBytes
+	}
+	scanner.Buffer(make([]byte, 0, initialBufSize), maxLineBytes)
+	return scanner
+}
+
 // parseLogFileWithLimit is parseLogFile with the scanner's max-line-size made
 // an explicit parameter, so tests can reproduce an oversized-line scan error
 // without allocating a real maxLogLineBytes-sized line.
@@ -721,16 +737,7 @@ func parseLogFileWithLimit(logFile string, keep int, maxLineBytes int) (parsedLo
 	var pl parsedLog
 	var entries []LogEntry
 
-	scanner := bufio.NewScanner(file)
-	// The initial buffer's capacity must not exceed maxLineBytes: bufio.Scanner
-	// only grows a token buffer when it needs to, so a capacity already bigger
-	// than maxLineBytes would let a token past that limit through untouched.
-	initialBufSize := 64 * 1024
-	if maxLineBytes < initialBufSize {
-		initialBufSize = maxLineBytes
-	}
-	buf := make([]byte, 0, initialBufSize)
-	scanner.Buffer(buf, maxLineBytes)
+	scanner := newLogScanner(file, maxLineBytes)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1092,8 +1099,9 @@ func parseClaudeModel(model string) (family string, major, minor int, ok bool) {
 // GhostThreshold is how long an orphaned process's log must be silent before
 // it is reported as a ghost and --kill-ghosts will offer to terminate it.
 //
-// Being orphaned (see getRunningClaudeDirs) is the primary signal; the hour of
-// silence guards the one legitimate orphan, a headless `claude -p` job whose
+// Being orphaned (harnessProcess.orphan, set by getRunningHarnessProcs) is the
+// primary signal; the hour of silence guards the one legitimate orphan, a
+// headless `claude -p` job whose
 // launching shell has exited but which is still producing output. Waiting
 // longer to reap a true orphan costs some idle memory; reaping too early kills
 // work in progress.
@@ -1273,44 +1281,28 @@ func determineStatus(entries []LogEntry, isRunning bool, fileModTime time.Time) 
 		return StatusWorking, task
 	}
 
-	// If the log file was recently modified, the session is actively writing —
-	// even if parsed entries are stale (e.g., streaming writes in progress).
-	if !fileModTime.IsZero() && time.Since(fileModTime) < logWriteWindow {
-		task := extractTask(lastAssistant)
-		return StatusWorking, task
+	// A user message that carries only a tool_result does NOT count as a prompt:
+	// it is the tail of Claude's own turn, and treating it as work is what made
+	// sessions stick on "Working" after Claude yielded back to the user without
+	// a turn_duration. omp needs no such test, which is why the decision is
+	// made here rather than inside the shared tail.
+	var lastPrompt time.Time
+	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) &&
+		isUserPrompt(lastUser) {
+		lastPrompt = lastUser.Timestamp
 	}
-
-	// If process is running but log is stale, it's Waiting (not ghost)
-	// The user may be away or thinking - this is a valid active session
-	// Ghost detection is only for --kill-ghosts to find truly orphaned processes
-	if time.Since(lastTimestamp) > sessionStaleWindow {
-		return StatusWaiting, "-"
-	}
-
-	// If assistant is recent, it's working. Use 2-minute window to avoid
-	// flipping to "Waiting" during brief gaps between log writes.
+	var lastAssistantAt time.Time
 	if lastAssistant != nil {
-		task := extractTask(lastAssistant)
-		if time.Since(lastAssistant.Timestamp) < recentActivityWindow {
-			return StatusWorking, task
-		}
+		lastAssistantAt = lastAssistant.Timestamp
 	}
 
-	// If a genuine user prompt is the most recent entry (e.g. first message in
-	// session), Claude is processing it — but only while the prompt is recent. A
-	// user message that only carries a tool_result does NOT count: that is the
-	// tail of Claude's own turn, not a new prompt, and treating it as work is
-	// what made sessions stick on "Working" after Claude yielded back to the user
-	// without a turn_duration. The recency bound matters just as much: a genuine
-	// prompt left unanswered (user walked away, or Claude stalled) must age out to
-	// Waiting instead of staying pinned on "Working".
-	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) {
-		if isUserPrompt(lastUser) && time.Since(lastUser.Timestamp) < recentActivityWindow {
-			return StatusWorking, "Processing..."
-		}
-	}
-
-	return StatusWaiting, "-"
+	return ageStatus(activity{
+		fileModTime:   fileModTime,
+		lastEntry:     lastTimestamp,
+		lastAssistant: lastAssistantAt,
+		lastPrompt:    lastPrompt,
+		task:          func() string { return extractTask(lastAssistant) },
+	})
 }
 
 // isUserPrompt reports whether a user log entry is a genuine user prompt
@@ -1329,6 +1321,25 @@ func isUserPrompt(entry *LogEntry) bool {
 	return false
 }
 
+// taskLabel condenses a message into the single line the task column shows.
+//
+// Runes, not bytes. The byte slice this replaces (`text[:47]`) puts a
+// replacement character in the dashboard the first time a task begins with
+// anything non-ASCII. The line cut comes first so that a long first line is
+// capped, rather than a cap landing past a newline and hiding it.
+func taskLabel(text string) string {
+	if text == "" {
+		return "-"
+	}
+	if idx := strings.Index(text, "\n"); idx > 0 {
+		text = text[:idx]
+	}
+	if runes := []rune(text); len(runes) > 50 {
+		return string(runes[:47]) + "..."
+	}
+	return text
+}
+
 // extractTask extracts a task description from an assistant entry
 func extractTask(entry *LogEntry) string {
 	if entry == nil || entry.Message == nil {
@@ -1340,20 +1351,63 @@ func extractTask(entry *LogEntry) string {
 			return "Using: " + content.Name
 		}
 		if content.Type == "text" && content.Text != "" {
-			// Truncate long text
-			text := content.Text
-			if len(text) > 50 {
-				text = text[:47] + "..."
-			}
-			// Take first line only
-			if idx := strings.Index(text, "\n"); idx > 0 {
-				text = text[:idx]
-			}
-			return text
+			return taskLabel(content.Text)
 		}
 	}
 
 	return "-"
+}
+
+// activity is what the shared tail of both harnesses' status rules needs: four
+// moments and a way to label the work. Timestamps are zero when the thing they
+// describe does not exist.
+type activity struct {
+	fileModTime time.Time
+	// lastEntry is the newest timestamp of any entry, however uninteresting.
+	lastEntry time.Time
+	// lastAssistant is when the agent last said something.
+	lastAssistant time.Time
+	// lastPrompt is when the user last said something *that counts as a prompt
+	// and is newer than lastAssistant*. Deciding that is the harness's job:
+	// Claude Code records tool results as user messages and omp does not.
+	lastPrompt time.Time
+	// task labels a Working row. Called only on the paths that report Working,
+	// so neither caller builds a label it will not use.
+	task func() string
+}
+
+// ageStatus is the tail both determineStatus and determineOMPStatus end in.
+//
+// Once each harness's own evidence has had its say -- pending tools, turn
+// markers, exits -- what is left is the same four rules about how recently
+// anything happened, on the same three windows. Sharing them is what makes
+// "both harnesses must mean the same thing by Working" structural instead of a
+// comment two functions are asked to honour.
+func ageStatus(a activity) (Status, string) {
+	// The write itself is evidence, for the moments when the newest entry is not
+	// on disk yet.
+	if !a.fileModTime.IsZero() && time.Since(a.fileModTime) < logWriteWindow {
+		return StatusWorking, a.task()
+	}
+
+	// Running, but nothing has happened for long enough that no signal below
+	// deserves to be read as work in progress.
+	if time.Since(a.lastEntry) > sessionStaleWindow {
+		return StatusWaiting, "-"
+	}
+
+	if !a.lastAssistant.IsZero() && time.Since(a.lastAssistant) < recentActivityWindow {
+		return StatusWorking, a.task()
+	}
+
+	// A prompt with no answer yet. The recency bound matters as much as the
+	// prompt: one left unanswered because the user walked away must age out to
+	// Waiting rather than stay pinned on Working.
+	if !a.lastPrompt.IsZero() && time.Since(a.lastPrompt) < recentActivityWindow {
+		return StatusWorking, "Processing..."
+	}
+
+	return StatusWaiting, "-"
 }
 
 // GhostProcess represents an orphaned coding agent process

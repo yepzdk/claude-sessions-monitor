@@ -18,7 +18,6 @@ package session
 //   - There are no progress heartbeats. The tool markers take their place.
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -67,9 +66,9 @@ type ompEntry struct {
 	CustomType string      `json:"customType,omitempty"`
 	Message    *ompMessage `json:"message,omitempty"`
 	// Data is the payload of a custom entry. omp types it as unknown and its
-	// shape depends on customType, so it stays raw and is decoded only by the
-	// two customTypes csm reads. Decoding it eagerly would fail an entire line
-	// over a payload csm does not look at.
+	// shape depends on customType, so it arrives raw -- decoding it eagerly
+	// would fail an entire line over a payload csm does not look at -- and
+	// decodeOMPEntry drops it once the parts csm reads are decoded.
 	Data json.RawMessage `json:"data,omitempty"`
 
 	// Header (type "session") and title-slot (type "title") fields. ID is the
@@ -78,6 +77,9 @@ type ompEntry struct {
 	CWD   string `json:"cwd,omitempty"`
 	ID    string `json:"id,omitempty"`
 	Title string `json:"title,omitempty"`
+
+	// toolStart is Data decoded, for a tool_execution_start entry.
+	toolStart *ompToolStart
 }
 
 // ompMessage is the message omp stores on a "message" entry. Roles are "user",
@@ -89,8 +91,11 @@ type ompMessage struct {
 	ToolCallID string `json:"toolCallId,omitempty"`
 	ToolName   string `json:"toolName,omitempty"`
 	// Content is raw because omp allows either a block array or a bare string
-	// (extension-provided messages use the latter).
+	// (extension-provided messages use the latter). decodeOMPEntry turns it into
+	// Text and clears it.
 	Content json.RawMessage `json:"content,omitempty"`
+	// Text is the decoded display text.
+	Text string `json:"-"`
 }
 
 // ompContentItem is one block of a message's content array. omp emits "text",
@@ -100,16 +105,41 @@ type ompContentItem struct {
 	Text string `json:"text,omitempty"`
 }
 
-// text returns the message's displayable text: its text blocks joined, or the
-// whole content when it is a bare string. Thinking and tool-call blocks are
-// skipped -- thinking is not a message to the user, and a tool call is reported
-// through the status column instead.
-func (m *ompMessage) text() string {
-	if m == nil || len(m.Content) == 0 {
+// decodeOMPEntry decodes the raw payloads csm reads and drops the raw copies.
+//
+// It runs once, at parse time, because determineOMPStatus and the task label run
+// on every tick *including* parse-cache hits: decoding there meant re-parsing
+// every tool_execution_start payload and the newest assistant's content blocks
+// twice a second for the lifetime of a session. Claude Code's path pre-decodes
+// in Message.UnmarshalJSON for the same reason. Clearing the raw fields also
+// keeps the cached entries from holding a second copy of every message body.
+//
+// A custom payload csm does not read is discarded rather than kept: nothing
+// downstream looks at it, and a future reader should decode it here too.
+func decodeOMPEntry(e *ompEntry) {
+	if e.Message != nil {
+		e.Message.Text = ompContentText(e.Message.Content)
+		e.Message.Content = nil
+	}
+	if e.Type == "custom" && e.CustomType == "tool_execution_start" && len(e.Data) > 0 {
+		var start ompToolStart
+		if json.Unmarshal(e.Data, &start) == nil {
+			e.toolStart = &start
+		}
+	}
+	e.Data = nil
+}
+
+// ompContentText returns a message's displayable text: its text blocks joined,
+// or the whole content when it is a bare string. Thinking and tool-call blocks
+// are skipped -- thinking is not a message to the user, and a tool call is
+// reported through the status column instead.
+func ompContentText(content json.RawMessage) string {
+	if len(content) == 0 {
 		return ""
 	}
 	var blocks []ompContentItem
-	if err := json.Unmarshal(m.Content, &blocks); err == nil {
+	if err := json.Unmarshal(content, &blocks); err == nil {
 		var parts []string
 		for _, b := range blocks {
 			if b.Type == "text" && strings.TrimSpace(b.Text) != "" {
@@ -119,7 +149,7 @@ func (m *ompMessage) text() string {
 		return strings.Join(parts, " ")
 	}
 	var s string
-	if err := json.Unmarshal(m.Content, &s); err == nil {
+	if err := json.Unmarshal(content, &s); err == nil {
 		return s
 	}
 	return ""
@@ -173,15 +203,7 @@ func parseOMPLogFileWithLimit(logFile string, keep int, maxLineBytes int) (ompPa
 	var pl ompParsedLog
 	var entries []ompEntry
 
-	scanner := bufio.NewScanner(file)
-	// The initial buffer's capacity must not exceed maxLineBytes: bufio.Scanner
-	// only grows a token buffer when it needs to, so a capacity already bigger
-	// than maxLineBytes would let a token past that limit through untouched.
-	initialBufSize := 64 * 1024
-	if maxLineBytes < initialBufSize {
-		initialBufSize = maxLineBytes
-	}
-	scanner.Buffer(make([]byte, 0, initialBufSize), maxLineBytes)
+	scanner := newLogScanner(file, maxLineBytes)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -222,6 +244,7 @@ func parseOMPLogFileWithLimit(logFile string, keep int, maxLineBytes int) (ompPa
 			continue
 		}
 
+		decodeOMPEntry(&entry)
 		entries = append(entries, entry)
 	}
 
@@ -252,7 +275,7 @@ func ompLastAssistant(entries []ompEntry) (text, model string) {
 		if model == "" {
 			model = e.Message.Model
 		}
-		if t := e.Message.text(); t != "" {
+		if t := e.Message.Text; t != "" {
 			return t, model
 		}
 	}
@@ -511,30 +534,25 @@ func determineOMPStatus(entries []ompEntry, isRunning bool, fileModTime time.Tim
 		}
 	}
 
-	// The write itself is evidence, for the moments when the newest entry is
-	// not on disk yet.
-	if !fileModTime.IsZero() && time.Since(fileModTime) < logWriteWindow {
-		return StatusWorking, ompTask(lastAssistant)
-	}
-
-	if time.Since(lastTimestamp) > sessionStaleWindow {
-		return StatusWaiting, "-"
-	}
-
-	if lastAssistant != nil && time.Since(lastAssistant.Timestamp) < recentActivityWindow {
-		return StatusWorking, ompTask(lastAssistant)
-	}
-
-	// A recent prompt with no answer yet. Unlike Claude Code there is no need to
-	// tell a real prompt from an echoed tool result: omp gives tool results
-	// their own role, so a "user" message is always a user message.
+	// The remaining rules are the same on both sides; ageStatus holds them.
+	// omp gives tool results their own role, so a "user" message is always a
+	// real prompt -- no isUserPrompt equivalent to write.
+	var lastPrompt time.Time
 	if lastUser != nil && (lastAssistant == nil || lastUser.Timestamp.After(lastAssistant.Timestamp)) {
-		if time.Since(lastUser.Timestamp) < recentActivityWindow {
-			return StatusWorking, "Processing..."
-		}
+		lastPrompt = lastUser.Timestamp
+	}
+	var lastAssistantAt time.Time
+	if lastAssistant != nil {
+		lastAssistantAt = lastAssistant.Timestamp
 	}
 
-	return StatusWaiting, "-"
+	return ageStatus(activity{
+		fileModTime:   fileModTime,
+		lastEntry:     lastTimestamp,
+		lastAssistant: lastAssistantAt,
+		lastPrompt:    lastPrompt,
+		task:          func() string { return ompTask(lastAssistant) },
+	})
 }
 
 // ompPendingToolCall is a tool omp announced and has not recorded a result for.
@@ -560,17 +578,13 @@ func ompPendingTool(entries []ompEntry) (ompPendingToolCall, bool) {
 	}
 
 	for _, e := range entries {
-		if e.Type != "custom" || e.CustomType != "tool_execution_start" || len(e.Data) == 0 {
+		if e.toolStart == nil {
 			continue
 		}
-		var start ompToolStart
-		if json.Unmarshal(e.Data, &start) != nil {
+		if e.toolStart.ToolCallID == "" || answered[e.toolStart.ToolCallID] {
 			continue
 		}
-		if start.ToolCallID == "" || answered[start.ToolCallID] {
-			continue
-		}
-		return ompPendingToolCall{ompToolStart: start, at: e.Timestamp}, true
+		return ompPendingToolCall{ompToolStart: *e.toolStart, at: e.Timestamp}, true
 	}
 
 	return ompPendingToolCall{}, false
@@ -581,17 +595,5 @@ func ompTask(lastAssistant *ompEntry) string {
 	if lastAssistant == nil || lastAssistant.Message == nil {
 		return "-"
 	}
-	text := lastAssistant.Message.text()
-	if text == "" {
-		return "-"
-	}
-	if idx := strings.Index(text, "\n"); idx > 0 {
-		text = text[:idx]
-	}
-	// Runes, not bytes: cutting mid-rune puts a replacement character in the
-	// dashboard.
-	if runes := []rune(text); len(runes) > 50 {
-		text = string(runes[:47]) + "..."
-	}
-	return text
+	return taskLabel(lastAssistant.Message.Text)
 }

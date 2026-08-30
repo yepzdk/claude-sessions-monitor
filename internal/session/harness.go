@@ -88,6 +88,14 @@ var interpreters = map[string]bool{"bun": true, "node": true, "deno": true}
 // runtime and the evidence sits in a later argument -- but only for a known
 // interpreter, so a path argument that happens to end in /omp (`cat /etc/omp`)
 // is not mistaken for the agent itself.
+//
+// ponytail: `ps -o args=` joins argv with spaces and gives no way to tell a
+// separator from a space inside a path, so an agent installed under
+// `/Users/me/My Tools/claude` splits into `/Users/me/My` and its session goes
+// unseen -- invisible to the dashboard and to --kill-ghosts. Scanning every
+// token for a `claude` basename would fix it and re-admit exactly the false
+// positives above (`cat /etc/claude`), which is the trade this function exists
+// to refuse. Living with the rarer, safer failure.
 func classifyProcess(argv string) Harness {
 	fields := strings.Fields(argv)
 	if len(fields) == 0 {

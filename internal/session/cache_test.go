@@ -63,8 +63,7 @@ func TestCachedParseKeepsPartialResultWithItsError(t *testing.T) {
 	// Both the miss and the subsequent hit must carry the partial result.
 	for _, pass := range []string{"miss", "hit"} {
 		got, err := cachedParseFile(parseCache, path, info.ModTime(), info.Size(),
-			func() (parsedLog, error) { return parseLogFileWithLimit(path, 100, 1024) },
-			func(pl parsedLog) int { return len(pl.entries) })
+			func() (parsedLog, error) { return parseLogFileWithLimit(path, 100, 1024) })
 		if err == nil {
 			t.Errorf("%s: error dropped; the row would lose its [?] marker", pass)
 		}
