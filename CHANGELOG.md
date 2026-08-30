@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `csm upgrade` and `csm update` do what `csm -upgrade` does. Arguments after the flags were silently discarded, so either of these started the dashboard instead of upgrading; an argument csm does not recognise is now an error rather than a different command
+
+### Fixed
+
+- Jumping to a session on Linux works under a terminal that runs one process for all its windows, which is how Omarchy launches Ghostty (`--gtk-single-instance=true`). The compositor reports the same pid for every window, so csm now picks the one whose title carries the session's own title — the agent writes it there, which makes it per-window evidence the pid is not. Previously a desktop with more than one agent window open was reported as ambiguous and nothing was focused
+
 ## [1.0.0] - 2026-08-30
 
 ### Added

@@ -19,7 +19,8 @@ type window struct {
 const csmTitlePrefix = "CSM: "
 
 // pickWindow chooses the window hosting a session, given the session process's
-// ancestor chain (the process itself first, then its parents).
+// ancestor chain (the process itself first, then its parents) and the title the
+// session is known by.
 //
 // Matching is by process ownership, not by title: a terminal that forks a
 // process per window is an ancestor of the Claude process running inside it,
@@ -27,15 +28,18 @@ const csmTitlePrefix = "CSM: "
 // is exact, unlike the directory heuristics the macOS path has to use.
 //
 // It stops being exact when one process owns several windows -- Ghostty with
-// --gtk-single-instance, foot --server, kitty --single-instance. Every window
-// then reports the same pid and the compositor knows nothing else about which
-// is which. Where a title makes one candidate the obvious answer, that is used
-// and reported as a guess; where it does not, the caller is told why rather
-// than having a window picked for it at random.
+// --gtk-single-instance (how Omarchy launches it), foot --server, kitty
+// --single-instance. Every window then reports the same pid, so ownership has
+// narrowed the field to one terminal's windows and cannot say which. The
+// session's own title separates them from there: the agent writes it into the
+// window it runs in, which makes it per-window evidence the compositor's pid
+// is not. Failing that, a title that does not look like a shell echoing its
+// path is the weaker guess; where nothing separates them the caller is told
+// why rather than having a window picked for it at random.
 //
 // Returns the chosen window, how many candidates it was chosen from, and
 // whether a choice was made at all. matches > 1 means the result is a guess.
-func pickWindow(wins []window, chain []int) (chosen window, matches int, ok bool) {
+func pickWindow(wins []window, chain []int, title string) (chosen window, matches int, ok bool) {
 	owned := windowsOwnedBy(withoutCSM(wins), chain)
 	switch len(owned) {
 	case 0:
@@ -44,7 +48,15 @@ func pickWindow(wins []window, chain []int) (chosen window, matches int, ok bool
 		return owned[0], 1, true
 	}
 
-	// Several windows, one process. A terminal echoing its working directory
+	// One process, several windows. A unique title hit identifies the window
+	// as surely as an unshared pid would, so it is not reported as a guess:
+	// the count exists to warn that a window was picked from candidates csm
+	// could not tell apart, and this one it can.
+	if hit, found := windowByTitle(owned, title); found {
+		return hit, 1, true
+	}
+
+	// No title to go on. A terminal echoing its working directory
 	// ("…/Projects/personal/webwrap") is a plain shell; a window running
 	// something announces what it is running. When exactly one candidate looks
 	// like the latter, it is the answer -- but the caller still hears that it
@@ -61,6 +73,42 @@ func pickWindow(wins []window, chain []int) (chosen window, matches int, ok bool
 	}
 
 	return window{}, len(owned), false
+}
+
+// minTitleHint is the shortest session title trusted to identify a window.
+// Anything shorter ("wip", "fix") turns up inside an unrelated window's title
+// by coincidence, and a wrong window focused silently is worse than the error
+// the caller falls back to.
+const minTitleHint = 4
+
+// windowByTitle finds the one window whose title carries the session's own
+// title, reporting whether exactly one did.
+//
+// Containment rather than equality, because the decoration around the title
+// belongs to the agent and csm cannot predict it: omp renders
+// "π ⠏ Fix the pagination bug" and Claude Code "✳ Fix the pagination bug" for
+// a session titled "Fix the pagination bug", and both change as the session
+// works. Case is folded because a shell prompt or terminal may re-case what it
+// was handed.
+//
+// Several hits mean the title separates nothing -- two windows on the same
+// session, or a title generic enough to appear in a neighbour's -- so the
+// caller's weaker heuristics get their turn instead.
+func windowByTitle(wins []window, title string) (window, bool) {
+	title = strings.ToLower(strings.TrimSpace(title))
+	if len([]rune(title)) < minTitleHint {
+		return window{}, false
+	}
+
+	var found window
+	hits := 0
+	for _, w := range wins {
+		if strings.Contains(strings.ToLower(w.Title), title) {
+			found = w
+			hits++
+		}
+	}
+	return found, hits == 1
 }
 
 // withoutCSM drops csm's own window from the candidates. Filtering here rather

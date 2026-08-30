@@ -126,7 +126,7 @@ make install
 ## Upgrading
 
 ```bash
-csm -upgrade
+csm -upgrade      # or: csm upgrade / csm update
 ```
 
 Checks GitHub for a newer release. If csm was installed with a package manager
@@ -213,13 +213,19 @@ the terminal that spawned the session is one of its parent processes, which is e
 
 That exactness needs one terminal process per window, which is the default for most
 terminals. If yours multiplexes every window into a single process — Ghostty with
-`--gtk-single-instance`, `foot --server`, `kitty --single-instance` — the compositor
-reports the same PID for all of them and csm has little left to tell them apart. It
-ignores its own window, and if exactly one of the rest is titled after something it is
-running rather than after a directory, it raises that one and tells you it guessed,
-naming the window it chose. When even that is ambiguous it says so instead of raising one
-at random. For a terminal that has a single-instance mode, launching it with that mode off
-restores exact matching:
+`--gtk-single-instance` (how Omarchy launches it), `foot --server`, `kitty
+--single-instance` — the compositor reports the same PID for all of them, so ownership
+narrows the field to that terminal's windows and cannot say which. The session's own
+title decides from there: the agent writes it into the window it runs in, so a window
+whose title carries it is that session's window, and csm raises it without hedging. It
+ignores its own window throughout.
+
+Where no title separates them — a session that has none, or two windows the title matches
+equally — csm falls back to raising the one window that looks like it is running something
+rather than echoing a directory, and tells you it guessed, naming the window it chose.
+When even that is ambiguous it says so instead of raising one at random. For a terminal
+with a single-instance mode, launching it with that mode off restores matching by
+ownership alone:
 
 ```bash
 ghostty --gtk-single-instance=false

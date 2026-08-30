@@ -46,6 +46,18 @@ func main() {
 	doUpgrade := flag.Bool("upgrade", false, "Upgrade csm to the latest release")
 	flag.Parse()
 
+	// flag stops parsing at the first non-flag argument and leaves the rest in
+	// flag.Args(), which nothing read: `csm upgrade` dropped the word entirely
+	// and started the dashboard, the one thing someone asking to upgrade did
+	// not ask for. A wrong guess about the spelling has to say so.
+	if wantUpgrade, err := resolveArgs(flag.Args()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		flag.Usage()
+		os.Exit(2)
+	} else if wantUpgrade {
+		*doUpgrade = true
+	}
+
 	// Check for conflicting flags
 	if *webMode && *webOnly {
 		fmt.Fprintf(os.Stderr, "Error: --web and --web-only are mutually exclusive\n")
@@ -106,6 +118,30 @@ func main() {
 
 	// Live view mode
 	os.Exit(runLiveView(*interval, *webMode, *webPort))
+}
+
+// resolveArgs interprets the arguments left over after flag parsing, reporting
+// whether they asked for an upgrade.
+//
+// csm's interface is flags, but `csm upgrade` is what a user reaches for before
+// reading -h, and `update` is the word half the tools they already use spell it
+// with. Both are accepted rather than corrected: the alternative is a person
+// who asked to upgrade watching a dashboard start instead, with nothing on
+// screen to say why. Anything else is an error, because silently ignoring an
+// argument means doing something other than what was typed.
+func resolveArgs(args []string) (upgrade bool, err error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	switch args[0] {
+	case "upgrade", "update":
+		if len(args) > 1 {
+			return false, fmt.Errorf("%s takes no arguments, got %q", args[0], args[1])
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("unknown argument %q; csm takes flags, plus `upgrade`", args[0])
+	}
 }
 
 // nextHarnessFilter cycles the live view's harness filter: everything, then each

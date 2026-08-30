@@ -14,13 +14,16 @@ import (
 // runs by the "manual" tag because they need a graphical session and move the
 // user's focus.
 //
-// A per-window terminal process is what makes matching exact, so on a
-// single-instance terminal start a throwaway window first:
+// A per-window terminal process is what makes matching exact. On a
+// single-instance terminal (Ghostty as Omarchy starts it, kitty
+// --single-instance) a session is instead identified by its own title, so pass
+// the pid of a live session's agent process and the window it titled is the one
+// that should be raised. To check the pre-title path, start a throwaway window:
 //
 //	ghostty --gtk-single-instance=false --title=livetest -e sleep 900
 //
-// then pass the pid of something running inside the window you expect to be
-// raised (the `sleep` above, or a live session's Claude process).
+// then pass the pid of the `sleep` inside it -- no session owns it, so there is
+// no title to match and ownership has to carry the pick alone.
 func livePID(t *testing.T) int {
 	t.Helper()
 	pid, err := strconv.Atoi(os.Args[len(os.Args)-1])
@@ -30,12 +33,35 @@ func livePID(t *testing.T) int {
 	return pid
 }
 
+// liveSession is the session csm itself would hand to Focus for this pid,
+// discovered rather than fabricated: matching reads SessionTitle as well as the
+// pid, so a hand-built Session exercises a shape Focus is never given on a
+// single-instance terminal. A pid no session owns still works, with no title,
+// which is exactly the fallback worth being able to aim at on purpose.
+func liveSession(t *testing.T, confident bool) session.Session {
+	t.Helper()
+	pid := livePID(t)
+	sessions, err := session.Discover()
+	if err != nil {
+		t.Logf("Discover() failed, going in with a bare pid: %v", err)
+	}
+	for _, s := range sessions {
+		if s.GhostPID == pid {
+			s.PIDConfident = confident
+			t.Logf("pid %d is session %q titled %q", pid, s.Project, s.SessionTitle)
+			return s
+		}
+	}
+	t.Logf("no session owns pid %d; going in with no title", pid)
+	return session.Session{GhostPID: pid, PIDConfident: confident}
+}
+
 // The exact path: one process per window, so the pid decides and the result is
 // not a guess.
 //
 //	go test -tags manual ./internal/jump/ -run TestFocusLiveLinux -v -args <pid>
 func TestFocusLiveLinux(t *testing.T) {
-	s := session.Session{GhostPID: livePID(t), PIDConfident: true}
+	s := liveSession(t, true)
 	res, err := Focus(s)
 	t.Logf("err=%v res=%+v msg=%q", err, res, res.Message())
 	if err != nil {
@@ -52,7 +78,7 @@ func TestFocusLiveLinux(t *testing.T) {
 //
 //	go test -tags manual ./internal/jump/ -run TestFocusLiveLinuxAsGuess -v -args <pid>
 func TestFocusLiveLinuxAsGuess(t *testing.T) {
-	s := session.Session{GhostPID: livePID(t), PIDConfident: false}
+	s := liveSession(t, false)
 	res, err := Focus(s)
 	t.Logf("err=%v res=%+v msg=%q", err, res, res.Message())
 	if err != nil {
@@ -112,7 +138,7 @@ func TestInspectLinux(t *testing.T) {
 			continue
 		}
 		chain := session.AncestorPIDs(s.GhostPID)
-		chosen, matches, ok := pickWindow(wins, chain)
+		chosen, matches, ok := pickWindow(wins, chain, s.SessionTitle)
 		outcome := ""
 		if ok {
 			outcome = (Result{Matches: matches, Noun: "window", Name: chosen.Title, Guessed: !s.PIDConfident}).Message()

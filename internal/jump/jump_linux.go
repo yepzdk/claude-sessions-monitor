@@ -55,7 +55,7 @@ func Focus(s session.Session) (Result, error) {
 		return Result{}, fmt.Errorf("couldn't ask %s for its windows: %w", b.name(), err)
 	}
 
-	chosen, matches, ok := pickWindow(wins, chain)
+	chosen, matches, ok := pickWindow(wins, chain, s.SessionTitle)
 	if !ok {
 		return Result{}, noWindowError(b, matches, s)
 	}

@@ -554,14 +554,22 @@ pid under a single-instance terminal, is certainly not the session's, and
 counting it made the guess below never fire.
 
 Ownership stops being exact when one process owns many windows — Ghostty with
-`--gtk-single-instance`, `foot --server`, `kitty --single-instance`. Every
-window then reports the same pid and the compositor knows nothing else about
-them; Ghostty in particular exports no per-window identifier into the child
-environment, so there is nothing to recover. Where exactly one candidate's
-title does not look like a path it is used and reported as a guess; otherwise
-`Focus` declines and names the cause, because focusing one of the user's
-windows at random is worse than not jumping. The advice to disable
-single-instance mode is only offered to terminals that have one
+`--gtk-single-instance` (Omarchy's default), `foot --server`, `kitty
+--single-instance`. Every window then reports the same pid, so ownership has
+narrowed the field to one terminal's windows and cannot go further: Ghostty in
+particular exports no per-window identifier into the child environment, so
+there is nothing there to recover.
+
+`windowByTitle` decides from there. The agent writes the session's title into
+the window it runs in — omp renders `π ⠏ <title>`, Claude Code `✳ <title>` —
+which makes it per-window evidence the shared pid is not, so a unique
+containment hit (case-folded, titles under `minTitleHint` runes ignored as too
+generic) returns `matches == 1` and is **not** reported as a guess. Several
+hits mean the title separates nothing and the weaker rule gets its turn: where
+exactly one candidate's title does not look like a path it is used and reported
+as a guess; otherwise `Focus` declines and names the cause, because focusing
+one of the user's windows at random is worse than not jumping. The advice to
+disable single-instance mode is only offered to terminals that have one
 (`singleInstanceTerminals`); GNOME Terminal and an IDE's integrated terminal
 hit the same wall with no flag to turn off.
 
