@@ -354,9 +354,13 @@ Reuse these instead of writing new ones:
   company, decided *before* the filter is applied so narrowing to one agent
   still says which one is on screen and the rows don't re-flow when `f` is
   pressed. `f` is a display filter; both agents are always scanned.
-- The agent label lives in the origin cell (`formatOrigin`), not the project
-  cell: which agent and what launched it are one fact about where a session came
-  from. `renderSessionRow` moves it back into `formatProject` when the terminal
+- The agent badge lives in the origin cell (`formatOrigin`), *after* the origin
+  name: which agent and what launched it are one fact about where a session came
+  from, and the origin is the column's subject. `calcSessionLayout` widens the
+  column by `harnessBadgeWidth` only when the badge is shown, so a single-agent
+  machine gets byte-identical columns, and the name is padded to the remainder so
+  badges align rather than trailing each name at a different offset.
+  `renderSessionRow` moves the badge back into `formatProject` when the terminal
   is too narrow for the origin column, because an untagged row on a mixed
   dashboard is an ambiguous row at any width.
 - `calcSessionLayout` / `calcHistoryLayout` / `calcUsageLayout` in `layout.go`

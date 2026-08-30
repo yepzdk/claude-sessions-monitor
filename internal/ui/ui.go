@@ -46,8 +46,8 @@ func RenderList(sessions []session.Session) {
 		return
 	}
 
-	l := calcSessionLayout(getTerminalWidth())
 	showHarness := MixedHarnesses(sessions)
+	l := calcSessionLayout(getTerminalWidth(), showHarness)
 
 	var buf strings.Builder
 	buf.WriteString(sessionHeader(l, "") + "\n")
@@ -224,7 +224,7 @@ func RenderLive(v LiveView) {
 	if len(active) == 0 {
 		fmt.Fprintf(&buf, "%sNo active sessions.%s%s", Dim, Reset, rawNewline)
 	} else {
-		l := calcSessionLayout(getTerminalWidth())
+		l := calcSessionLayout(getTerminalWidth(), v.Mixed)
 
 		// Column headers
 		fmt.Fprintf(&buf, "%s%s", sessionHeader(l, unselectedMarker), rawNewline)
@@ -517,32 +517,24 @@ func formatContext(s session.Session, width int) string {
 	return bar
 }
 
-// harnessCellWidth is the room formatOrigin reserves for the agent prefix:
-// the widest label plus a separating space, so origin names stay aligned down
-// the column whichever agent a row belongs to.
-const harnessCellWidth = 4
-
-// formatOrigin renders the session's provenance cell — which agent, and what
-// launched it — padded to exactly width visible chars. Returns an empty string
-// when the column is disabled (width == 0).
+// formatOrigin renders the origin cell, padded to exactly width visible chars.
+// Returns an empty string when the column is disabled (width == 0).
 //
-// The agent prefix is dim so the origin name still reads first: the origin is
-// the more variable fact, and the prefix repeats down the column.
+// The agent badge follows the origin name rather than leading it: the origin is
+// this column's subject, and the badge qualifies it. Reserving harnessBadgeWidth
+// and padding the name to what is left keeps every badge at the same offset, so
+// they read as a column rather than trailing each name at a different place.
 func formatOrigin(s session.Session, width int, showHarness bool) string {
 	if width <= 0 {
 		return ""
 	}
 
-	prefix, prefixLen := "", 0
-	if showHarness && s.Harness != "" {
-		label := harnessLabel(s.Harness)
-		// Padded to a fixed width rather than joined with a single space, so
-		// `cc` and `omp` rows line their origin names up.
-		if pad := harnessCellWidth - 1 - len([]rune(label)); pad > 0 {
-			label += strings.Repeat(" ", pad)
-		}
-		prefix = Dim + label + Reset + " "
-		prefixLen = harnessCellWidth
+	nameWidth := width
+	if showHarness {
+		nameWidth -= harnessBadgeWidth
+	}
+	if nameWidth < 1 {
+		nameWidth = 1
 	}
 
 	text := s.Origin.Display
@@ -551,10 +543,6 @@ func formatOrigin(s session.Session, width int, showHarness bool) string {
 	}
 	// Runes, not bytes: slicing by byte can split a multi-byte character in
 	// half and mis-measures the padding.
-	nameWidth := width - prefixLen
-	if nameWidth < 1 {
-		nameWidth = 1
-	}
 	runes := []rune(text)
 	if len(runes) > nameWidth {
 		runes = runes[:nameWidth]
@@ -573,7 +561,23 @@ func formatOrigin(s session.Session, width int, showHarness bool) string {
 	default:
 		color = Dim
 	}
-	return prefix + color + text + Reset + padding
+	cell := color + text + Reset + padding
+
+	if !showHarness {
+		return cell
+	}
+
+	// Dim, and padded to the reserved width so the cell measures exactly `width`
+	// whether the badge is "[cc]" or "[omp]".
+	badge := ""
+	if s.Harness != "" {
+		badge = "[" + harnessLabel(s.Harness) + "]"
+	}
+	badgeRunes := len([]rune(badge))
+	if pad := harnessBadgeWidth - 1 - badgeRunes; pad > 0 {
+		badge += strings.Repeat(" ", pad)
+	}
+	return cell + " " + Dim + badge + Reset
 }
 
 // renderSessionRow renders a single session row using the given layout.

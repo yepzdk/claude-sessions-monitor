@@ -3,11 +3,12 @@ package ui
 // Column width constraints for session table
 const (
 	fixedStatusWidth = 14 // "● Needs Input" = 13 chars + 1 padding
-	// "omp " / "cc  " prefix (4) + the origin name. 10 truncated "Claude
-	// Desktop" and "GNOME Terminal" already; the harness sits here rather than
-	// in the project column because it is provenance too -- which agent, and
-	// what launched it, read as one fact.
-	fixedOriginWidth   = 14
+	fixedOriginWidth = 10 // "Claude Desktop" truncated; most origins fit in 9
+	// harnessBadgeWidth is what the origin column grows by when the agent badge
+	// is shown: a separating space plus the widest badge, "[omp]". The column is
+	// widened rather than shared, so the origin name -- the column's subject --
+	// keeps every character it had before csm watched a second agent.
+	harnessBadgeWidth  = 6
 	fixedContextWidth  = 21 // progress bar (10) + " 100%" (5) + " (1M)" suffix (5) + 1 padding
 	fixedActivityWidth = 15 // "LAST ACTIVITY" header + padding
 	minProjectWidth    = 15
@@ -30,7 +31,10 @@ type sessionLayout struct {
 // All remaining space goes to the project column. The origin column is
 // dropped on narrow terminals to keep the project column readable.
 // Accounts for one separator space between each pair of adjacent columns.
-func calcSessionLayout(width int) sessionLayout {
+//
+// showHarness widens the origin column for the agent badge, so a machine
+// running a single agent gets exactly the columns it had before csm watched two.
+func calcSessionLayout(width int, showHarness bool) sessionLayout {
 	l := sessionLayout{
 		status:   fixedStatusWidth,
 		context:  fixedContextWidth,
@@ -38,6 +42,9 @@ func calcSessionLayout(width int) sessionLayout {
 	}
 	if width >= originColumnMinTTY {
 		l.origin = fixedOriginWidth
+		if showHarness {
+			l.origin += harnessBadgeWidth
+		}
 	}
 
 	// One space between each pair of adjacent visible columns.

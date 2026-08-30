@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Oh My Pi sessions appear alongside Claude Code sessions in one list, auto-detected from `~/.omp/agent/sessions/` with no flag to set. When both are on screen the origin column names the agent next to what launched it (`omp Ghostty`, `cc Zed`)
+- Oh My Pi sessions appear alongside Claude Code sessions in one list, auto-detected from `~/.omp/agent/sessions/` with no flag to set. When both are on screen the origin column carries a `[cc]` / `[omp]` badge
 - `f` in the live view cycles which agent's rows are shown: all, Claude Code, Oh My Pi. A reading aid over an always-complete scan, not a discovery switch
 - `CSM_OMP_SESSIONS_DIR` points csm at a non-default Oh My Pi session store, for `--profile` and `--session-dir` setups
 - `harness` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), naming which coding agent a session belongs to

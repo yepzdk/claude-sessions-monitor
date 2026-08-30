@@ -50,10 +50,15 @@ func TestFormatProjectPadsToRuneWidth(t *testing.T) {
 	}
 }
 
+// The cell is padded to a fixed width whether or not the badge is in it, or
+// every column to its right shifts on a mixed dashboard.
 func TestFormatOriginPadsToRuneWidth(t *testing.T) {
-	const width = 14
-	for _, display := range []string{"Ghostty", "", "iTerm", "Zed", "Ünicode", "非常長的名字"} {
-		for _, showHarness := range []bool{false, true} {
+	for _, showHarness := range []bool{false, true} {
+		width := fixedOriginWidth
+		if showHarness {
+			width += harnessBadgeWidth
+		}
+		for _, display := range []string{"Ghostty", "", "iTerm", "Zed", "Ünicode", "非常長的名字"} {
 			s := session.Session{
 				Origin:  session.Origin{Display: display},
 				Harness: session.HarnessOMP,
@@ -67,37 +72,47 @@ func TestFormatOriginPadsToRuneWidth(t *testing.T) {
 	}
 }
 
-// The agent belongs with the origin: both answer "where did this come from".
-// The prefix is padded to a fixed width so a `cc` row and an `omp` row line
-// their origin names up down the column.
-func TestFormatOriginCarriesHarness(t *testing.T) {
-	const width = 14
-	omp := formatOrigin(session.Session{
-		Origin:  session.Origin{Display: "Ghostty", Category: session.OriginTerminal},
-		Harness: session.HarnessOMP,
-	}, width, true)
-	claude := formatOrigin(session.Session{
-		Origin:  session.Origin{Display: "Ghostty", Category: session.OriginTerminal},
-		Harness: session.HarnessClaude,
-	}, width, true)
-
-	if !strings.Contains(omp, "omp") || !strings.Contains(omp, "Ghostty") {
-		t.Errorf("omp cell = %q, want both the agent and the origin", omp)
-	}
-	if !strings.Contains(claude, "cc") {
-		t.Errorf("claude cell = %q, want the agent label", claude)
-	}
-	// Same origin, same column position for the name.
-	if strings.Index(stripANSI(omp), "Ghostty") != strings.Index(stripANSI(claude), "Ghostty") {
-		t.Errorf("origin names do not align: %q vs %q", stripANSI(omp), stripANSI(claude))
+// The agent badge belongs with the origin -- both answer "where did this come
+// from" -- but after it: the origin is the column's subject and the badge
+// qualifies it. Reserving a fixed width for the badge is what keeps them in a
+// readable column instead of trailing each name at a different offset.
+func TestFormatOriginCarriesHarnessAfterTheName(t *testing.T) {
+	const width = fixedOriginWidth + harnessBadgeWidth
+	cell := func(display string, h session.Harness) string {
+		return stripANSI(formatOrigin(session.Session{
+			Origin:  session.Origin{Display: display, Category: session.OriginTerminal},
+			Harness: h,
+		}, width, true))
 	}
 
-	plain := formatOrigin(session.Session{
+	long := cell("Ghostty", session.HarnessOMP)
+	if !strings.Contains(long, "[omp]") {
+		t.Errorf("cell = %q, want the [omp] badge", long)
+	}
+	if strings.Index(long, "Ghostty") > strings.Index(long, "[omp]") {
+		t.Errorf("badge precedes the origin name: %q", long)
+	}
+
+	// Different origin lengths, different badges: the badge still starts at the
+	// same offset.
+	short := cell("Zed", session.HarnessClaude)
+	if !strings.Contains(short, "[cc]") {
+		t.Errorf("cell = %q, want the [cc] badge", short)
+	}
+	if strings.Index(long, "[") != strings.Index(short, "[") {
+		t.Errorf("badges do not align: %q vs %q", long, short)
+	}
+
+	plain := stripANSI(formatOrigin(session.Session{
 		Origin:  session.Origin{Display: "Ghostty"},
 		Harness: session.HarnessOMP,
-	}, width, false)
+	}, fixedOriginWidth, false))
 	if strings.Contains(plain, "omp") {
 		t.Errorf("agent shown on a single-agent dashboard: %q", plain)
+	}
+	if visibleWidth(plain) != fixedOriginWidth {
+		t.Errorf("single-agent cell width = %d, want the unchanged %d",
+			visibleWidth(plain), fixedOriginWidth)
 	}
 }
 
@@ -112,11 +127,11 @@ func TestRenderSessionRowKeepsHarnessOnNarrowTerminal(t *testing.T) {
 		Origin:  session.Origin{Display: "Ghostty", Category: session.OriginTerminal},
 	}
 
-	wide := calcSessionLayout(120)
+	wide := calcSessionLayout(120, true)
 	if wide.origin == 0 {
 		t.Fatal("120 columns should keep the origin column")
 	}
-	narrow := calcSessionLayout(originColumnMinTTY - 1)
+	narrow := calcSessionLayout(originColumnMinTTY-1, true)
 	if narrow.origin != 0 {
 		t.Fatal("below originColumnMinTTY the origin column should be dropped")
 	}

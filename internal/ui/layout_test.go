@@ -3,7 +3,7 @@ package ui
 import "testing"
 
 func TestCalcSessionLayout_WideTerminal(t *testing.T) {
-	l := calcSessionLayout(140)
+	l := calcSessionLayout(140, false)
 
 	if l.status != 14 {
 		t.Errorf("expected status=14, got %d", l.status)
@@ -29,7 +29,7 @@ func TestCalcSessionLayout_WideTerminal(t *testing.T) {
 
 func TestCalcSessionLayout_NarrowTerminal(t *testing.T) {
 	// 80 < originColumnMinTTY, so origin column is hidden.
-	l := calcSessionLayout(80)
+	l := calcSessionLayout(80, false)
 
 	if l.status != 14 {
 		t.Errorf("expected status=14, got %d", l.status)
@@ -44,7 +44,7 @@ func TestCalcSessionLayout_NarrowTerminal(t *testing.T) {
 }
 
 func TestCalcSessionLayout_VeryNarrowTerminal(t *testing.T) {
-	l := calcSessionLayout(55)
+	l := calcSessionLayout(55, false)
 
 	if l.origin != 0 {
 		t.Errorf("expected origin=0 at width=55, got %d", l.origin)
@@ -55,7 +55,7 @@ func TestCalcSessionLayout_VeryNarrowTerminal(t *testing.T) {
 }
 
 func TestCalcSessionLayout_MinWidth(t *testing.T) {
-	l := calcSessionLayout(40)
+	l := calcSessionLayout(40, false)
 
 	// At tiny widths the origin column is dropped; project gets whatever remains (minus 3 gaps).
 	expected := 40 - fixedStatusWidth - fixedContextWidth - fixedActivityWidth - 3
@@ -72,11 +72,11 @@ func TestCalcSessionLayout_MinWidth(t *testing.T) {
 
 func TestCalcSessionLayout_OriginDropsAtBoundary(t *testing.T) {
 	// At exactly the threshold, origin should appear; one below, it should vanish.
-	lOn := calcSessionLayout(originColumnMinTTY)
+	lOn := calcSessionLayout(originColumnMinTTY, false)
 	if lOn.origin != fixedOriginWidth {
 		t.Errorf("expected origin=%d at width=%d, got %d", fixedOriginWidth, originColumnMinTTY, lOn.origin)
 	}
-	lOff := calcSessionLayout(originColumnMinTTY - 1)
+	lOff := calcSessionLayout(originColumnMinTTY-1, false)
 	if lOff.origin != 0 {
 		t.Errorf("expected origin=0 at width=%d, got %d", originColumnMinTTY-1, lOff.origin)
 	}
