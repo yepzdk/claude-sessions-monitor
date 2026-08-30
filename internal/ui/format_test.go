@@ -73,9 +73,9 @@ func TestFormatOriginPadsToRuneWidth(t *testing.T) {
 }
 
 // The agent badge belongs with the origin -- both answer "where did this come
-// from" -- but after it: the origin is the column's subject and the badge
-// qualifies it. Reserving a fixed width for the badge is what keeps them in a
-// readable column instead of trailing each name at a different offset.
+// from" -- but after it, one space behind: the origin is the column's subject
+// and the badge qualifies it, so it has to read as attached to the name rather
+// than as a field of its own.
 func TestFormatOriginCarriesHarnessAfterTheName(t *testing.T) {
 	const width = fixedOriginWidth + harnessBadgeWidth
 	cell := func(display string, h session.Harness) string {
@@ -85,22 +85,29 @@ func TestFormatOriginCarriesHarnessAfterTheName(t *testing.T) {
 		}, width, true))
 	}
 
-	long := cell("Ghostty", session.HarnessOMP)
-	if !strings.Contains(long, "[omp]") {
-		t.Errorf("cell = %q, want the [omp] badge", long)
+	got := cell("Ghostty", session.HarnessOMP)
+	if !strings.HasPrefix(got, "Ghostty [omp]") {
+		t.Errorf("cell = %q, want the badge one space after the origin name", got)
 	}
-	if strings.Index(long, "Ghostty") > strings.Index(long, "[omp]") {
-		t.Errorf("badge precedes the origin name: %q", long)
+	if visibleWidth(got) != width {
+		t.Errorf("visible width = %d, want %d; the columns after it shift",
+			visibleWidth(got), width)
 	}
 
-	// Different origin lengths, different badges: the badge still starts at the
-	// same offset.
+	// A shorter origin keeps the badge next to it rather than parked at a
+	// column position of its own.
 	short := cell("Zed", session.HarnessClaude)
-	if !strings.Contains(short, "[cc]") {
-		t.Errorf("cell = %q, want the [cc] badge", short)
+	if !strings.HasPrefix(short, "Zed [cc]") {
+		t.Errorf("cell = %q, want %q", short, "Zed [cc]")
 	}
-	if strings.Index(long, "[") != strings.Index(short, "[") {
-		t.Errorf("badges do not align: %q vs %q", long, short)
+	if visibleWidth(short) != width {
+		t.Errorf("short cell width = %d, want %d", visibleWidth(short), width)
+	}
+
+	// The name is capped so the longest badge still fits the widened column.
+	long := cell("GNOME Terminal", session.HarnessOMP)
+	if !strings.HasPrefix(long, "GNOME Term [omp]") {
+		t.Errorf("cell = %q; the name should cap at %d to leave room", long, fixedOriginWidth)
 	}
 
 	plain := stripANSI(formatOrigin(session.Session{

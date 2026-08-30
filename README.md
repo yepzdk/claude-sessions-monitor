@@ -233,10 +233,10 @@ Coding Sessions
 
 STATUS          PROJECT                                  ORIGIN           CONTEXT          LAST ACTIVITY
 ────────────────────────────────────────────────────────────────────────────────────────────────────────
-● Working       myorg/api-server @main                   Ghostty    [cc]  ███████░░░ 68%   Now
+● Working       myorg/api-server @main                   Ghostty [cc]     ███████░░░ 68%   Now
   Implementing auth middleware
 
-▲ Needs Input   work/api-gateway "Rate limiting"         Ghostty    [omp] -                12s ago
+▲ Needs Input   work/api-gateway "Rate limiting"         Ghostty [omp]    -                12s ago
   Using: bash
 
 ↑↓: select | Enter: jump | h: history | u: usage | f: filter | Ctrl+C: quit

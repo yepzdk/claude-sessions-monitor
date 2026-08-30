@@ -520,15 +520,20 @@ func formatContext(s session.Session, width int) string {
 // formatOrigin renders the origin cell, padded to exactly width visible chars.
 // Returns an empty string when the column is disabled (width == 0).
 //
-// The agent badge follows the origin name rather than leading it: the origin is
-// this column's subject, and the badge qualifies it. Reserving harnessBadgeWidth
-// and padding the name to what is left keeps every badge at the same offset, so
-// they read as a column rather than trailing each name at a different place.
+// The agent badge follows the origin name, one space behind it: the origin is
+// this column's subject and the badge qualifies it, so it has to read as
+// attached to the name. Padding the name to a fixed width first would line the
+// badges up into a column of their own, which is the opposite -- it reads as a
+// separate field again, which is what moving it here was meant to fix. All the
+// slack goes to the right of the cell instead, exactly as formatProject does
+// with its own suffixes.
 func formatOrigin(s session.Session, width int, showHarness bool) string {
 	if width <= 0 {
 		return ""
 	}
 
+	// The name is capped so the longest badge still fits; harnessBadgeWidth is
+	// what calcSessionLayout added to the column for it.
 	nameWidth := width
 	if showHarness {
 		nameWidth -= harnessBadgeWidth
@@ -548,7 +553,6 @@ func formatOrigin(s session.Session, width int, showHarness bool) string {
 		runes = runes[:nameWidth]
 		text = string(runes)
 	}
-	padding := strings.Repeat(" ", nameWidth-len(runes))
 
 	var color string
 	switch s.Origin.Category {
@@ -561,23 +565,20 @@ func formatOrigin(s session.Session, width int, showHarness bool) string {
 	default:
 		color = Dim
 	}
-	cell := color + text + Reset + padding
 
-	if !showHarness {
-		return cell
+	cell := color + text + Reset
+	visible := len(runes)
+
+	if showHarness && s.Harness != "" {
+		badge := "[" + harnessLabel(s.Harness) + "]"
+		cell += " " + Dim + badge + Reset
+		visible += 1 + len([]rune(badge))
 	}
 
-	// Dim, and padded to the reserved width so the cell measures exactly `width`
-	// whether the badge is "[cc]" or "[omp]".
-	badge := ""
-	if s.Harness != "" {
-		badge = "[" + harnessLabel(s.Harness) + "]"
+	if visible < width {
+		cell += strings.Repeat(" ", width-visible)
 	}
-	badgeRunes := len([]rune(badge))
-	if pad := harnessBadgeWidth - 1 - badgeRunes; pad > 0 {
-		badge += strings.Repeat(" ", pad)
-	}
-	return cell + " " + Dim + badge + Reset
+	return cell
 }
 
 // renderSessionRow renders a single session row using the given layout.
