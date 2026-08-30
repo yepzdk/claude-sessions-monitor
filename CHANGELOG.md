@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-30
+
 ### Added
 
 - Jumping to a session works on Linux: `Enter` focuses the session's window under Hyprland, sway, or any X11 window manager with `wmctrl` installed. Matching is by process ownership, which is exact where the terminal runs one process per window
