@@ -255,3 +255,62 @@ func writeProcCmdline(t *testing.T, root, pid, cmdline string) {
 		t.Fatal(err)
 	}
 }
+
+// The whole point of reading a terminal at all is omp pairing, and the Linux
+// half of that is the half no macOS developer can run: /dev/pts/3 is `pts-3` in
+// omp's breadcrumb directory, and comparing the two unconverted matched on macOS
+// and never here. So this asserts the conversion end to end -- what the kernel
+// gives, through ompTerminalID, to the name on disk -- rather than only that the
+// readlink worked.
+func TestProcessTerminalReadsStdinAndConvertsToABreadcrumbName(t *testing.T) {
+	root := t.TempDir()
+	procRootFor(t, root)
+
+	fdDir := filepath.Join(root, "101", "fd")
+	if err := os.MkdirAll(fdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Dangling on purpose: Readlink reports the target without resolving it, and
+	// a test cannot create a pty at a fixed path.
+	if err := os.Symlink("/dev/pts/3", filepath.Join(fdDir, "0")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := processTerminal(101)
+	if err != nil {
+		t.Fatalf("processTerminal: %v", err)
+	}
+	if got != "/dev/pts/3" {
+		t.Errorf("terminal = %q, want /dev/pts/3", got)
+	}
+	if id := ompTerminalID(got); id != "pts-3" {
+		t.Errorf("breadcrumb name = %q, want pts-3; omp names the file after "+
+			"ttyname(3) with the separators replaced, so a mismatch here means "+
+			"no jump and no --kill-ghosts for any omp session on Linux", id)
+	}
+}
+
+// A process whose stdin is not a terminal -- a headless `claude -p` in a
+// pipeline, or a daemon -- has no breadcrumb to match and must pair
+// unconfidently rather than being handed a name that looks like a device.
+func TestProcessTerminalRejectsStdinThatIsNotATerminal(t *testing.T) {
+	root := t.TempDir()
+	procRootFor(t, root)
+
+	fdDir := filepath.Join(root, "202", "fd")
+	if err := os.MkdirAll(fdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("pipe:[12345]", filepath.Join(fdDir, "0")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := processTerminal(202); err == nil {
+		t.Errorf("a pipe was reported as the terminal %q", got)
+	}
+
+	// And a pid with no fd directory at all.
+	if got, err := processTerminal(303); err == nil {
+		t.Errorf("a missing process reported the terminal %q", got)
+	}
+}
