@@ -129,7 +129,7 @@ func TestListProcessesNativeSkipsAProcessThatExitedMidScan(t *testing.T) {
 
 // A procfs that cannot be listed is a broken scan, not an empty machine. A
 // table that lists but yields nothing is rejected one level up, in
-// getRunningClaudeDirs.
+// getRunningHarnessProcs.
 func TestListProcessesNativeReportsABrokenProcfs(t *testing.T) {
 	procRootFor(t, filepath.Join(t.TempDir(), "no-such-procfs"))
 

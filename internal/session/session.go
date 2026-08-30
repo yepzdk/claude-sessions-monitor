@@ -230,7 +230,7 @@ type procInfo struct {
 var listProcesses = listProcessesNative
 
 // getProcessCwdFn is the per-process working-directory lookup. A var so a test
-// can drive getRunningClaudeDirs without a real process behind each pid.
+// can drive getRunningHarnessProcs without a real process behind each pid.
 var getProcessCwdFn = getProcessCwd
 
 // processArgvFn reads one process's full argument vector. A var so a test can
