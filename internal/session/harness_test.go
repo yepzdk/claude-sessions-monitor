@@ -2,8 +2,10 @@ package session
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -149,6 +151,37 @@ func TestClassifyProcessHandlesRuntimeFlagsThatTakeAValue(t *testing.T) {
 	}
 }
 
+// A path ending in /omp is not enough: a directory named after the agent is
+// exactly what someone running that agent is likely to have, and a flag's value
+// is its own argv element with no leading dash, so skipping flags does not keep
+// one out. Every case here would be handed to SIGTERM once omp discovery sets
+// HarnessOMP.
+func TestClassifyProcessRejectsADirectoryNamedAfterTheAgent(t *testing.T) {
+	for _, argv := range [][]string{
+		{"bun", "install", "/home/u/omp"},
+		{"node", "/usr/local/lib/eslint/bin/eslint.js", "/home/u/projects/omp"},
+		{"bun", "run", "--cwd", "/home/u/src/omp", "test"},
+		{"node", "--require", "/opt/lib/omp", "/app/server.js"},
+	} {
+		if got := classifyProcess(argv); got != HarnessNone {
+			t.Errorf("classifyProcess(%q) = %q, want HarnessNone", argv, got)
+		}
+	}
+}
+
+// The shape that is the agent: a shim in a bin directory, which is where a
+// runtime-launched program lives and a project checkout does not.
+func TestClassifyProcessAcceptsAnAgentShimInABinDirectory(t *testing.T) {
+	for _, argv := range [][]string{
+		{"bun", "/Users/dev/.bun/bin/omp"},
+		{"node", "/home/u/proj/node_modules/.bin/omp", "--resume"},
+	} {
+		if got := classifyProcess(argv); got != HarnessOMP {
+			t.Errorf("classifyProcess(%q) = %q, want %q", argv, got, HarnessOMP)
+		}
+	}
+}
+
 // The recheck runs immediately before SIGTERM. Requiring the *session's*
 // harness rather than "any coding agent" is what stops a reissued pid that now
 // belongs to the other agent from being killed on the first one's behalf.
@@ -179,9 +212,15 @@ func TestVerifyGhostProcessSeparatesAnExitedPIDFromARecycledOne(t *testing.T) {
 		err      error
 		wantGone bool
 	}{
-		{name: "the process is gone", err: errors.New("no such process"), wantGone: true},
+		{name: "the proc entry is gone", err: fs.ErrNotExist, wantGone: true},
+		{name: "macOS has no such pid", err: syscall.EINVAL, wantGone: true},
+		{name: "the pid is gone", err: syscall.ESRCH, wantGone: true},
 		{name: "the pid has no command line", argv: nil, wantGone: true},
 		{name: "the pid now belongs to something else", argv: []string{"/usr/bin/vim"}, wantGone: false},
+		// csm failing to look is not the process having exited. Labelling it
+		// as one puts it back on the path that reports nothing.
+		{name: "the read was refused", err: syscall.EPERM, wantGone: false},
+		{name: "the buffer would not parse", err: errors.New("kern.procargs2 ended after 1 of 3 arguments"), wantGone: false},
 	}
 
 	for _, tc := range tests {
@@ -234,7 +273,7 @@ func TestKillGhostsReportsAGhostItRefusesToSignal(t *testing.T) {
 // --kill-ghosts wanted, and reporting it would make every ordinary run look
 // like a partial failure.
 func TestKillGhostsStaysSilentAboutAGhostThatAlreadyExited(t *testing.T) {
-	swapArgvLookup(t, func(int) ([]string, error) { return nil, errors.New("no such process") })
+	swapArgvLookup(t, func(int) ([]string, error) { return nil, fs.ErrNotExist })
 
 	killed, failed := killGhosts([]GhostProcess{
 		{PID: 999999, Project: "work/api", Harness: HarnessClaude},
@@ -242,6 +281,28 @@ func TestKillGhostsStaysSilentAboutAGhostThatAlreadyExited(t *testing.T) {
 
 	if len(killed) != 0 || len(failed) != 0 {
 		t.Errorf("killed=%v failed=%v, want both empty", killed, failed)
+	}
+}
+
+// A ghost csm could not inspect is not a ghost that exited. Dropping it
+// silently produces the same "Found 1 ghost process(es)" followed by "No
+// processes were terminated (they may have already exited)" that this guard
+// exists to end -- just from a refused read rather than a disagreeing rule.
+func TestKillGhostsReportsAGhostItCouldNotInspect(t *testing.T) {
+	swapArgvLookup(t, func(int) ([]string, error) { return nil, syscall.EPERM })
+
+	killed, failed := killGhosts([]GhostProcess{
+		{PID: 4100, Project: "work/api", Harness: HarnessClaude},
+	})
+
+	if len(killed) != 0 {
+		t.Fatalf("killed %v without being able to read its command line", killed)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("got %d reported failures, want 1", len(failed))
+	}
+	if got := failed[0].Err.Error(); !strings.Contains(got, "4100") {
+		t.Errorf("reason %q does not name the pid csm could not inspect", got)
 	}
 }
 
@@ -270,6 +331,16 @@ func TestHarnessCandidateAdmitsEveryShapeAnAgentCanRunAs(t *testing.T) {
 	for _, comm := range []string{"claude", "omp", "bun", "node", "deno"} {
 		if !harnessCandidate(comm) {
 			t.Errorf("comm %q is not admitted, so its argv is never read", comm)
+		}
+	}
+	// macOS derives comm from the executable's own name, and Claude Code's
+	// native installer names that file after the version
+	// (~/.local/share/claude/versions/2.1.250). A prefilter that only knows
+	// agent names drops a running session before its argv is ever read.
+	for _, comm := range []string{"2.1.250", "2.1.250-beta", "2026.8.14"} {
+		if !harnessCandidate(comm) {
+			t.Errorf("comm %q is not admitted, so an agent installed under a "+
+				"version-named path is invisible to discovery", comm)
 		}
 	}
 	for _, comm := range []string{"bash", "Google Chrome for Testing", "Python"} {

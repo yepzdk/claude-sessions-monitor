@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The amd64 release binary no longer requires a glibc as new as the CI runner's; release builds are now statically linked (`CGO_ENABLED=0`)
 - `--kill-ghosts` printed "No processes were terminated (they may have already exited)" for a ghost it had listed and then declined to signal. It now names what the pid belongs to instead, so a refusal cannot read as a clean run
 - The `--kill-ghosts` recheck accepted any process whose name merely ended in "claude", so a recycled pid belonging to something like `wrap-claude` could be signalled on a session's behalf
+- A session whose Claude Code is installed under a version-named path (`~/.local/share/claude/versions/<version>`, which the native installer uses) was reported Inactive while it ran, and could never be found as a ghost: the process scan filtered on a name the kernel takes from the executable, and that name is the version
 
 ## [0.7.0] - 2026-08-28
 
