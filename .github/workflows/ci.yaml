@@ -53,9 +53,9 @@ jobs:
           GOOS: linux
           GOARCH: amd64
 
-      # Build tags hide code from a single pass: internal/jump's real
-      # implementation is darwin-only, so the run above type-checks a stub
-      # instead of the ~200 lines that do the work.
+      # Build tags hide code from a single pass: internal/jump's darwin and
+      # linux implementations share no fallback file, so each pass is the only
+      # one that type-checks its platform's several hundred lines.
       #
       # The action's cache key carries no GOOS, so saving here would collide
       # with what the step above already stored under that key.

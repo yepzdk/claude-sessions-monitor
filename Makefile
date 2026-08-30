@@ -20,12 +20,12 @@ GOLANGCI_LINT := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)/golangci
 # toolchain on a 1.25 machine. GOTOOLCHAIN=local blocks that and the install
 # fails; leave GOTOOLCHAIN at its default.
 #
-# Build tags hide code from a single pass: internal/jump's real implementation
-# is darwin-only and its stub is !darwin, so whichever GOOS runs, the other's
-# file goes untyped. Naming both, rather than letting one of them be the host,
-# is what makes a macOS machine lint the same pair a Linux one does. No file
-# here is constrained by architecture, so GOARCH is pinned for that reason
-# alone: to keep the host's out of the result.
+# Build tags hide code from a single pass: internal/jump is a darwin file and a
+# linux file with no shared fallback, so whichever GOOS runs, the other's files
+# go untyped. Naming both, rather than letting one of them be the host, is what
+# makes a macOS machine lint the same pair a Linux one does. No file here is
+# constrained by architecture, so GOARCH is pinned for that reason alone: to
+# keep the host's out of the result.
 lint:
 	@$(GOLANGCI_LINT) --version 2>/dev/null | grep -q ' $(patsubst v%,%,$(GOLANGCI_LINT_VERSION)) ' || \
 		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)

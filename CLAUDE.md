@@ -18,7 +18,7 @@ Tests sandbox `$HOME`. To run them against a clean one, keep the caches where th
 internal/
   session/  - Session discovery for both agents, log parsing, status detection, timeline/metrics
   ui/       - Terminal rendering (ANSI colors, formatting)
-  jump/     - Bring a session's terminal tab to the front (macOS + Ghostty)
+  jump/     - Bring a session's terminal to the front: the tab on macOS (Ghostty), the window on Linux (Hyprland, sway, wmctrl)
   web/      - Web dashboard (HTTP server, REST API, SSE, embedded frontend)
     static/ - Frontend assets (HTML, CSS, JS) embedded via go:embed
 main.go     - CLI entry point and flag handling

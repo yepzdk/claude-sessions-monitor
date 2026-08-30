@@ -114,7 +114,7 @@ func Focus(s session.Session) (Result, error) {
 		return Result{}, fmt.Errorf("that tab just closed")
 	}
 
-	return Result{Matches: matches, Name: chosen.Name}, nil
+	return Result{Matches: matches, Noun: "tab", Name: chosen.Name}, nil
 }
 
 // parseTerminals reads the tab-separated listing produced by
@@ -175,22 +175,17 @@ func runOsascript(script string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-// osascriptError turns osascript's exit status into something actionable.
-// cmd.Output() captures stderr on failure but Error() only reports the exit
-// code, so the real reason — a permission refusal, a missing dictionary term —
-// would otherwise never reach the user.
+// osascriptError turns osascript's exit status into something actionable. The
+// stderr extraction is shared with the Linux backend; only the interpretation
+// below is macOS's.
 func osascriptError(err error) error {
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || len(exit.Stderr) == 0 {
+	msg := stderrLine(err)
+	if msg == "" {
 		return err
-	}
-	msg := strings.TrimSpace(string(exit.Stderr))
-	if i := strings.IndexByte(msg, '\n'); i > 0 {
-		msg = msg[:i]
 	}
 	// -1743 is macOS refusing the Apple event outright.
 	if strings.Contains(msg, "-1743") || strings.Contains(msg, "Not authorized") {
 		return fmt.Errorf("csm isn't allowed to control Ghostty — enable it under System Settings > Privacy & Security > Automation")
 	}
-	return fmt.Errorf("%s", msg)
+	return errors.New(msg)
 }

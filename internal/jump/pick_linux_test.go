@@ -92,3 +92,68 @@ func TestPickWindowIgnoresWindowsWithoutPIDs(t *testing.T) {
 		t.Errorf("pickWindow() = (%q, ok %v), want 0xb", got.ID, ok)
 	}
 }
+
+func TestPickWindowStopsAtTheNearestOwningAncestor(t *testing.T) {
+	// `ghostty &` launched from a shell running in kitty, claude started in
+	// the ghostty: the chain reaches both terminals, and each owns a window.
+	// Collecting from every ancestor would report two candidates and blame a
+	// single-instance terminal that is not involved.
+	wins := []window{
+		{ID: "0xkitty", PID: 1000, Title: "nvim"},
+		{ID: "0xghostty", PID: 2000, Title: "◐ Fixing tests"},
+	}
+	chain := []int{5000, 4000, 2000, 3000, 1000, 1} // claude, zsh, ghostty, zsh, kitty, init
+
+	got, matches, ok := pickWindow(wins, chain)
+	if !ok {
+		t.Fatal("pickWindow() declined, want the nearest ancestor's window")
+	}
+	if got.ID != "0xghostty" {
+		t.Errorf("chose %q, want 0xghostty — the terminal the session runs in", got.ID)
+	}
+	if matches != 1 {
+		t.Errorf("matches = %d, want 1: the ancestor kitty window is not a candidate", matches)
+	}
+}
+
+func TestPickWindowIgnoresCSMsOwnWindow(t *testing.T) {
+	// Single-instance Ghostty with csm running in one of its windows. csm's
+	// window shares the pid but is certainly not the session's — it is where
+	// the user just pressed Enter — so the session's window is unambiguous.
+	wins := []window{
+		{ID: "0xcsm", PID: 28701, Title: "CSM: 2 working"},
+		{ID: "0xsession", PID: 28701, Title: "~/proj"},
+	}
+	chain := []int{5000, 4000, 28701, 1}
+
+	got, matches, ok := pickWindow(wins, chain)
+	if !ok {
+		t.Fatal("pickWindow() declined; csm's own window should not make the choice ambiguous")
+	}
+	if got.ID != "0xsession" {
+		t.Errorf("chose %q, want 0xsession", got.ID)
+	}
+	if matches != 1 {
+		t.Errorf("matches = %d, want 1 — csm's window is not something the user chose between", matches)
+	}
+}
+
+func TestPickWindowDoesNotLetCSMSuppressTheGuess(t *testing.T) {
+	// The fallback picks the one candidate that is not an idle shell. csm's
+	// title is not a path either, so counting it as a named candidate stopped
+	// the fallback from ever firing on a terminal shared with the dashboard.
+	wins := []window{
+		{ID: "0xcsm", PID: 28701, Title: "CSM: 1 working"},
+		{ID: "0xshell", PID: 28701, Title: "…/Projects/webwrap"},
+		{ID: "0xsession", PID: 28701, Title: "◐ Reviewing the changelog"},
+	}
+	chain := []int{5000, 4000, 28701, 1}
+
+	got, matches, ok := pickWindow(wins, chain)
+	if !ok || got.ID != "0xsession" {
+		t.Errorf("pickWindow() = (%q, ok %v), want 0xsession", got.ID, ok)
+	}
+	if matches != 2 {
+		t.Errorf("matches = %d, want 2 — the count the user is shown excludes csm's window", matches)
+	}
+}

@@ -15,7 +15,7 @@ the OS process table  ──►  classifyProcess()  ──►  both above  ─�
                                                     []session.Session  ◄──┘
                                                              │
                                     ┌────────────────────────┼────────────────────┐
-                                 ui (TUI)            web (JSON + SSE)     jump (focus tab)
+                                 ui (TUI)            web (JSON + SSE)     jump (focus tab/window)
 ```
 
 `internal/session` is the only package that reads logs or looks at processes.
@@ -261,8 +261,10 @@ survive that:
   still belongs to *the session's own* harness before `SIGTERM` — not merely to
   some coding agent, which would accept a recycled pid that now belongs to the
   other one. A session with no harness can never name a process to kill. An
-  unconfident pairing would be a coin flip over which session dies. `jump`
-  applies the same rule before trusting a pid's tty.
+  unconfident pairing would be a coin flip over which session dies. `jump` is
+  deliberately laxer — it reports a guess rather than declining, because a
+  wrongly raised window costs a keystroke and a wrongly killed session costs
+  work.
 - A ghost that fails that recheck for any reason but having exited is reported
   as a failure rather than dropped, so "csm listed it and refused to signal it"
   cannot read as "it had already exited".
@@ -517,29 +519,58 @@ rather than by which tools are installed, so a missing tool is reported as a
 missing tool. GNOME and KDE on Wayland have no way for one client to focus
 another's window; they get a sentence saying so. Every call is bounded at 3s:
 these are local IPC round-trips, and unlike macOS there is no consent dialog to
-wait on.
+wait on. `run` returns stdout *even on failure*, because hyprctl reports what
+went wrong there rather than on stderr.
 
 Hyprland is asked twice. 0.56 replaced dispatch arguments with a Lua API
 (`hl.dsp.focus{window="address:0x…"}`), and the old `focuswindow address:0x…`
 is a syntax error there while the new form is an unknown dispatcher on anything
-older. `hyprctl` exits 0 for success, for a window that is gone, and for a
-command it did not understand, so `"ok"` on stdout is the only success signal —
-check the body, never the exit code.
+older. Measured on 0.56.2, and the thing to get right if this ever needs
+touching:
+
+- Everything hyprctl says goes to **stdout**; stderr stays empty.
+- A dispatch it could not parse exits **7** with `error: … ')' expected near …`
+  or `hl.dispatch: expected a dispatcher`. Pre-0.56 it exits **0** and says
+  `Invalid dispatcher`, so the exit status cannot carry this decision — only
+  the body can. That is what `hyprRejectedForm` reads.
+- A dispatch it understood exits 0 and says either `ok` or
+  `warning: … window not found`. `"ok"` is the only success signal.
+
+Only a rejected *spelling* falls through to the other form; a real verdict is
+returned as it stands, so the legacy form's syntax complaint can no longer
+overwrite the working form's answer and invent a version incompatibility.
+`hyprWorkingForm` remembers which form answered, so the one that cannot work
+here is spawned once per csm run rather than once per jump.
 
 Matching (`pick_linux.go`, pure) is by process ownership, not title: a terminal
 that forks per window is an ancestor of the Claude process inside it, so the
-window whose pid is in `session.AncestorPIDs(GhostPID)` is the one. That is
-exact, and it is why there is no Linux equivalent of the macOS directory
-heuristic.
+window whose pid is in `session.AncestorPIDs(GhostPID)` is the one. The chain
+is walked **nearest-first and stops at the first pid that owns any window** —
+collecting from every ancestor would pull in the terminal that terminal was
+launched from, or an IDE's main window above a nested terminal, and report
+unrelated windows as one single-instance terminal. csm's own window is dropped
+first (`CSM: ` title prefix, written by `ui.buildTerminalTitle`): it shares the
+pid under a single-instance terminal, is certainly not the session's, and
+counting it made the guess below never fire.
 
-It stops being exact when one process owns many windows — Ghostty with
+Ownership stops being exact when one process owns many windows — Ghostty with
 `--gtk-single-instance`, `foot --server`, `kitty --single-instance`. Every
 window then reports the same pid and the compositor knows nothing else about
 them; Ghostty in particular exports no per-window identifier into the child
 environment, so there is nothing to recover. Where exactly one candidate's
 title does not look like a path it is used and reported as a guess; otherwise
 `Focus` declines and names the cause, because focusing one of the user's
-windows at random is worse than not jumping.
+windows at random is worse than not jumping. The advice to disable
+single-instance mode is only offered to terminals that have one
+(`singleInstanceTerminals`); GNOME Terminal and an IDE's integrated terminal
+hit the same wall with no flag to turn off.
+
+Unlike `--kill-ghosts`, `Focus` does not require `PIDConfident`. A second
+`.jsonl` appearing after `/clear` or `/resume` drops confidence for half an
+hour with one unambiguous process running, and refusing to jump for that long
+is worse than jumping and saying so: the result carries `Guessed`, and
+`Result.Message` then names the window title, which is the only way the user
+can see a wrong pick.
 
 ## Writing tests
 

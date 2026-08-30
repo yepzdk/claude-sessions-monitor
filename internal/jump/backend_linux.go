@@ -3,6 +3,7 @@
 package jump
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,14 +11,15 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // commandTimeout bounds every call out to a compositor. These are local IPC
 // round-trips that normally finish in milliseconds; the deadline exists so a
-// wedged compositor cannot freeze the render loop, which calls Focus on its
-// own goroutine. It is short on purpose -- unlike the macOS path, nothing here
-// can raise a consent dialog the user needs time to answer.
+// wedged compositor cannot stall the live view, which calls Focus inline from
+// its key handler. It is short on purpose -- unlike the macOS path, nothing
+// here can raise a consent dialog the user needs time to answer.
 const commandTimeout = 3 * time.Second
 
 // backend is one display server's way of listing and focusing windows.
@@ -63,20 +65,35 @@ func needsTool(b backend, tool string) (backend, error) {
 // desktopName reports the desktop environment for error messages, falling back
 // to something honest rather than empty.
 func desktopName() string {
-	if d := os.Getenv("XDG_CURRENT_DESKTOP"); d != "" {
-		return d
-	}
-	return "unknown"
+	return cmp.Or(os.Getenv("XDG_CURRENT_DESKTOP"), "unknown")
 }
 
 // run executes a compositor command and returns its stdout.
+//
+// stdout comes back even when the command failed, because hyprctl reports what
+// went wrong there rather than on stderr and exits non-zero for a dispatch it
+// could not parse; discarding it would leave nothing to tell a version
+// mismatch apart from a real refusal. The error prefers stderr (wmctrl's
+// "Cannot open display"), then stdout, and only then the bare exit status,
+// which on its own says nothing a user can act on.
 func run(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, name, args...).Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		// Without this the SIGKILL that enforced the deadline surfaces as
+		// "signal: killed", which reads as a crash.
+		return out, fmt.Errorf("%s didn't respond in time", name)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
+		if msg := stderrLine(err); msg != "" {
+			return out, fmt.Errorf("%s: %s", name, msg)
+		}
+		if msg := firstLine(strings.TrimSpace(string(out))); msg != "" {
+			return out, fmt.Errorf("%s: %s", name, msg)
+		}
+		return out, fmt.Errorf("%s: %w", name, err)
 	}
 	return out, nil
 }
@@ -95,44 +112,97 @@ func (hyprland) list() ([]window, error) {
 	return parseHyprctlClients(out)
 }
 
-func (hyprland) focus(id string) error {
-	// Hyprland 0.56 replaced dispatch arguments with a Lua API: the old
-	// `focuswindow address:0x…` is a syntax error there, and the new
-	// `hl.dsp.focus{window=…}` is an unknown dispatcher on anything older.
-	// Version-sniffing would have to guess where distro patches put the
-	// boundary, so both forms are tried and the one that answers takes effect.
-	// The address is what `hyprctl clients` reported, already 0x-prefixed.
-	forms := [][]string{
-		{"dispatch", fmt.Sprintf("hl.dsp.focus{window=%q}", "address:"+id)},
-		{"dispatch", "focuswindow", "address:" + id},
-	}
+// hyprFocusForms spell "focus this window" for hyprctl, newest first. The
+// address is what `hyprctl clients` reported, already 0x-prefixed.
+//
+// Hyprland 0.56 replaced dispatch arguments with a Lua API: `focuswindow
+// address:0x…` is a syntax error there, and `hl.dsp.focus{…}` is not a
+// dispatcher anything older recognises. Version-sniffing would have to guess
+// where distro patches put the boundary, so the forms are tried in turn.
+var hyprFocusForms = []func(addr string) []string{
+	func(addr string) []string {
+		return []string{"dispatch", fmt.Sprintf("hl.dsp.focus{window=%q}", "address:"+addr)}
+	},
+	func(addr string) []string {
+		return []string{"dispatch", "focuswindow", "address:" + addr}
+	},
+}
 
-	var failure error
-	for _, args := range forms {
-		out, err := run("hyprctl", args...)
-		if err != nil {
-			failure = err
+// hyprWorkingForm is the index of the form this Hyprland understood, so the
+// form that cannot work here is spawned once per csm run rather than once per
+// jump. First answer wins; the compositor does not change version underneath
+// a running dashboard.
+var hyprWorkingForm atomic.Int32
+
+func (hyprland) focus(id string) error {
+	first := int(hyprWorkingForm.Load())
+	for i := range hyprFocusForms {
+		n := (first + i) % len(hyprFocusForms)
+		out, err := run("hyprctl", hyprFocusForms[n](id)...)
+		body := strings.TrimSpace(string(out))
+
+		// Only a rejection of the spelling justifies trying the other form.
+		// Returning the last failure instead would let the legacy form's
+		// syntax complaint overwrite the real verdict from the form that did
+		// work, and report a version incompatibility that does not exist.
+		if hyprRejectedForm(body) {
 			continue
 		}
-		// hyprctl exits 0 whether the dispatch worked, named a window that is
-		// gone, or was not understood at all, so the body is the only signal.
-		// "ok" is success and nothing else is.
-		body := strings.TrimSpace(string(out))
+		if err != nil {
+			return err
+		}
+
+		hyprWorkingForm.Store(int32(n)) //nolint:gosec // index of a 2-element slice
+
+		// hyprctl exits 0 whether the dispatch worked or named a window that
+		// is already gone, so the body is the only signal. "ok" is success and
+		// nothing else is.
 		if strings.HasPrefix(body, "ok") {
 			return nil
 		}
-		failure = fmt.Errorf("hyprctl: %s", firstLine(body))
+		return fmt.Errorf("hyprctl: %s", hyprComplaint(body))
 	}
-	return failure
+	return fmt.Errorf("this Hyprland understood neither way of focusing a window — please report the output of `hyprctl version`")
 }
 
-// firstLine keeps a compositor's multi-line complaint to the part that fits on
-// the dashboard's one line of feedback.
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
+// hyprRejectedForm reports whether hyprctl refused the *spelling* of a dispatch
+// rather than answering it.
+//
+// Measured on 0.56.2: an unparseable dispatch exits 7 and prints a Lua syntax
+// error ("')' expected near 'address'") or "hl.dispatch: expected a dispatcher"
+// on stdout, while one it understood exits 0 and prints "ok" or a
+// "warning: … window not found". Pre-0.56 hyprctl exits 0 for everything and
+// prints "Invalid dispatcher" for a name it does not know, so the exit status
+// alone cannot carry this decision -- the body has to.
+func hyprRejectedForm(body string) bool {
+	return strings.Contains(body, "Invalid dispatcher") ||
+		strings.Contains(body, "expected a dispatcher") ||
+		strings.Contains(body, "expected near")
+}
+
+// hyprComplaint reduces a hyprctl refusal to the part worth showing. Measured
+// on 0.56.2, a refusal arrives as
+//
+//	warning: =[C]:-1: hl.focus: window not found
+//
+// Neither the severity label nor the Lua chunk that raised it survives contact
+// with a user: the sentence is already introduced as a failure to focus, and
+// the chunk names hyprctl's internals.
+func hyprComplaint(body string) string {
+	msg := firstLine(body)
+	for _, label := range []string{"error: ", "warning: "} {
+		msg = strings.TrimPrefix(msg, label)
 	}
-	return s
+	// A Lua chunk location: "=[C]:-1: " for a native binding, or
+	// "[string \"…\"]:1: " for a compiled snippet.
+	if strings.HasPrefix(msg, "=[") || strings.HasPrefix(msg, `[string "`) {
+		if i := strings.Index(msg, "]:"); i >= 0 {
+			if j := strings.Index(msg[i:], ": "); j >= 0 {
+				msg = strings.TrimSpace(msg[i+j+2:])
+			}
+		}
+	}
+	return msg
 }
 
 // hyprClient is the subset of `hyprctl -j clients` csm reads.
@@ -140,7 +210,6 @@ type hyprClient struct {
 	Address string `json:"address"`
 	PID     int    `json:"pid"`
 	Title   string `json:"title"`
-	Class   string `json:"class"`
 }
 
 func parseHyprctlClients(data []byte) ([]window, error) {
@@ -150,7 +219,7 @@ func parseHyprctlClients(data []byte) ([]window, error) {
 	}
 	wins := make([]window, 0, len(clients))
 	for _, c := range clients {
-		wins = append(wins, window{ID: c.Address, PID: c.PID, Title: c.Title, Class: c.Class})
+		wins = append(wins, window{ID: c.Address, PID: c.PID, Title: c.Title})
 	}
 	return wins, nil
 }
@@ -180,7 +249,6 @@ type swayNode struct {
 	ID          int        `json:"id"`
 	Name        string     `json:"name"`
 	PID         int        `json:"pid"`
-	AppID       string     `json:"app_id"`
 	Nodes       []swayNode `json:"nodes"`
 	FloatingCon []swayNode `json:"floating_nodes"`
 }
@@ -196,7 +264,7 @@ func parseSwayTree(data []byte) ([]window, error) {
 	var walk func(n swayNode)
 	walk = func(n swayNode) {
 		if n.PID > 0 {
-			wins = append(wins, window{ID: strconv.Itoa(n.ID), PID: n.PID, Title: n.Name, Class: n.AppID})
+			wins = append(wins, window{ID: strconv.Itoa(n.ID), PID: n.PID, Title: n.Name})
 		}
 		for _, child := range n.Nodes {
 			walk(child)
@@ -232,8 +300,11 @@ func (x11) focus(id string) error {
 //
 //	0x02c00007  0 12345  hostname  Window title with spaces
 //
-// The title is everything after the hostname, so the split is bounded at five
-// fields rather than splitting the whole line.
+// The title is the fifth column onwards, rejoined with single spaces. Column
+// padding varies, so the original run of spaces between words cannot be
+// recovered from Fields anyway -- and searching the line for the hostname
+// instead would cut at its first occurrence anywhere, which for hosts named
+// like a hex digit or a pid substring lands inside the earlier columns.
 func parseWmctrlList(data []byte) []window {
 	var wins []window
 	for line := range strings.SplitSeq(string(data), "\n") {
@@ -245,11 +316,11 @@ func parseWmctrlList(data []byte) []window {
 		if err != nil {
 			continue
 		}
-		title := ""
-		if parts := strings.SplitN(line, fields[3], 2); len(parts) == 2 {
-			title = strings.TrimSpace(parts[1])
-		}
-		wins = append(wins, window{ID: fields[0], PID: pid, Title: title})
+		wins = append(wins, window{
+			ID:    fields[0],
+			PID:   pid,
+			Title: strings.Join(fields[4:], " "),
+		})
 	}
 	return wins
 }

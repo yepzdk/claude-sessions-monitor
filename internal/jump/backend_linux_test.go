@@ -90,6 +90,86 @@ func TestParseWmctrlList(t *testing.T) {
 	}
 }
 
+func TestParseWmctrlListWithAHostnameThatCollides(t *testing.T) {
+	// The title used to be cut at the first occurrence of the hostname
+	// anywhere in the line. A host named like a hex digit matches inside the
+	// window id, and one that is a substring of the pid matches inside the
+	// pid, so both produced a garbled title that then went on to be judged by
+	// looksLikePath and shown to the user as what was focused.
+	out := []byte("0x00dec001  0 4321  dec  vim\n" +
+		"0x02c00007  0 12345  1  htop\n" +
+		"0x03000005  0 67890  0  ~/Projects\n")
+
+	wins := parseWmctrlList(out)
+	if len(wins) != 3 {
+		t.Fatalf("parsed %d windows, want 3", len(wins))
+	}
+	want := []string{"vim", "htop", "~/Projects"}
+	for i, w := range want {
+		if wins[i].Title != w {
+			t.Errorf("title[%d] = %q, want %q", i, wins[i].Title, w)
+		}
+	}
+}
+
+func TestParseWmctrlListWithNoTitle(t *testing.T) {
+	// A window with no title still has to yield a matchable pid.
+	wins := parseWmctrlList([]byte("0x02c00007  0 12345  archbox\n"))
+	if len(wins) != 1 || wins[0].PID != 12345 || wins[0].Title != "" {
+		t.Errorf("parseWmctrlList() = %+v, want one pid-carrying window with an empty title", wins)
+	}
+}
+
+// The strings below were captured from hyprctl 0.56.2 on Arch. Guessing them
+// is the whole risk in this code path: hyprctl reports on stdout, and it exits
+// 0 for a dispatch that failed for a real reason as readily as for one it
+// understood, so only the body separates "wrong spelling, try the other form"
+// from "this is your answer".
+func TestHyprRejectedForm(t *testing.T) {
+	rejected := []string{
+		// 0.56.2, legacy `dispatch focuswindow address:0x…`: the Lua parser
+		// chokes on the bare argument.
+		`error: [string "return hl.dispatch(focuswindow address:0xdead..."]:1: ')' expected near 'address'`,
+		// 0.56.2, a dispatch name it has no Lua binding for.
+		"error: return hl.dispatch(totallynotadispatcher):1: hl.dispatch: expected a dispatcher (e.g. hl.dsp.window.close())",
+		// Pre-0.56, where `hl.dsp.focus{…}` is just an unknown dispatcher name.
+		"Invalid dispatcher",
+	}
+	for _, body := range rejected {
+		if !hyprRejectedForm(body) {
+			t.Errorf("hyprRejectedForm(%q) = false, want the other form to be tried", body)
+		}
+	}
+
+	answered := []string{
+		"ok",
+		// 0.56.2 with a window that closed between listing and focusing: a
+		// real verdict, and returning it beats masking it with the legacy
+		// form's syntax complaint.
+		"warning: =[C]:-1: hl.focus: window not found",
+	}
+	for _, body := range answered {
+		if hyprRejectedForm(body) {
+			t.Errorf("hyprRejectedForm(%q) = true, want the answer to be used as-is", body)
+		}
+	}
+}
+
+func TestHyprComplaintKeepsOnlyTheReason(t *testing.T) {
+	// Captured from 0.56.2. The sentence this ends up in already says csm
+	// could not focus the window, so hyprctl's severity label is a redundant
+	// second one and the Lua chunk that raised it names hyprctl's internals.
+	got := hyprComplaint("warning: =[C]:-1: hl.focus: window not found\n\n → Note: dispatch in lua is a shorthand")
+	if got != "hl.focus: window not found" {
+		t.Errorf("hyprComplaint() = %q, want just the reason", got)
+	}
+
+	// A refusal with no label or chunk must survive untouched.
+	if got := hyprComplaint("no such window"); got != "no such window" {
+		t.Errorf("hyprComplaint() = %q, want it returned as-is", got)
+	}
+}
+
 func TestDetectBackendReportsWhatIsMissing(t *testing.T) {
 	// A compositor csm cannot drive must say so, rather than failing later
 	// with something about a missing command.

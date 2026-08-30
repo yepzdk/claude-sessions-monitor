@@ -214,9 +214,12 @@ the terminal that spawned the session is one of its parent processes, which is e
 That exactness needs one terminal process per window, which is the default for most
 terminals. If yours multiplexes every window into a single process — Ghostty with
 `--gtk-single-instance`, `foot --server`, `kitty --single-instance` — the compositor
-reports the same PID for all of them and csm has nothing left to tell them apart. It will
-say so instead of raising one at random. Launching that terminal with its single-instance
-mode off makes jumping work:
+reports the same PID for all of them and csm has little left to tell them apart. It
+ignores its own window, and if exactly one of the rest is titled after something it is
+running rather than after a directory, it raises that one and tells you it guessed,
+naming the window it chose. When even that is ambiguous it says so instead of raising one
+at random. For a terminal that has a single-instance mode, launching it with that mode off
+restores exact matching:
 
 ```bash
 ghostty --gtk-single-instance=false
