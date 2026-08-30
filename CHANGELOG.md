@@ -14,11 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The live dashboard checks for a newer release once a day in the background; set `CSM_NO_UPDATE_CHECK` to disable
 - An AUR package, `csm-bin`, published automatically on release
 - Releases now ship a `checksums.txt` asset, which `install.sh`, `csm -upgrade` and the Homebrew formula all verify against
+- `harness` in the session JSON (`csm -l -json` and the dashboard's `/api/sessions`), naming which coding agent a session belongs to
 
 ### Changed
 
 - The scan for running Claude processes reads the kernel's process table directly (`/proc` on Linux, `sysctl kern.proc.all` on macOS) instead of parsing `ps` output. On Linux csm no longer spawns any subprocess except `xdg-open`
 - Platform-specific code (`getProcessCwd`, `GetOAuthToken`, `openBrowser`) moved from `runtime.GOOS` switches to build-tagged files, so an unsupported platform is a build error rather than a silent no-op
+- A process is identified from its full argument vector, read from the kernel (`/proc/<pid>/cmdline`, `kern.procargs2`), instead of from the truncated name the OS accounts it under. Session discovery and the `--kill-ghosts` recheck now apply the same rule, so a process one of them finds cannot be silently rejected by the other
 
 ### Fixed
 
@@ -27,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The usage view said "OAuth token not found" for every credential failure. It now reports the actual reason, and rejects credentials with an empty access token instead of sending an empty `Bearer` header
 - Pressing `w` said nothing when the browser could not be launched (e.g. Linux without `xdg-utils`). The live view now confirms the launch or shows the error
 - The amd64 release binary no longer requires a glibc as new as the CI runner's; release builds are now statically linked (`CGO_ENABLED=0`)
+- `--kill-ghosts` printed "No processes were terminated (they may have already exited)" for a ghost it had listed and then declined to signal. It now names what the pid belongs to instead, so a refusal cannot read as a clean run
+- The `--kill-ghosts` recheck accepted any process whose name merely ended in "claude", so a recycled pid belonging to something like `wrap-claude` could be signalled on a session's behalf
 
 ## [0.7.0] - 2026-08-28
 

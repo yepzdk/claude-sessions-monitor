@@ -88,6 +88,20 @@ A user entry that carries only `tool_result` blocks is *not* a prompt
 
 ### Processes, ghosts and the pairing pitfall
 
+A process is identified in two steps, in `harness.go`. `harnessCandidate`
+filters the process table on `comm` — cheap, already in hand, and deliberately
+loose, because missing an agent here means never reading the argv that would
+have identified it. `classifyProcess` then decides from the full argv, read
+from `/proc/<pid>/cmdline` or `kern.procargs2`, and returns a `Harness`
+(`claude`, `omp`, or none). It matches the basename of a whole argv element,
+never a substring: `~/.omp/puppeteer/.../Google Chrome for Testing` and
+`Python -u /var/.../omp-python-runner/runner.py` both contain "omp" and are a
+browser and a REPL. Taking argv as the kernel stored it, rather than
+re-splitting a printed command line, is what keeps `/Volumes/My Disk/bin/claude`
+one element. Discovery and the pre-`SIGTERM` recheck call the same function, so
+a pid one lists can only fail the other by having been recycled. `Session` and
+`GhostProcess` both carry the harness, serialized as `harness`.
+
 Claude Code (2.1.x) keeps a registry at `~/.claude/sessions/<pid>.json` with
 the pid, session id and cwd of every live session; `registry.go` reads it.
 Every entry is validated against the set of `claude` pids the scan found,
@@ -117,9 +131,15 @@ survive that:
   headless `claude -p` whose shell has exited. Known ceiling: a Linux
   subreaper adopts orphans instead of pid 1 and this misses them.
 - `ghostsFrom` refuses any session that is not `PIDConfident`, and
-  `KillGhostProcesses` re-checks the pid is still a claude process before
-  `SIGTERM`. An unconfident pairing would be a coin flip over which session
-  dies. `jump` applies the same rule before trusting a pid's tty.
+  `KillGhostProcesses` re-checks, through `verifyGhostProcess`, that the pid
+  still belongs to *the session's own* harness before `SIGTERM` — not merely to
+  some coding agent, which would accept a recycled pid that now belongs to the
+  other one. A session with no harness can never name a process to kill. An
+  unconfident pairing would be a coin flip over which session dies. `jump`
+  applies the same rule before trusting a pid's tty.
+- A ghost that fails that recheck for any reason but having exited is reported
+  as a failure rather than dropped, so "csm listed it and refused to signal it"
+  cannot read as "it had already exited".
 
 ### `Degraded`
 

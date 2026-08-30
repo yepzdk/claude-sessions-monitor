@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // procRoot is where procfs is mounted. A var so a test can point the scan at a
@@ -49,14 +50,29 @@ func listProcessesNative() ([]procInfo, error) {
 	return procs, nil
 }
 
-// processComm returns the command name of one pid.
-func processComm(pid int) (string, error) {
-	data, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "stat"))
+// processArgv returns the full argument vector of one pid.
+//
+// /proc/<pid>/cmdline holds argv as the kernel stored it: NUL-separated, one
+// element per argument. Nothing re-splits it on spaces, so an agent installed
+// under a path holding a space stays a single element and classifyProcess sees
+// the basename it expects.
+//
+// The file is empty for a kernel thread, and for a process that has exited but
+// whose entry has not been reaped. Both come back as an empty argv, which the
+// caller reads as "no live process to attribute".
+func processArgv(pid int) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "cmdline"))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	comm, _, err := parseProcStat(data)
-	return comm, err
+	// The kernel terminates every element, the last one included, so trimming
+	// first is what keeps Split from returning a trailing empty element. An
+	// empty element *between* two NULs is a real empty argument and survives.
+	trimmed := strings.Trim(string(data), "\x00")
+	if trimmed == "" {
+		return nil, nil
+	}
+	return strings.Split(trimmed, "\x00"), nil
 }
 
 // parseProcStat pulls the command name and the parent pid out of one

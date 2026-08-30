@@ -5,6 +5,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -195,29 +196,62 @@ func writeProcEntry(t *testing.T, root, pid, stat string) {
 	}
 }
 
-// isClaudeProcess is the guard --kill-ghosts runs before it sends SIGTERM. If
-// it says yes for anything but a claude process, csm kills whatever unrelated
-// process inherited a recycled pid.
-func TestIsClaudeProcessRefusesAnythingButClaude(t *testing.T) {
+// procfs stores argv NUL-separated, exactly as the kernel received it. Reading
+// it that way is what keeps an agent installed under a path holding a space in
+// one piece; re-splitting a printed command line on whitespace is what used to
+// break it.
+func TestProcessArgvKeepsArgumentsWholeAcrossSpacesAndEmptyValues(t *testing.T) {
 	root := t.TempDir()
-	writeProcEntry(t, root, "101", "101 (claude) S 1 101\n")
-	writeProcEntry(t, root, "303", "303 (bash) S 1 303\n")
+	writeProcCmdline(t, root, "101", "/Volumes/My Disk/bin/claude\x00--resume\x00")
+	// A process can pass an empty argument, and the kernel writes it as two
+	// adjacent NULs. Trimming has to leave that one alone.
+	writeProcCmdline(t, root, "202", "prog\x00\x00tail\x00")
+	// A kernel thread has no command line at all, and neither does a process
+	// that has exited but not been reaped.
+	writeProcCmdline(t, root, "303", "")
 	procRootFor(t, root)
 
 	tests := []struct {
 		name string
 		pid  int
-		want bool
+		want []string
 	}{
-		{"a claude process", 101, true},
-		{"an unrelated process holding a recycled pid", 303, false},
-		{"a pid that no longer exists", 999, false},
+		{"a path holding a space stays one argument", 101, []string{"/Volumes/My Disk/bin/claude", "--resume"}},
+		{"an empty argument between two others survives", 202, []string{"prog", "", "tail"}},
+		{"a process with no command line", 303, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isClaudeProcess(tt.pid); got != tt.want {
-				t.Errorf("isClaudeProcess(%d) = %v, want %v", tt.pid, got, tt.want)
+			got, err := processArgv(tt.pid)
+			if err != nil {
+				t.Fatalf("processArgv(%d): %v", tt.pid, err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("processArgv(%d) = %q, want %q", tt.pid, got, tt.want)
 			}
 		})
+	}
+}
+
+// A pid that is gone has to be reported as an error, not as an empty argv. The
+// kill guard tells the two apart, and only one of them is worth reporting to
+// the user.
+func TestProcessArgvReportsAPIDThatIsGone(t *testing.T) {
+	procRootFor(t, t.TempDir())
+
+	if argv, err := processArgv(999); err == nil {
+		t.Errorf("processArgv on a missing pid returned %q and no error", argv)
+	}
+}
+
+// writeProcCmdline creates <root>/<pid>/cmdline holding one NUL-separated argv.
+func writeProcCmdline(t *testing.T, root, pid, cmdline string) {
+	t.Helper()
+	dir := filepath.Join(root, pid)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

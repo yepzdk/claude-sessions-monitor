@@ -76,12 +76,36 @@ const fakeCwd = "/home/u/proj"
 
 // fakeProcesses points the scan at a fixed process list and gives every process
 // the same working directory, for the duration of one test.
+//
+// Discovery reads an argv as well as a comm, so each process is given the
+// simplest argv its comm implies. A test that needs a specific command line
+// calls swapArgvLookup afterwards.
 func fakeProcesses(t *testing.T, procs []procInfo) {
 	t.Helper()
 	original := listProcesses
 	t.Cleanup(func() { listProcesses = original })
 	listProcesses = func() ([]procInfo, error) { return procs, nil }
 	swapCwdLookup(t, func(int) (string, error) { return fakeCwd, nil })
+
+	byPID := make(map[int][]string, len(procs))
+	for _, p := range procs {
+		byPID[p.pid] = []string{p.comm}
+	}
+	swapArgvLookup(t, func(pid int) ([]string, error) {
+		argv, ok := byPID[pid]
+		if !ok {
+			return nil, fs.ErrNotExist
+		}
+		return argv, nil
+	})
+}
+
+// swapArgvLookup replaces the per-process argv lookup for one test.
+func swapArgvLookup(t *testing.T, fn func(int) ([]string, error)) {
+	t.Helper()
+	original := processArgvFn
+	t.Cleanup(func() { processArgvFn = original })
+	processArgvFn = fn
 }
 
 // swapCwdLookup replaces the per-process working-directory lookup. It is a
@@ -91,4 +115,57 @@ func swapCwdLookup(t *testing.T, fn func(int) (string, error)) {
 	original := getProcessCwdFn
 	t.Cleanup(func() { getProcessCwdFn = original })
 	getProcessCwdFn = fn
+}
+
+// The bug this guards against is a disagreement, not a wrong answer: discovery
+// listing a process the pre-SIGTERM recheck then refuses. csm prints "Found 1
+// ghost process(es)" and terminates nothing, every run, while the process
+// lives. Both sides call classifyProcess over an argv, so the only way a listed
+// pid can fail the recheck is by having been recycled -- which is what the
+// recheck is for.
+func TestDiscoveryAndTheKillGuardIdentifyAProcessTheSameWay(t *testing.T) {
+	// A claude installed under a path holding a space, and a wrapper script
+	// whose name merely ends in "claude". Both reach the argv test: comm is a
+	// deliberately loose prefilter.
+	fakeProcesses(t, []procInfo{
+		{pid: 101, ppid: 1, comm: "claude"},
+		{pid: 202, ppid: 1, comm: "work-claude"},
+	})
+	argv := map[int][]string{
+		101: {"/Volumes/My Disk/bin/claude", "--resume"},
+		202: {"/home/u/bin/work-claude"},
+	}
+	swapArgvLookup(t, func(pid int) ([]string, error) { return argv[pid], nil })
+
+	dirs, _, err := getRunningClaudeDirs()
+	if err != nil {
+		t.Fatalf("getRunningClaudeDirs: %v", err)
+	}
+
+	discovered := make(map[int]bool)
+	for _, pids := range dirs {
+		for _, pid := range pids {
+			discovered[pid] = true
+		}
+	}
+
+	for _, tc := range []struct {
+		pid   int
+		want  bool
+		claim string
+	}{
+		{101, true, "a claude under a path holding a space"},
+		{202, false, "a wrapper whose name only ends in claude"},
+	} {
+		if discovered[tc.pid] != tc.want {
+			t.Errorf("%s: discovered = %v, want %v", tc.claim, discovered[tc.pid], tc.want)
+		}
+		// The recheck has to reach the same verdict, or a discovered ghost is
+		// listed and never signalled.
+		verifyErr := verifyGhostProcess(tc.pid, HarnessClaude)
+		if (verifyErr == nil) != tc.want {
+			t.Errorf("%s: discovery says %v but the kill guard says %v (%v)",
+				tc.claim, tc.want, verifyErr == nil, verifyErr)
+		}
+	}
 }

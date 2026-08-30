@@ -3,6 +3,9 @@
 package session
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -34,13 +37,63 @@ func listProcessesNative() ([]procInfo, error) {
 	return out, nil
 }
 
-// processComm returns the command name of one pid.
-func processComm(pid int) (string, error) {
-	proc, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+// processArgv returns the full argument vector of one pid.
+//
+// macOS has no procfs. kern.procargs2 is the supported way to read another
+// process's argv, and unlike proc_pidinfo it needs no cgo -- which matters
+// because the release workflow cross-builds the darwin targets from a Linux
+// runner in one job.
+func processArgv(pid int) ([]string, error) {
+	buf, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
-		return "", fmt.Errorf("sysctl kern.proc.pid %d: %w", pid, err)
+		return nil, fmt.Errorf("sysctl kern.procargs2 %d: %w", pid, err)
 	}
-	return unix.ByteSliceToString(proc.Proc.P_comm[:]), nil
+	return parseProcArgs2(buf)
+}
+
+// parseProcArgs2 pulls argv out of a kern.procargs2 buffer.
+//
+// The layout is a 32-bit argument count, the executable path, NUL padding to
+// an alignment boundary, then that many NUL-terminated arguments, and then the
+// environment. Two things follow from it. The executable path is skipped
+// rather than used as argv[0]: it is the binary the kernel resolved, where
+// argv[0] is what the caller actually passed, and the two differ for anything
+// launched through a symlink -- which is how Claude Code is installed. And the
+// count is what stops the walk, because nothing but the count separates the
+// last argument from the first environment variable.
+func parseProcArgs2(buf []byte) ([]string, error) {
+	if len(buf) < 4 {
+		return nil, fmt.Errorf("kern.procargs2 returned %d bytes, too few to hold an argument count", len(buf))
+	}
+	// Every argument costs at least its terminator, so the buffer's own length
+	// bounds the count. The check runs before the width conversion, so a
+	// malformed buffer can neither size an allocation nor overflow an int.
+	count := binary.NativeEndian.Uint32(buf[:4])
+	if count == 0 || uint64(count) > uint64(len(buf)) {
+		return nil, fmt.Errorf("kern.procargs2 reports %d arguments in %d bytes", count, len(buf))
+	}
+	argc := int(count)
+
+	rest := buf[4:]
+	end := bytes.IndexByte(rest, 0)
+	if end < 0 {
+		return nil, errors.New("kern.procargs2 holds no terminated executable path")
+	}
+	rest = rest[end+1:]
+	for len(rest) > 0 && rest[0] == 0 {
+		rest = rest[1:]
+	}
+
+	argv := make([]string, 0, argc)
+	for len(argv) < argc {
+		end := bytes.IndexByte(rest, 0)
+		if end < 0 {
+			return nil, fmt.Errorf("kern.procargs2 ended after %d of %d arguments", len(argv), argc)
+		}
+		argv = append(argv, string(rest[:end]))
+		rest = rest[end+1:]
+	}
+	return argv, nil
 }
 
 // kinfoToProcInfo copies the three fields this package reads out of a kinfo_proc.
@@ -51,7 +104,8 @@ func processComm(pid int) (string, error) {
 // badged a ghost.
 //
 // P_comm is the accounting name: the executable's basename, capped at 16 bytes.
-// isClaudeComm matches on the suffix.
+// harnessCandidate matches on the suffix, and classifyProcess then decides from
+// the full argv.
 func kinfoToProcInfo(p *unix.KinfoProc) procInfo {
 	return procInfo{
 		pid:  int(p.Proc.P_pid),

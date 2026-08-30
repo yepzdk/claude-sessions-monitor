@@ -32,7 +32,7 @@ const (
 	StatusInactive   Status = "Inactive"
 )
 
-// Session represents a Claude Code session
+// Session represents a session of one of the coding agents csm watches
 type Session struct {
 	Project      string    `json:"project"`
 	Status       Status    `json:"status"`
@@ -43,7 +43,8 @@ type Session struct {
 	LogFile      string    `json:"log_file"`
 	ProjectPath  string    `json:"-"`                    // Encoded project directory name (as used under ~/.claude/projects)
 	CWD          string    `json:"-"`                    // Absolute working directory recorded in the log
-	SessionID    string    `json:"session_id,omitempty"` // Claude session UUID (log filename stem)
+	SessionID    string    `json:"session_id,omitempty"` // Session UUID (log filename stem)
+	Harness      Harness   `json:"harness"`              // Which coding agent this session belongs to
 	Origin       Origin    `json:"origin,omitempty"`     // Where the session was launched from
 	IsGhost      bool      `json:"is_ghost,omitempty"`   // True if process running but log is stale
 	GhostPID     int       `json:"ghost_pid,omitempty"`  // PID of the ghost process (for killing)
@@ -231,14 +232,11 @@ var listProcesses = listProcessesNative
 // can drive getRunningClaudeDirs without a real process behind each pid.
 var getProcessCwdFn = getProcessCwd
 
-// isClaudeComm reports whether a process name belongs to Claude Code.
+// processArgvFn reads one process's full argument vector. A var so a test can
+// supply an argv without a real process behind the pid.
 //
-// Both platforms record a basename, capped at 15 bytes on Linux and 16 on
-// macOS. The match is on the suffix so that a name carrying a path in front of
-// it still counts.
-func isClaudeComm(comm string) bool {
-	return strings.HasSuffix(comm, "claude")
-}
+// See listprocs_linux.go and listprocs_darwin.go for the implementations.
+var processArgvFn = processArgv
 
 // getRunningClaudeDirs returns a map of encoded directory names to PIDs where
 // Claude processes are running.
@@ -274,7 +272,17 @@ func getRunningClaudeDirs() (map[string][]int, map[int]bool, error) {
 	}
 
 	for _, row := range procs {
-		if !isClaudeComm(row.comm) {
+		// comm narrows the table to the few pids worth a second read; argv is
+		// what actually identifies the process. Discovery and the pre-SIGTERM
+		// recheck in KillGhostProcesses run the same classifyProcess over the
+		// same kind of input, so a pid this loop lists can only fail that
+		// recheck by having been recycled -- not by the two disagreeing about
+		// what a claude process looks like.
+		if !harnessCandidate(row.comm) {
+			continue
+		}
+		argv, err := processArgvFn(row.pid)
+		if err != nil || classifyProcess(argv) != HarnessClaude {
 			continue
 		}
 		if row.ppid == 1 {
@@ -696,7 +704,7 @@ func parseLogFileWithLimit(logFile string, keep int, maxLineBytes int) (parsedLo
 	return pl, scanner.Err()
 }
 
-// parseSession parses a session from its log file
+// parseSession parses a Claude Code session from its log file
 func parseSession(projectName, logFile string, isRunning bool, pid int, orphaned bool) (Session, error) {
 	session := Session{
 		Project:     decodeProjectName(projectName),
@@ -704,6 +712,7 @@ func parseSession(projectName, logFile string, isRunning bool, pid int, orphaned
 		Status:      StatusInactive, // Default to inactive
 		ProjectPath: projectName,    // Store the encoded name for matching
 		SessionID:   sessionIDFromLogFile(logFile),
+		Harness:     HarnessClaude,
 	}
 
 	// Resolve the session's origin (terminal / IDE / Claude Desktop).
@@ -1251,14 +1260,18 @@ func extractTask(entry *LogEntry) string {
 	return "-"
 }
 
-// GhostProcess represents an orphaned Claude process
+// GhostProcess represents an orphaned coding agent process
 type GhostProcess struct {
 	PID     int
 	Project string
 	Age     time.Duration
+	// Harness is the agent this process is believed to belong to. It comes
+	// from the session, not from a fresh guess about the pid, because it is
+	// what the pre-SIGTERM recheck verifies the pid against.
+	Harness Harness
 }
 
-// FindGhostProcesses returns Claude processes that have lost their parent and
+// FindGhostProcesses returns coding agent processes that have lost their parent and
 // whose log has been silent for longer than GhostThreshold.
 func FindGhostProcesses() ([]GhostProcess, error) {
 	sessions, err := Discover()
@@ -1298,20 +1311,11 @@ func ghostsFrom(sessions []Session) []GhostProcess {
 				PID:     s.GhostPID,
 				Project: s.Project,
 				Age:     time.Since(s.LastActivity),
+				Harness: s.Harness,
 			})
 		}
 	}
 	return ghosts
-}
-
-// isClaudeProcess checks whether the given PID belongs to a process named "claude".
-// This guards against PID reuse where a stale PID now belongs to an unrelated process.
-func isClaudeProcess(pid int) bool {
-	comm, err := processComm(pid)
-	if err != nil {
-		return false
-	}
-	return isClaudeComm(comm)
 }
 
 // KillGhostProcesses sends SIGTERM to every ghost process.
@@ -1326,10 +1330,26 @@ func KillGhostProcesses() (killed []GhostProcess, failed []GhostKillFailure, err
 	if err != nil {
 		return nil, nil, err
 	}
+	killed, failed = killGhosts(ghosts)
+	return killed, failed, nil
+}
 
+// killGhosts is the signalling half of KillGhostProcesses, split from the
+// discovery half so a test can drive it with a ghost list. The property worth
+// testing here is what it refuses to signal, and that path sends nothing.
+func killGhosts(ghosts []GhostProcess) (killed []GhostProcess, failed []GhostKillFailure) {
 	for _, ghost := range ghosts {
-		// The pid may have been recycled by an unrelated process since Discover.
-		if !isClaudeProcess(ghost.PID) {
+		// The pid may have been recycled since Discover, and "recycled"
+		// includes a process belonging to a different coding agent.
+		if verifyErr := verifyGhostProcess(ghost.PID, ghost.Harness); verifyErr != nil {
+			// A ghost that exited on its own is the outcome --kill-ghosts
+			// wanted, and needs no report. Anything else means csm listed a
+			// process one moment and refused to signal it the next, and
+			// saying nothing would leave that indistinguishable from a clean
+			// run.
+			if !errors.Is(verifyErr, errProcessGone) {
+				failed = append(failed, GhostKillFailure{Ghost: ghost, Err: verifyErr})
+			}
 			continue
 		}
 
@@ -1351,7 +1371,7 @@ func KillGhostProcesses() (killed []GhostProcess, failed []GhostKillFailure, err
 		killed = append(killed, ghost)
 	}
 
-	return killed, failed, nil
+	return killed, failed
 }
 
 // GhostKillFailure is a ghost process that would not accept SIGTERM, paired

@@ -7,7 +7,7 @@ Claude Sessions Monitor (csm) is a CLI tool that monitors Claude Code sessions a
 ## Tech Stack
 
 - Go 1.25+
-- Standard library, plus `golang.org/x/term` for raw terminal input. No other third-party dependencies.
+- Standard library, plus `golang.org/x/term` for raw terminal input and `golang.org/x/sys` for the macOS process table. No other third-party dependencies.
 
 Tests sandbox `$HOME`. To run them against a clean one, keep the caches where they are:
 `HOME=<tmpdir> GOMODCACHE=$(go env GOMODCACHE) GOCACHE=$(go env GOCACHE) go test ./... -count=1`
