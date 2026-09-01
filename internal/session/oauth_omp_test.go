@@ -9,10 +9,16 @@ import (
 	"time"
 )
 
-// stubOMP puts a fake omp on PATH and points HOME at a temp directory, so
+// stubOMP puts a fake omp first on PATH and points HOME at a temp directory, so
 // nothing in these tests reaches the real omp, the real credential store or the
 // real ~/.claude.json. script is the body of a shell script that stands in for
 // the whole omp CLI.
+//
+// The stub directory is prepended rather than replacing PATH: the stub still
+// wins the lookup for "omp", but the ordinary utilities a stub script may call
+// stay resolvable. Replacing PATH outright left `sleep` unresolvable under
+// dash, which found it only because bash-as-sh falls back to a compiled-in
+// default path -- so the hang-guard test passed on macOS and failed on Linux.
 func stubOMP(t *testing.T, script string) string {
 	t.Helper()
 
@@ -24,7 +30,7 @@ func stubOMP(t *testing.T, script string) string {
 	}
 
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", bin)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return home
 }
 
