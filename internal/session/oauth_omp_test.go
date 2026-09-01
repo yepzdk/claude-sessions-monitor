@@ -162,9 +162,18 @@ esac
 	}
 }
 
-// An omp that never returns must not take the dashboard with it.
+// An omp that never returns must not take the dashboard with it. FetchAPIQuota
+// holds the quota cache's lock across the call, so a stall here stalls the TUI
+// and every HTTP consumer too.
+//
+// The sleep is backgrounded so that killing the shell cannot also kill it: it
+// then survives holding the write end of the stdout pipe, which is what makes
+// Wait block past the timeout. A plain foreground `sleep` is not enough --
+// shells that exec the last command leave no grandchild, so the test would pass
+// without exercising the case it exists for (as it did on macOS while failing on
+// Linux).
 func TestOMPOAuthTokenGivesUpOnAnOMPThatHangs(t *testing.T) {
-	stubOMP(t, "sleep 30\n")
+	stubOMP(t, "sleep 30 &\nwait\n")
 
 	restore := ompCommandTimeout
 	ompCommandTimeout = 50 * time.Millisecond

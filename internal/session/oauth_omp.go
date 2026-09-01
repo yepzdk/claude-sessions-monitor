@@ -199,6 +199,13 @@ func runOMP(binary string, args ...string) (string, error) {
 	// No stdin. omp must not be able to mistake this for an interactive run and
 	// block the dashboard waiting on an answer nobody is there to give.
 	cmd.Stdin = nil
+	// Cancelling the context kills omp, but not anything omp itself started, and
+	// a grandchild inherits the write end of these pipes. Without a WaitDelay,
+	// Wait blocks on the pipe copy until that grandchild exits -- so the timeout
+	// above would bound nothing, and FetchAPIQuota holds the quota cache's lock
+	// across this call, stalling the TUI and every HTTP consumer with it. The
+	// delay closes the pipes and gives up on output csm no longer wants.
+	cmd.WaitDelay = 500 * time.Millisecond
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
