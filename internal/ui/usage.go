@@ -21,15 +21,17 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 	// see rawNewline in ui.go for why printing line-by-line causes flicker.
 	var buf strings.Builder
 
-	// Named for its scope. Both numbers below are Claude Code's: the quota comes
-	// from Anthropic's OAuth usage endpoint, and the per-session tokens are read
-	// out of Claude Code's own logs. An omp session appears in neither, and a
-	// heading that said only "Token Usage" would read as covering everything.
-	fmt.Fprintf(&buf, "%sToken Usage%s %s(Claude Code)%s%s%s", Bold, Reset, Dim, Reset, nl, nl)
+	// Scoped per section, not once for the whole view, because the two sections
+	// no longer have the same scope. The quota is the Anthropic account's, and
+	// every harness billing that plan is already inside those numbers -- csm
+	// will ask omp for the token when Claude Code's has expired, and it is the
+	// same account either way. The per-session tokens below really are read out
+	// of Claude Code's logs alone, so an omp session appears in that half only.
+	fmt.Fprintf(&buf, "%sToken Usage%s%s%s", Bold, Reset, nl, nl)
 
 	// --- API Quota Section ---
 	width := getTerminalWidth()
-	sectionHeader := "API Quota"
+	sectionHeader := "API Quota (Anthropic account)"
 	separatorLen := width - 4 - len(sectionHeader) - 1
 	if separatorLen < 1 {
 		separatorLen = 1
@@ -48,6 +50,9 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 		if apiQuota.ExtraUsage != nil && apiQuota.ExtraUsage.IsEnabled {
 			fmt.Fprintf(&buf, "  %sExtra usage: enabled%s%s", Dim, Reset, nl)
 		}
+		if apiQuota.Source != "" {
+			fmt.Fprintf(&buf, "  %svia %s%s%s", Dim, apiQuota.Source, Reset, nl)
+		}
 	} else {
 		// No guessed default: "not found" was printed for every reason the
 		// quota could not be read, including reasons no sign-in would fix.
@@ -55,13 +60,18 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 		if apiQuota != nil && apiQuota.Error != "" {
 			errMsg = apiQuota.Error
 		}
+		// The source belongs on a failure too: a refusal means something
+		// different depending on whose token was refused.
+		if apiQuota != nil && apiQuota.Source != "" {
+			errMsg += ", via " + apiQuota.Source
+		}
 		fmt.Fprintf(&buf, "  %sNot available (%s)%s%s", Dim, errMsg, Reset, nl)
 	}
 
 	buf.WriteString(nl)
 
 	// --- Local Usage Section ---
-	sectionHeader = "Local Usage (5h window)"
+	sectionHeader = "Local Usage (5h window, Claude Code)"
 	separatorLen = width - 4 - len(sectionHeader) - 1
 	if separatorLen < 1 {
 		separatorLen = 1

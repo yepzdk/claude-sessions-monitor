@@ -123,3 +123,85 @@ func TestComputeUsageReportsDiscoveryFailure(t *testing.T) {
 			`"No token usage in the past 5 hours."`)
 	}
 }
+
+// The body of a failed usage-API response is read before the status is checked,
+// and then used to be thrown away. "401 Unauthorized" is the same text whether
+// the token expired, was revoked or never had the scope; the API says which, and
+// the panel was reporting the status line instead of the answer.
+func TestAPIErrorMessageCarriesTheAPIsOwnExplanation(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		status string
+		want   string
+	}{
+		{
+			name:   "the expiry the endpoint actually reports",
+			body:   `{"type":"error","error":{"type":"authentication_error","message":"OAuth access token has expired. Re-authenticate to continue."}}`,
+			status: "401 Unauthorized",
+			want:   "HTTP 401 Unauthorized: OAuth access token has expired. Re-authenticate to continue.",
+		},
+		{
+			// A gateway or proxy failure, where the status line really is all
+			// there is. Inventing a message here would be worse than the status.
+			name:   "an HTML error page falls back to the status",
+			body:   `<html><body>502 Bad Gateway</body></html>`,
+			status: "502 Bad Gateway",
+			want:   "HTTP 502 Bad Gateway",
+		},
+		{
+			name:   "JSON with no message falls back to the status",
+			body:   `{"type":"error","error":{"type":"overloaded_error"}}`,
+			status: "529 ",
+			want:   "HTTP 529 ",
+		},
+		{
+			name:   "an empty body falls back to the status",
+			body:   "",
+			status: "500 Internal Server Error",
+			want:   "HTTP 500 Internal Server Error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := apiErrorMessage([]byte(tt.body), tt.status); got != tt.want {
+				t.Errorf("apiErrorMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The dashboard branches on the reason, not the wording. A rate-limited endpoint
+// wants to be left alone; a rejected credential wants a sign-in; the two must not
+// arrive as the same cause.
+func TestReasonForStatusSeparatesTheCausesTheDashboardActsOn(t *testing.T) {
+	tests := []struct {
+		code int
+		want string
+	}{
+		{401, reasonUnauthorized},
+		{403, reasonUnauthorized},
+		{429, reasonRateLimited},
+		{500, reasonAPIError},
+		{502, reasonAPIError},
+	}
+
+	for _, tt := range tests {
+		if got := reasonForStatus(tt.code); got != tt.want {
+			t.Errorf("reasonForStatus(%d) = %q, want %q", tt.code, got, tt.want)
+		}
+	}
+}
+
+// A body that does not parse is not an absent quota: the panel has to be able to
+// tell "csm could not read the answer" from "there is no credential".
+func TestParseAPIQuotaResponseReportsAParseFailureAsItsOwnCause(t *testing.T) {
+	quota := parseAPIQuotaResponse([]byte(`{"five_hour":`))
+	if quota.Available {
+		t.Fatal("an unparseable response reported as available")
+	}
+	if quota.Reason != reasonParse {
+		t.Errorf("Reason = %q, want %q", quota.Reason, reasonParse)
+	}
+}

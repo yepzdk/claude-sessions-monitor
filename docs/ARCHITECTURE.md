@@ -302,15 +302,22 @@ see [Writing tests](#writing-tests).
 
 Reads: `~/.claude/projects/` (logs, `sessions-index.json`),
 `~/.omp/agent/sessions/` (logs) and `~/.omp/agent/terminal-sessions/`
-(breadcrumbs), and the OAuth token from the macOS Keychain item
+(breadcrumbs), the OAuth token from the macOS Keychain item
 `Claude Code-credentials` or `~/.claude/.credentials.json` on Linux
-(`oauth.go`).
+(`oauth.go`), and `~/.claude.json` for the signed-in account's email — read
+only to pick between several omp accounts, so a machine with one never parses
+it (`oauth_omp.go`).
 
-Nothing else under `~/.omp` is read, deliberately. `agent/models.yml` holds the
-authoritative context windows csm would like for its context column — and
-provider API keys in plaintext right beside them. `models.db` has the same
-numbers behind a SQLite dependency that would end the single static binary. The
-context column stays blank for omp rows instead.
+Nothing else under `~/.omp` is read, deliberately, and that still holds now
+that omp can supply a credential. `agent/models.yml` holds the authoritative
+context windows csm would like for its context column — and provider API keys
+in plaintext right beside them. `models.db` has the same numbers behind a
+SQLite dependency that would end the single static binary. `agent/agent.db`
+holds omp's Anthropic OAuth token in plaintext, in a private schema with its
+own version table, behind the same SQLite dependency. csm asks the `omp`
+binary for that token instead (see below), which keeps it out of another
+tool's secrets at rest and off the dependency. The context column stays blank
+for omp rows instead.
 
 Writes: only `~/.claude-monitor/origins/<sessionID>.json` (`origin_store.go`),
 atomically via temp file + rename, so a session's origin badge survives after
@@ -323,13 +330,23 @@ Network (`http.Client` with 5s timeout, both):
   greppable rather than imitating another client. Keep it that way.
 - `https://status.claude.com/api/v2/status.json` — service health.
 
-Subprocesses, all macOS-only bar the last: `lsof` (a process's cwd), `ps`
-(origin detection, and the tty lookup in jump), `security` (Keychain) and
-`osascript` (jump). The native calls for the first and last are libproc and
-Security.framework, both cgo, and the release workflow cross-builds the darwin
-targets from a Linux runner in one job. On Linux csm spawns `xdg-open` and,
-only while jumping, the one window-manager client its display server calls for
-(`hyprctl`, `swaymsg` or `wmctrl`).
+Subprocesses. macOS-only: `lsof` (a process's cwd), `ps` (origin detection, and
+the tty lookup in jump), `security` (Keychain) and `osascript` (jump). The
+native calls for the first and last are libproc and Security.framework, both
+cgo, and the release workflow cross-builds the darwin targets from a Linux
+runner in one job. On Linux csm spawns `xdg-open` and, only while jumping, the
+one window-manager client its display server calls for (`hyprctl`, `swaymsg` or
+`wmctrl`).
+
+On both platforms, and only when Claude Code cannot supply a usable token, csm
+runs `omp token anthropic` (`oauth_omp.go`, 5s timeout, no stdin). omp holds a
+credential for the same Anthropic account and refreshes it on read, so it can
+answer for the same plan when Claude Code's stored copy has lapsed — Claude
+Code refreshes only while it is itself running, so a day without it leaves an
+expired token and a quota panel reporting a 401. `--list` first, and an
+explicit `--account`, because omp round-robins across accounts when none is
+named and the panel would otherwise report a different account's utilization
+each time the cache expired.
 
 ### Platform code
 

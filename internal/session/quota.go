@@ -42,6 +42,20 @@ type SessionUsage struct {
 	EndTime      time.Time `json:"end_time"`
 }
 
+// Reasons a quota fetch produced no numbers. These are the stable half of a
+// failure: the web dashboard branches on them, while Error carries the wording
+// for a human. The dashboard used to match on the wording instead, and went on
+// matching a string Go had stopped emitting.
+const (
+	reasonNoCredentials = "no_credentials"
+	reasonExpired       = "expired"
+	reasonUnauthorized  = "unauthorized"
+	reasonRateLimited   = "rate_limited"
+	reasonAPIError      = "api_error"
+	reasonNetwork       = "network"
+	reasonParse         = "parse"
+)
+
 // APIQuota holds the response from the Anthropic usage API.
 type APIQuota struct {
 	Available      bool         `json:"available"`
@@ -51,6 +65,13 @@ type APIQuota struct {
 	SevenDayOpus   *QuotaBucket `json:"seven_day_opus,omitempty"`
 	ExtraUsage     *ExtraUsage  `json:"extra_usage,omitempty"`
 	Error          string       `json:"error,omitempty"`
+	// Reason is a stable cause from the constants above, for callers that must
+	// tell a machine with no credential from an endpoint that is failing.
+	Reason string `json:"reason,omitempty"`
+	// Source names the tool whose credential produced these numbers. Both
+	// harnesses can bill the same plan, so the panel has to say whose token it
+	// asked with -- otherwise a number that came from elsewhere is untraceable.
+	Source string `json:"source,omitempty"`
 }
 
 // QuotaBucket holds utilization data for a single quota window.
@@ -179,15 +200,15 @@ func FetchAPIQuota() *APIQuota {
 }
 
 func fetchAPIQuotaUncached() *APIQuota {
-	token, err := GetOAuthToken()
-	if err != nil {
-		return &APIQuota{Available: false, Error: err.Error()}
+	token, credErr := resolveCredential(time.Now())
+	if credErr != nil {
+		return &APIQuota{Available: false, Error: credErr.Error(), Reason: credErr.reason}
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest("GET", "https://api.anthropic.com/api/oauth/usage", nil)
 	if err != nil {
-		return &APIQuota{Available: false, Error: err.Error()}
+		return &APIQuota{Available: false, Error: err.Error(), Reason: reasonNetwork, Source: token.Source}
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
@@ -195,20 +216,63 @@ func fetchAPIQuotaUncached() *APIQuota {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return &APIQuota{Available: false, Error: err.Error()}
+		return &APIQuota{Available: false, Error: err.Error(), Reason: reasonNetwork, Source: token.Source}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return &APIQuota{Available: false, Error: err.Error()}
+		return &APIQuota{Available: false, Error: err.Error(), Reason: reasonNetwork, Source: token.Source}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return &APIQuota{Available: false, Error: "API returned " + resp.Status}
+		return &APIQuota{
+			Available: false,
+			Error:     apiErrorMessage(body, resp.Status),
+			Reason:    reasonForStatus(resp.StatusCode),
+			Source:    token.Source,
+		}
 	}
 
-	return parseAPIQuotaResponse(body)
+	result := parseAPIQuotaResponse(body)
+	result.Source = token.Source
+	return result
+}
+
+// apiErrorMessage turns a failed usage-API response into something the panel
+// can act on.
+//
+// The status line alone is not it: "401 Unauthorized" is the same text whether
+// the token expired, was revoked, or never had the scope. The API says which in
+// the body, and the body is already read by the time the status is checked --
+// discarding it was what left the panel reporting a bare 401 while the answer
+// ("re-authenticate to continue") sat unused.
+func apiErrorMessage(body []byte, status string) string {
+	var raw struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &raw); err == nil && raw.Error.Message != "" {
+		return "HTTP " + status + ": " + raw.Error.Message
+	}
+	// An unparseable body is normal for a proxy or gateway failure, where the
+	// status line really is all there is.
+	return "HTTP " + status
+}
+
+// reasonForStatus maps an HTTP status to a stable cause. 401 and 429 are called
+// out because they are the two the dashboard treats differently: one wants a
+// sign-in, the other wants to be left alone for a while.
+func reasonForStatus(code int) string {
+	switch code {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return reasonUnauthorized
+	case http.StatusTooManyRequests:
+		return reasonRateLimited
+	default:
+		return reasonAPIError
+	}
 }
 
 // parseAPIQuotaResponse parses the JSON response from the Anthropic usage API.
@@ -237,7 +301,7 @@ func parseAPIQuotaResponse(body []byte) *APIQuota {
 	}
 
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return &APIQuota{Available: false, Error: "failed to parse API response"}
+		return &APIQuota{Available: false, Error: "failed to parse API response", Reason: reasonParse}
 	}
 
 	result := &APIQuota{Available: true}

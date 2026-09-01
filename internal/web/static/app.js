@@ -76,26 +76,34 @@
         headerQuotaEl.innerHTML = `<span class="header-quota-item header-quota-error" title="${esc(reason)}">quota unavailable</span>`;
     }
 
+    // Credential-side failures never reach Anthropic: csm gives up before the
+    // request when it has no usable token. There is no endpoint to protect and
+    // nothing to hammer, so these keep polling -- signing in, or omp refreshing
+    // its own token, brings the widget back without a reload.
+    const QUOTA_LOCAL_REASONS = new Set(['no_credentials', 'expired']);
+
     function renderHeaderQuota(apiQuota) {
         if (!headerQuotaEl) return;
         if (!apiQuota || !apiQuota.available) {
-            // No OAuth token is a normal local configuration state, not a
-            // broken endpoint -- show nothing and keep polling, in case one
-            // shows up later.
-            if (apiQuota && apiQuota.error === 'OAuth token not found') {
-                headerQuotaEl.innerHTML = '';
+            if (apiQuota && QUOTA_LOCAL_REASONS.has(apiQuota.reason)) {
+                // Never signed in is a normal local configuration state and
+                // says nothing. A token that has lapsed is worth a word: the
+                // numbers are missing for a reason the user can act on.
+                headerQuotaEl.innerHTML = apiQuota.reason === 'expired'
+                    ? `<span class="header-quota-item header-quota-error" title="${esc(apiQuota.error || '')}">token expired</span>`
+                    : '';
                 return;
             }
             breakHeaderQuota((apiQuota && apiQuota.error) || 'unknown error');
             return;
         }
         let html = '';
-        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour);
-        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day);
+        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour, apiQuota.source);
+        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day, apiQuota.source);
         headerQuotaEl.innerHTML = html;
     }
 
-    function renderHeaderQuotaBar(shortLabel, fullLabel, bucket) {
+    function renderHeaderQuotaBar(shortLabel, fullLabel, bucket, source) {
         const pct = Math.min(bucket.utilization || 0, 100);
         const cls = pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
         let title = `${fullLabel} quota: ${Math.round(pct)}%`;
@@ -103,6 +111,10 @@
             const remaining = new Date(bucket.resets_at) - Date.now();
             if (remaining > 0) title += `, resets in ${formatDurationHuman(remaining * 1e6)}`;
         }
+        // Whose token these numbers came from. The header has no room to say it
+        // outright, and the usage tab does, but a chip that cannot be traced at
+        // all is worse than one that needs hovering.
+        if (source) title += ` (via ${source})`;
         return `<span class="header-quota-item" title="${esc(title)}">
             <span class="header-quota-label">${esc(shortLabel)}</span>
             <span class="header-quota-bar"><span class="header-quota-fill ${cls}" style="width:${pct}%"></span></span>
@@ -524,7 +536,7 @@
 
         // API Quota section
         html += '<div class="usage-section">';
-        html += '<h2 class="usage-section-title">API Quota</h2>';
+        html += '<h2 class="usage-section-title">API Quota (Anthropic account)</h2>';
 
         if (apiQuota && apiQuota.available) {
             html += '<div class="usage-bars">';
@@ -544,15 +556,22 @@
             if (apiQuota.extra_usage && apiQuota.extra_usage.is_enabled) {
                 html += '<div class="usage-note">Extra usage: enabled</div>';
             }
+            if (apiQuota.source) {
+                html += `<div class="usage-note">via ${esc(apiQuota.source)}</div>`;
+            }
         } else {
-            const errMsg = apiQuota && apiQuota.error ? apiQuota.error : 'OAuth token not found';
+            // No invented default. Every reason csm can give is more specific
+            // than a guess at the most common one, and the guess this used to
+            // print was a Go error string that Go had already stopped emitting.
+            let errMsg = apiQuota && apiQuota.error ? apiQuota.error : 'reason unknown';
+            if (apiQuota && apiQuota.source) errMsg += `, via ${apiQuota.source}`;
             html += `<div class="usage-unavailable">Not available (${esc(errMsg)})</div>`;
         }
         html += '</div>';
 
         // Local usage section
         html += '<div class="usage-section">';
-        html += '<h2 class="usage-section-title">Local Usage (5h window)</h2>';
+        html += '<h2 class="usage-section-title">Local Usage (5h window, Claude Code)</h2>';
 
         if (local && local.total_tokens > 0) {
             html += '<div class="usage-summary">';

@@ -25,7 +25,7 @@ Oh My Pi — across multiple projects.
 - **Last message display** shows recent assistant responses
 - **Git branch display** shows current branch for each session (Claude Code only — Oh My Pi does not record it)
 - **Status indicators**: Working, Needs Input, Waiting
-- **Usage and history views** with API quota bars and per-session token breakdown (press `u`). Both are labelled *(Claude Code)*: the quota comes from Anthropic's OAuth endpoint and both read Claude Code's logs, so Oh My Pi sessions do not appear in them
+- **Usage and history views** with API quota bars and per-session token breakdown (press `u`). The history view and the usage view's local half read Claude Code's logs, so Oh My Pi sessions do not appear in them; the quota is the whole Anthropic account's, and says which credential it asked with
 - **Jump to a session** — select a row with `↑`/`↓` and press `Enter` to bring its terminal to the front: the tab on macOS (Ghostty), the window on Linux (Hyprland, sway, or any X11 window manager via `wmctrl`)
 - **Origin column** showing what launched each session — a terminal (Ghostty, iTerm, Terminal.app, WezTerm, Kitty, Alacritty, Konsole, GNOME Terminal, ...), Claude Desktop, or an IDE (Zed, VS Code, Cursor, VSCodium, JetBrains) — detected from the agent process's parent chain + environment and cached to `~/.claude-monitor/origins/` so it survives session end. On a mixed dashboard it also carries the agent badge; the column widens to fit it, so a single-agent machine keeps exactly the columns it had
 - **Session badges**: Agent [cc] / [omp], Unsandboxed [!S], Ghost [ghost], Incomplete data [?]
@@ -272,17 +272,29 @@ export CSM_OMP_SESSIONS_DIR=~/.omp-work/agent/sessions
 Two columns stay blank for Oh My Pi rows, on purpose: **context %** (it is
 multi-provider, so a context window cannot be derived from the model id, and a
 wrong percentage reads as a measurement) and **git branch** (not recorded in its
-logs). The history and usage views are Claude Code only, and say so in their
-headings.
+logs). The history view is Claude Code only, and says so in its heading; so is
+the local half of the usage view.
 
 ### Usage view
 
-Press `u` in the live dashboard to see token usage. The view is labelled
-*(Claude Code)* because both of its sections are: Oh My Pi authenticates against
-its own providers and keeps its costs in its own logs. It has two sections:
+Press `u` in the live dashboard to see token usage. Each section says what it
+covers, because the two do not cover the same thing:
 
-- **API Quota** — Shows your Anthropic plan's utilization (5-hour and 7-day windows, plus per-model breakdowns when available). Uses color-coded progress bars: green (<75%), yellow (75-89%), red (≥90%). Reads the OAuth token from the macOS Keychain or `~/.claude/.credentials.json` on Linux.
-- **Local Usage** — Aggregates token counts (input, output, cache) from session log files within a 5-hour rolling window, broken down per session.
+- **API Quota (Anthropic account)** — Your Anthropic plan's utilization (5-hour
+  and 7-day windows, plus per-model breakdowns when available), with
+  color-coded bars: green (<75%), yellow (75-89%), red (≥90%). This is the
+  account's number, so everything billing that plan is already in it, Oh My Pi
+  included. The panel names the credential it asked with.
+- **Local Usage (5h window, Claude Code)** — Token counts (input, output, cache)
+  aggregated from Claude Code's session logs over a 5-hour rolling window,
+  broken down per session. Oh My Pi sessions do not appear here.
+
+The quota needs an Anthropic OAuth credential. csm prefers Claude Code's, from
+the macOS Keychain or `~/.claude/.credentials.json` on Linux. Claude Code only
+refreshes that token while it is running, so on a machine that has not run it
+for a day the stored token is expired — csm then asks `omp token anthropic`, if
+omp is installed and signed in to the same account, rather than reporting a 401
+that no retry can fix. Nothing under `~/.omp` is read directly.
 
 ### Web dashboard
 

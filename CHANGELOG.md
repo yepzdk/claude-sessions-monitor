@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The API quota falls back to Oh My Pi's Anthropic credential when Claude Code's has expired. Claude Code only refreshes its token while it is running, so a day without it left the quota panel showing a 401; omp holds a credential for the same account and refreshes it on read. The panel names the credential it asked with
+
+### Changed
+
+- The usage view's sections are labelled separately: the API quota is the whole Anthropic account's, so everything billing that plan is in it, while local usage is still Claude Code's logs alone
+
+### Fixed
+
+- A failed quota request reports what Anthropic said ("OAuth access token has expired. Re-authenticate to continue.") instead of a bare "API returned 401 Unauthorized"
+- An expired token is recognised before the request, so the panel says which token lapsed and how to refresh it rather than spending a doomed call to find out
+- The web dashboard's quota widget no longer breaks itself on a machine that was never signed in to Claude Code. It matched an error string csm had stopped emitting, so the "no credential is normal" path was unreachable and the widget showed a permanent "quota unavailable"
+
 ## [1.1.0] - 2026-08-30
 
 ### Added
