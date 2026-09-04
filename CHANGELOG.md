@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-04
+
 ### Added
 
 - The API quota falls back to Oh My Pi's Anthropic credential when Claude Code's has expired. Claude Code only refreshes its token while it is running, so a day without it left the quota panel showing a 401; omp holds a credential for the same account and refreshes it on read. The panel names the credential it asked with
