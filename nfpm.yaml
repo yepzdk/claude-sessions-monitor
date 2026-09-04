@@ -11,7 +11,7 @@ version: ${VERSION}
 version_schema: semver
 section: utils
 priority: optional
-maintainer: Jesper Pedersen <pejes@aarhus.dk>
+maintainer: Jesper Pedersen <jesper@yepz.dk>
 description: |
   Coding Sessions Monitor — a lightweight CLI to monitor Claude Code and
   Oh My Pi sessions across multiple projects, with live dashboard, web

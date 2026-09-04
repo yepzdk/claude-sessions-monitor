@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The usage view's sections are labelled separately: the API quota is the whole Anthropic account's, so everything billing that plan is in it, while local usage is still Claude Code's logs alone
+- The maintainer address in the `.deb`/`.rpm` and AUR package metadata is `jesper@yepz.dk`, the address for this project
 
 ### Fixed
 
