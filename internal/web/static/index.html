@@ -24,8 +24,13 @@
 
     <main>
         <section id="live-view" class="view active">
+            <div class="section-label">
+                <span class="section-label-text">Live sessions</span>
+                <span class="section-label-rule"></span>
+                <span class="section-label-meta" id="live-summary"></span>
+            </div>
             <div id="sessions-list" class="sessions-list">
-                <div class="empty-state">Connecting...</div>
+                <div class="state"><div class="state-title">Connecting to the session stream</div></div>
             </div>
         </section>
 
@@ -40,14 +45,19 @@
                     <option value="30">Last 30 days</option>
                 </select>
             </div>
+            <div class="section-label">
+                <span class="section-label-text">History</span>
+                <span class="section-label-rule"></span>
+                <span class="section-label-meta" id="history-summary"></span>
+            </div>
             <div id="history-list" class="history-list">
-                <div class="empty-state">Loading history...</div>
+                <div class="state"><div class="state-title">Loading history</div></div>
             </div>
         </section>
 
         <section id="usage-view" class="view">
             <div id="usage-content">
-                <div class="empty-state">Loading usage data...</div>
+                <div class="state"><div class="state-title">Loading usage</div></div>
             </div>
         </section>
     </main>
@@ -63,10 +73,10 @@
                 <button class="detail-tab" data-detail="timeline">Timeline</button>
             </div>
             <div id="detail-metrics" class="detail-content active">
-                <div class="loading">Loading metrics...</div>
+                <div class="state"><div class="state-title">Loading metrics</div></div>
             </div>
             <div id="detail-timeline" class="detail-content">
-                <div class="loading">Loading timeline...</div>
+                <div class="state"><div class="state-title">Loading timeline</div></div>
             </div>
         </div>
     </div>

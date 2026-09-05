@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The web dashboard's live view groups sessions by project, and a project's stopped sessions fold into one row. A machine running fifteen sessions is a list of projects rather than a wall of cards, and the sessions waiting on you sort to the top
+- The web dashboard's three tabs and its detail panel share one set of section headings, group headers, chips and meters, so a project reads the same wherever it appears
+- The quota window nearer its limit is the one in the web dashboard's header. Both windows, with their reset times, stay on the Usage tab, which used to draw them a second time on the same screen
+- The web dashboard says what it found and what to do about it: an empty list names what would fill it, a failed request says what failed and offers a retry, and a request that could not reach the data no longer reads as a measured zero
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
 
 ### Fixed

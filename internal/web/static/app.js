@@ -17,6 +17,8 @@
     // --- DOM refs ---
     const statusBar = document.getElementById('status-bar');
     const sessionsList = document.getElementById('sessions-list');
+    const liveSummary = document.getElementById('live-summary');
+    const historySummary = document.getElementById('history-summary');
     const historyList = document.getElementById('history-list');
     const historySearch = document.getElementById('history-search');
     const historyDays = document.getElementById('history-days');
@@ -59,9 +61,7 @@
         // init and a #history/#usage deep link both see a stale 0 and fire.
         headerQuotaFetchedAt = Date.now();
         try {
-            const resp = await fetch('/api/quota');
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            renderHeaderQuota(await resp.json());
+            renderHeaderQuota(await fetchJSON('/api/quota'));
         } catch (err) {
             breakHeaderQuota(err.message || 'fetch failed');
         }
@@ -97,17 +97,24 @@
             breakHeaderQuota((apiQuota && apiQuota.error) || 'unknown error');
             return;
         }
-        let html = '';
-        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour, apiQuota.source);
-        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day, apiQuota.source);
-        headerQuotaEl.innerHTML = html;
+        // The Usage tab draws both windows in full, with their resets and their
+        // source. The header shows one, because on that tab the two were
+        // otherwise drawn twice on the same screen. The one worth the space is
+        // whichever is nearer its limit: that is the one about to stop work.
+        const windows = [];
+        if (apiQuota.five_hour) windows.push(['5h', '5-hour', apiQuota.five_hour]);
+        if (apiQuota.seven_day) windows.push(['7d', '7-day', apiQuota.seven_day]);
+        windows.sort((a, b) => (b[2].utilization || 0) - (a[2].utilization || 0));
+        headerQuotaEl.innerHTML = windows.length
+            ? renderHeaderQuotaBar(windows[0][0], windows[0][1], windows[0][2], apiQuota.source)
+            : '';
     }
 
     // The header chip and the usage row must agree on how full a bucket is and
     // when it lifts, so both read it from here rather than each doing the math.
     function quotaBarParts(bucket) {
         const pct = Math.min(bucket.utilization || 0, 100);
-        const cls = pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
+        const cls = severityClass(pct);
         let resetsIn = '';
         if (bucket.resets_at) {
             const remaining = new Date(bucket.resets_at) - Date.now();
@@ -173,8 +180,7 @@
 
     async function loadClaudeStatus() {
         try {
-            const resp = await fetch('/api/claude-status');
-            claudeStatusData = await resp.json();
+            claudeStatusData = await fetchJSON('/api/claude-status');
             claudeStatusFetchedAt = Date.now();
         } catch (err) {
             claudeStatusData = { available: false, error: 'fetch failed' };
@@ -253,12 +259,24 @@
         });
 
         sseSource.addEventListener('sessions', e => {
+            let payload;
             try {
-                currentSessions = JSON.parse(e.data);
-                if (currentView === 'live') renderSessions();
-                connStatus.className = 'connected';
-                connStatus.title = 'SSE connected';
-            } catch (err) { /* ignore parse errors */ }
+                payload = JSON.parse(e.data);
+            } catch (err) {
+                // A frame we cannot read is a frame we cannot draw, and the
+                // next one is two seconds away. Say the view is stale rather
+                // than leaving a green dot over the last good render.
+                connStatus.className = 'stale';
+                connStatus.title = 'Connected, but the last update could not be read - data may be out of date';
+                return;
+            }
+            // Deliberately outside the catch: a throw from renderSessions is a
+            // bug in this file, and swallowing it would freeze the list under a
+            // "connected" dot with nothing in the console to find it by.
+            currentSessions = payload;
+            if (currentView === 'live') renderSessions();
+            connStatus.className = 'connected';
+            connStatus.title = 'SSE connected';
         });
 
         // The connection stays up and the heartbeat keeps arriving when a scan
@@ -289,53 +307,183 @@
     connectSSE();
 
     // --- Render live sessions ---
+
+    // The live list is rebuilt from scratch on every scan, so what the user has
+    // opened or closed cannot live in the DOM the way history's collapse state
+    // does -- it would reset every two seconds. Both are keyed by project name
+    // rather than position, because groups reorder as activity moves between
+    // them, and neither is pruned: a set of project names cannot grow past the
+    // number of projects the user has touched.
+    const collapsedProjects = new Set();   // projects the user closed
+    const openStoppedFolds = new Set();    // projects whose stopped rows they opened
+
+    // The order a person triages in: what is blocked on them, then what is
+    // moving, then what is parked. Fixed rather than data order, so the status
+    // bar and the list do not reshuffle between scans. These are every status
+    // session.Status defines; anything else sorts last and wears the Inactive
+    // styling that statusClass falls back to.
+    const STATUSES = [
+        { name: 'Needs Input', cls: 'needs-input', symbol: '\u25B2', word: 'needs input' },
+        { name: 'Working', cls: 'working', symbol: '\u25CF', word: 'working' },
+        { name: 'Waiting', cls: 'waiting', symbol: '\u25C9', word: 'waiting' },
+        { name: 'Inactive', cls: 'inactive', symbol: '\u25CC', word: 'stopped' },
+    ];
+    const STATUS_ORDER = STATUSES.map(s => s.name);
+    const STATUS_BY_NAME = new Map(STATUSES.map(s => [s.name, s]));
+
+    // The class, glyph and word a status is spelled with, in one place:
+    // "Inactive" is the API's word and the one a card's tooltip shows,
+    // "stopped" is what the badge and the status bar say. A status this
+    // page does not know wears the last row.
+    function statusInfo(status) {
+        return STATUS_BY_NAME.get(status) || STATUSES[STATUSES.length - 1];
+    }
+
+    function statusRank(status) {
+        const i = STATUS_ORDER.indexOf(status);
+        return i === -1 ? STATUS_ORDER.length : i;
+    }
+
+    // 0 for anything unreadable rather than NaN: one NaN poisons the Math.max
+    // a group's age is built from, and a NaN in the sort comparator makes the
+    // whole project fall through to the alphabetical tiebreak with nothing on
+    // screen to say why it moved.
+    function activityTime(s) {
+        const t = s.last_activity ? new Date(s.last_activity).getTime() : 0;
+        return Number.isNaN(t) ? 0 : t;
+    }
+
     function renderSessions() {
         if (!currentSessions || currentSessions.length === 0) {
-            sessionsList.innerHTML = '<div class="empty-state">No active sessions found</div>';
+            // An empty dashboard looks broken, so say what would fill it.
+            sessionsList.innerHTML = stateBlock({
+                title: 'No active sessions',
+                hint: 'Start a session in any project and it shows up here.',
+            });
             statusBar.innerHTML = '';
+            liveSummary.textContent = '';
             return;
         }
 
-        // Status summary
-        const counts = {};
-        currentSessions.forEach(s => {
-            const label = s.status === 'Inactive' ? 'Stopped' : s.status;
-            counts[label] = (counts[label] || 0) + 1;
-        });
-        statusBar.innerHTML = Object.entries(counts).map(([status, count]) => {
-            const cls = statusClass(status);
-            return `<span class="status-badge"><span class="status-dot ${cls}"></span>${count} ${status}</span>`;
-        }).join('');
+        const counts = countByStatus(currentSessions);
+        statusBar.innerHTML = STATUS_ORDER
+            .filter(status => counts[status])
+            .map(status => `<span class="status-badge"><span class="status-dot ${statusClass(status)}"></span>${counts[status]} ${statusWord(status)}</span>`)
+            .join('');
 
+        const groups = groupSessions();
+        liveSummary.textContent = countSummary(currentSessions.length, groups.length);
+        sessionsList.innerHTML = groups.map(renderGroup).join('');
+    }
+
+    // groupSessions splits the flat list into per-project groups and puts both
+    // the groups and the rows inside them in triage order.
+    function groupSessions() {
+        const groups = new Map();
+        currentSessions.forEach(s => {
+            // Same fallback name history uses, so a project with no name is one
+            // group across both tabs rather than two differently-labelled ones.
+            const project = s.project || 'Unknown';
+            if (!groups.has(project)) groups.set(project, []);
+            groups.get(project).push(s);
+        });
+
+        const ordered = [...groups.entries()].map(([project, sessions]) => {
+            sessions.sort((a, b) => statusRank(a.status) - statusRank(b.status) || activityTime(b) - activityTime(a));
+            return {
+                project,
+                sessions,
+                active: sessions.filter(s => s.status !== 'Inactive'),
+                stopped: sessions.filter(s => s.status === 'Inactive'),
+                // Newest activity anywhere in the project, stopped sessions
+                // included: a project whose sessions have all stopped still
+                // needs an age, and the header is the only place left to show
+                // one once the rows are folded away.
+                age: Math.max(...sessions.map(activityTime)),
+                blocked: sessions.some(s => s.status === 'Needs Input'),
+            };
+        });
+
+        // A project waiting on the user outranks a busy one: it is the only
+        // state that will not move again without them. Ties fall back to the
+        // name so the order is stable when two groups have no timestamps.
+        ordered.sort((a, b) =>
+            (b.blocked - a.blocked) || (b.age - a.age) || a.project.localeCompare(b.project));
+        return ordered;
+    }
+
+    function renderGroup(g) {
+        const collapsed = collapsedProjects.has(g.project);
+        const foldOpen = openStoppedFolds.has(g.project);
+
+        const counts = countByStatus(g.sessions);
+        const stats = STATUS_ORDER
+            .filter(status => counts[status])
+            .map(status => `<span class="group-stat"><span class="status-dot ${statusClass(status)}"></span>${counts[status]}</span>`)
+            .join('');
+
+        // A closed project's cards are never painted, so they are not built.
+        // Opening one calls renderSessions, which rebuilds this group with them.
+        let body = '';
+        if (!collapsed) {
+            body = g.active.map(renderSessionCard).join('');
+            if (g.stopped.length > 0) {
+                const lastActive = Math.max(...g.stopped.map(activityTime));
+                body += `<div class="session-fold${foldOpen ? ' open' : ''}">
+                    <span class="group-toggle">&#x25B6;</span>
+                    <span class="session-fold-glyph">${statusSymbol('Inactive')}</span>
+                    <span>${plural(g.stopped.length, 'stopped session')}</span>
+                    <span class="session-fold-age">last active ${lastActive ? formatAge(lastActive) : '-'}</span>
+                </div>`;
+                if (foldOpen) body += g.stopped.map(renderSessionCard).join('');
+            }
+        }
+
+        return groupShell({
+            project: g.project,
+            stats,
+            count: g.sessions.length,
+            age: g.age ? formatAge(g.age) : '',
+            collapsed,
+            body,
+        });
+    }
+
+    function renderSessionCard(s) {
+        const isInactive = s.status === 'Inactive';
+        const cls = statusClass(s.status);
+        const symbol = statusSymbol(s.status);
+        const age = s.status === 'Working' ? 'Now' : formatAge(s.last_activity);
+        const pct = s.context_percent || 0;
+        const ctxCls = severityClass(pct);
+        const cardCls = isInactive ? 'session-card stopped' : 'session-card';
+        const stoppedBadge = isInactive ? `<span class="stopped-badge">Stopped</span>` : '';
         // Whether to name each card's agent is the server's call: it is decided
         // from every session on the machine, and this list is only the last
         // hour of it, so deriving it here would drop the badge whenever the
         // other agent happened to be idle.
+        //
+        // It renders with the origin and context-window chips rather than
+        // before the branch: it belongs to that cluster of "what this session
+        // is" identifiers, and alone at the front it reads as a stray word.
+        const harnessBadge = mixedHarnesses && s.harness
+            ? `<span class="badge session-harness-badge" title="${esc(harnessName(s.harness))}">${esc(s.harness)}</span>`
+            : '';
+        // The project name lives in the group header now, so the branch leads
+        // the row. A session outside a git checkout has no branch, and falls
+        // back to the project name rather than to nothing -- it repeats the
+        // header, which is why it is not dressed as a branch.
+        const lead = s.git_branch
+            ? `<span class="session-branch">${esc(s.git_branch)}</span>`
+            : `<span class="session-lead-plain">${esc(s.project)}</span>`;
 
-        sessionsList.innerHTML = currentSessions.map(s => {
-            const isInactive = s.status === 'Inactive';
-            const cls = statusClass(s.status);
-            const symbol = statusSymbol(s.status);
-            const age = s.status === 'Working' ? 'Now' : formatAge(s.last_activity);
-            const pct = s.context_percent || 0;
-            const ctxCls = pct > 90 ? 'high' : pct > 75 ? 'medium' : 'low';
-            const cardCls = isInactive ? 'session-card stopped' : 'session-card';
-            const stoppedBadge = isInactive ? `<span class="stopped-badge">Stopped</span>` : '';
-            // Rendered further down, with the origin and context-window chips:
-            // it belongs to that cluster of "what this session is" identifiers,
-            // and sitting alone between the project name and the branch read
-            // like a stray word rather than a badge.
-            const harnessBadge = mixedHarnesses && s.harness
-                ? `<span class="badge session-harness-badge" title="${esc(harnessName(s.harness))}">${esc(s.harness)}</span>`
-                : '';
-
-            return `<div class="${cardCls}" data-logfile="${esc(s.log_file || '')}" data-project="${esc(s.project)}">
-                <div class="session-top">
-                    <span class="session-status ${cls}" title="${esc(s.status)}">${symbol}</span>
-                    <span class="session-project">${esc(s.project)}</span>
-                    ${stoppedBadge}
-                    ${s.git_branch ? `<span class="session-branch">${esc(s.git_branch)}</span>` : ''}
-                    ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
+        return `<div class="${cardCls}" data-logfile="${esc(s.log_file || '')}" data-project="${esc(s.project)}" data-branch="${esc(s.git_branch || '')}" data-status="${esc(s.status)}">
+            <div class="session-top">
+                <span class="session-status ${cls}" title="${esc(s.status)}">${symbol}</span>
+                ${lead}
+                ${stoppedBadge}
+                ${s.session_title ? `<span class="session-title">${esc(s.session_title)}</span>` : ''}
+                <span class="session-meta">
                     ${harnessBadge}
                     ${s.origin && s.origin.category ? `<span class="badge session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
                     ${(s.context_window || 0) > 200000 ? `<span class="badge session-model-badge" title="${esc(s.model)}">1M</span>` : ''}
@@ -346,17 +494,29 @@
                     </span>
                     <span class="session-activity">${age}</span>
                     <a class="session-history-link" title="View project history">&#x29D6;</a>
-                </div>
-                ${s.last_message ? `<div class="session-bottom">${esc(s.last_message)}</div>` : ''}
-                ${renderSubagents(s.subagents)}
-            </div>`;
-        }).join('');
+                </span>
+            </div>
+            ${s.last_message ? `<div class="session-bottom">${esc(s.last_message)}</div>` : ''}
+            ${renderSubagents(s.subagents)}
+        </div>`;
     }
 
     // One listener on the container, bound once, rather than one per card on
     // every frame: the card list is rebuilt from scratch every two seconds, so
     // per-card binding re-walks and re-binds the whole list that often.
     sessionsList.addEventListener('click', (e) => {
+        const header = e.target.closest('.group-header');
+        if (header) {
+            toggleMembership(collapsedProjects, header.parentElement.dataset.project);
+            renderSessions();
+            return;
+        }
+        const fold = e.target.closest('.session-fold');
+        if (fold) {
+            toggleMembership(openStoppedFolds, fold.closest('.group').dataset.project);
+            renderSessions();
+            return;
+        }
         const card = e.target.closest('.session-card');
         if (!card) return;
         // If the history link was clicked, navigate to history instead
@@ -368,12 +528,22 @@
         // A click on a nested subagent opens that agent's log, not the parent's
         const subagent = e.target.closest('.subagent');
         if (subagent && subagent.dataset.logfile) {
-            openDetail(subagent.dataset.logfile, subagent.dataset.label);
+            openDetail(subagent.dataset.logfile, { project: subagent.dataset.label });
             return;
         }
         const logFile = card.dataset.logfile;
-        if (logFile) openDetail(logFile, card.querySelector('.session-project').textContent);
+        if (logFile) {
+            openDetail(logFile, {
+                project: card.dataset.project,
+                branch: card.dataset.branch,
+                status: card.dataset.status,
+            });
+        }
     });
+
+    function toggleMembership(set, key) {
+        if (set.has(key)) set.delete(key); else set.add(key);
+    }
 
     // Render a session's live subagents as rows nested under its card.
     // Only running agents reach here — the backend drops finished ones.
@@ -410,12 +580,20 @@
     // --- History ---
     async function loadHistory() {
         const days = historyDays.value;
+        historyList.innerHTML = stateBlock({ title: 'Loading history' });
+        historySummary.textContent = '';
         try {
-            const resp = await fetch(`/api/history?days=${days}`);
-            historyData = (await resp.json()) || [];
+            historyData = (await fetchJSON(`/api/history?days=${days}`)) || [];
             renderHistory();
         } catch (err) {
-            historyList.innerHTML = `<div class="empty-state">Failed to load history</div>`;
+            historySummary.textContent = '';
+            historyList.innerHTML = stateBlock({
+                title: 'Could not load history',
+                hint: esc(err.message || 'the request failed'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(historyList, loadHistory);
         }
     }
 
@@ -428,7 +606,18 @@
         );
 
         if (filtered.length === 0) {
-            historyList.innerHTML = '<div class="empty-state">No sessions found</div>';
+            historySummary.textContent = '';
+            // Two filters can empty this list, and the fix differs, so say which
+            // one is in the way rather than only that nothing was found.
+            historyList.innerHTML = query
+                ? stateBlock({
+                    title: `No sessions match &quot;${esc(historySearch.value)}&quot;`,
+                    hint: 'Clear the search to see every project.',
+                })
+                : stateBlock({
+                    title: 'No sessions in this range',
+                    hint: 'Try a wider range.',
+                });
             return;
         }
 
@@ -449,17 +638,8 @@
 
         let html = '';
         sortedProjects.forEach(([project, sessions]) => {
-            const isCollapsed = query ? '' : ' collapsed';
-            html += `<div class="project-group${isCollapsed}">`;
             const lastStarted = sessions[0] && sessions[0].start_time ? formatAge(sessions[0].start_time) : '';
-            html += `<div class="project-group-header">
-                <span class="project-group-toggle">&#x25B6;</span>
-                <span class="project-group-name">${esc(project)}</span>
-                <span class="project-group-count">${sessions.length} session${sessions.length !== 1 ? 's' : ''}</span>
-                <span class="project-group-age">${lastStarted || ''}</span>
-            </div>`;
-            html += `<div class="project-group-body">`;
-            html += `<div class="history-row history-header">
+            let body = `<div class="history-row history-header">
                 <div class="history-row-main">
                     <span class="history-branch">Branch</span>
                     <span class="history-date">Date</span>
@@ -471,7 +651,7 @@
                 const dur = formatDuration(s.duration);
                 const date = s.start_time ? dateGroup(s.start_time) + ' ' + new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
                 const promptLine = s.first_prompt ? `<div class="history-prompt">${esc(s.first_prompt)}</div>` : '';
-                html += `<div class="history-row" data-logfile="${esc(s.log_file || '')}">
+                body += `<div class="history-row" data-logfile="${esc(s.log_file || '')}" data-branch="${esc(s.git_branch || '')}">
                     <div class="history-row-main">
                         <span class="history-branch">${s.git_branch ? esc(s.git_branch) : '-'}</span>
                         ${s.degraded ? `<span class="badge session-degraded-badge" title="${esc(s.degraded)}">?</span>` : ''}
@@ -482,26 +662,37 @@
                     ${promptLine}
                 </div>`;
             });
-            html += `</div></div>`;
+            // The same shell the live list draws, minus the status dots: a
+            // finished session has no live status to count.
+            html += groupShell({
+                project,
+                count: sessions.length,
+                age: lastStarted,
+                collapsed: !query,
+                body,
+            });
         });
 
         historyList.innerHTML = html;
-
-        // Attach collapse/expand handlers
-        historyList.querySelectorAll('.project-group-header').forEach(header => {
-            header.addEventListener('click', () => {
-                header.parentElement.classList.toggle('collapsed');
-            });
-        });
-
-        historyList.querySelectorAll('.history-row:not(.history-header)').forEach(row => {
-            row.addEventListener('click', () => {
-                const logFile = row.dataset.logfile;
-                const project = row.closest('.project-group').querySelector('.project-group-name').textContent;
-                if (logFile) openDetail(logFile, project);
-            });
-        });
+        historySummary.textContent = countSummary(filtered.length, sortedProjects.length);
     }
+
+    // One delegated listener, bound once, rather than one per row on every
+    // render: the search box re-renders the whole list on each keystroke, and
+    // a 30-day range is hundreds of rows. Same reason the live list delegates.
+    historyList.addEventListener('click', e => {
+        const header = e.target.closest('.group-header');
+        if (header) {
+            header.parentElement.classList.toggle('collapsed');
+            return;
+        }
+        const row = e.target.closest('.history-row:not(.history-header)');
+        if (!row || !row.dataset.logfile) return;
+        openDetail(row.dataset.logfile, {
+            project: row.closest('.group').dataset.project,
+            branch: row.dataset.branch,
+        });
+    });
 
     historySearch.addEventListener('input', renderHistory);
     historyDays.addEventListener('change', loadHistory);
@@ -513,13 +704,19 @@
     async function loadUsage() {
         if (usageLoading) return;
         usageLoading = true;
+        usageContent.innerHTML = stateBlock({ title: 'Loading usage' });
         try {
-            const resp = await fetch('/api/usage');
-            usageData = await resp.json();
+            usageData = await fetchJSON('/api/usage');
             usageLastUpdated = new Date();
             renderUsageView(usageData);
         } catch (err) {
-            usageContent.innerHTML = '<div class="empty-state">Failed to load usage data</div>';
+            usageContent.innerHTML = stateBlock({
+                title: 'Could not load usage',
+                hint: esc(err.message || 'the request failed'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(usageContent, loadUsage);
         } finally {
             usageLoading = false;
         }
@@ -527,7 +724,13 @@
 
     function renderUsageView(data) {
         if (!data) {
-            usageContent.innerHTML = '<div class="empty-state">No usage data available</div>';
+            usageContent.innerHTML = stateBlock({
+                title: 'No usage data in the response',
+                hint: 'The request succeeded but carried nothing to show.',
+                error: true,
+                retry: true,
+            });
+            wireRetry(usageContent, loadUsage);
             return;
         }
 
@@ -545,7 +748,7 @@
 
         // API Quota section
         html += '<div class="usage-section">';
-        html += '<h2 class="usage-section-title">API Quota (Anthropic account)</h2>';
+        html += sectionLabel('API quota &#183; Anthropic account');
 
         if (apiQuota && apiQuota.available) {
             html += '<div class="usage-bars">';
@@ -580,14 +783,14 @@
 
         // Local usage section
         html += '<div class="usage-section">';
-        html += '<h2 class="usage-section-title">Local Usage (5h window, Claude Code)</h2>';
+        html += sectionLabel('Local usage &#183; 5h window, Claude Code');
 
         if (local && local.total_tokens > 0) {
             html += '<div class="usage-summary">';
             html += `<div class="usage-summary-card"><div class="usage-summary-label">Total</div><div class="usage-summary-value">${fmtNum(local.total_tokens)}</div></div>`;
-            html += `<div class="usage-summary-card"><div class="usage-summary-label">Input</div><div class="usage-summary-value blue">${fmtNum(local.input_tokens)}</div></div>`;
-            html += `<div class="usage-summary-card"><div class="usage-summary-label">Output</div><div class="usage-summary-value green">${fmtNum(local.output_tokens)}</div></div>`;
-            html += `<div class="usage-summary-card"><div class="usage-summary-label">Cache</div><div class="usage-summary-value yellow">${fmtNum(local.cache_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Input</div><div class="usage-summary-value">${fmtNum(local.input_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Output</div><div class="usage-summary-value">${fmtNum(local.output_tokens)}</div></div>`;
+            html += `<div class="usage-summary-card"><div class="usage-summary-label">Cache</div><div class="usage-summary-value">${fmtNum(local.cache_tokens)}</div></div>`;
             html += `<div class="usage-summary-card"><div class="usage-summary-label">Sessions</div><div class="usage-summary-value">${local.sessions ? local.sessions.length : 0}</div></div>`;
             html += '</div>';
 
@@ -595,6 +798,7 @@
                 html += '<div class="usage-table">';
                 html += '<div class="usage-table-header">';
                 html += '<span class="usage-col-project">Project</span>';
+                html += '<span class="usage-col-share">Share of total</span>';
                 html += '<span class="usage-col-tokens">Input</span>';
                 html += '<span class="usage-col-tokens">Output</span>';
                 html += '<span class="usage-col-tokens">Cache</span>';
@@ -603,6 +807,10 @@
                 local.sessions.forEach(s => {
                     html += '<div class="usage-table-row">';
                     html += `<span class="usage-col-project">${esc(s.project)}</span>`;
+                    // The block only renders when local.total_tokens > 0, so
+                    // this cannot divide by zero.
+                    const share = (s.total_tokens / local.total_tokens) * 100;
+                    html += `<span class="usage-col-share"><span class="share-bar"><span class="share-bar-fill" style="width:${share}%"></span></span><span class="share-pct">${formatShare(s.total_tokens, local.total_tokens)}</span></span>`;
                     html += `<span class="usage-col-tokens">${fmtNum(s.input_tokens)}</span>`;
                     html += `<span class="usage-col-tokens">${fmtNum(s.output_tokens)}</span>`;
                     html += `<span class="usage-col-tokens">${fmtNum(s.cache_tokens)}</span>`;
@@ -615,8 +823,15 @@
             // Saying "no usage" here would be a positive claim invented from a
             // failure to look.
             html += `<div class="usage-unavailable">Local usage unavailable (${esc(local.error)})</div>`;
+        } else if (local) {
+            // A measured zero, so muted ink. The amber above is for numbers the
+            // app could not reach, and painting a true zero in it would say
+            // something is wrong when nothing is.
+            html += '<div class="usage-none">No token usage in the past 5 hours.</div>';
         } else {
-            html += '<div class="usage-unavailable">No token usage in the past 5 hours.</div>';
+            // Neither a reading nor a stated error: the same rule applies, so
+            // this reports what is missing rather than inventing a zero.
+            html += '<div class="usage-unavailable">Local usage is missing from the response.</div>';
         }
         if (local && local.partial_logs > 0) {
             html += `<div class="usage-partial">${local.partial_logs} log(s) could not be read in full; totals are a lower bound.</div>`;
@@ -659,13 +874,16 @@
     let metricsLoadToken = 0;
     let timelineLoadMoreClicks = 0;
 
-    function openDetail(logFile, project) {
+    function openDetail(logFile, { project = '', branch = '', status = '' } = {}) {
         currentLogFile = logFile;
         timelineOffset = 0;
         timelineEntries = [];
         timelineFilter = 'all';
         timelineLoadMoreClicks = 0;
-        detailTitle.textContent = project;
+        // Several live sessions can share a project now that the list is
+        // grouped by project, so the panel names the row that was clicked.
+        // Subagents open with a label and no branch, and get just the label.
+        detailTitle.innerHTML = `${status ? `<span class="session-status ${statusClass(status)}" title="${esc(status)}">${statusSymbol(status)}</span>` : ''}<span class="detail-project">${esc(project)}</span>${branch ? `<span class="session-branch">${esc(branch)}</span>` : ''}`;
         detailOverlay.classList.remove('hidden');
 
         // Reset to metrics tab
@@ -695,16 +913,23 @@
 
     async function loadMetrics(logFile) {
         const token = ++metricsLoadToken;
-        detailMetrics.innerHTML = '<div class="loading">Loading metrics...</div>';
+        detailMetrics.innerHTML = stateBlock({ title: 'Loading metrics' });
         try {
-            const resp = await fetch(`/api/sessions/metrics?file=${encodeURIComponent(logFile)}`);
-            if (!resp.ok) throw new Error(await resp.text());
-            const m = await resp.json();
+            const m = await fetchJSON(`/api/sessions/metrics?file=${encodeURIComponent(logFile)}`);
             if (token !== metricsLoadToken) return;
             renderMetrics(m);
         } catch (err) {
             if (token !== metricsLoadToken) return;
-            detailMetrics.innerHTML = `<div class="empty-state">Failed to load metrics</div>`;
+            detailMetrics.innerHTML = stateBlock({
+                title: 'Could not load metrics',
+                hint: esc(err.message || 'the log file could not be read'),
+                error: true,
+                retry: true,
+            });
+            // metricsLoadToken already drops a response for a session the user
+            // has since navigated away from, so the retry needs no guard of its
+            // own beyond asking for the file it failed on.
+            wireRetry(detailMetrics, () => loadMetrics(logFile));
         }
     }
 
@@ -755,7 +980,7 @@
         // compacts as it approaches the limit -- so it leads, as a figure with a
         // meter. Everything else is volume, and reads as supporting detail.
         const pct = Math.min(Math.max(m.context_percent || 0, 0), 100);
-        const severity = pct > 90 ? 'danger' : pct > 75 ? 'warning' : 'ok';
+        const severity = SEVERITY_WORDS[severityClass(pct)];
 
         // Colour is the only thing separating ok from warning from danger, so the
         // state has to be said in words somewhere too. The meter says it: it is
@@ -803,7 +1028,7 @@
         // the exact value and share for every kind, including the invisible ones.
         if (totalTokens > 0) {
             html += `<section class="token-composition">
-                <h3>Token composition</h3>
+                ${sectionLabel('Token composition')}
                 <div class="token-stack">`;
             TOKEN_KINDS.forEach(k => {
                 const v = m[k.key] || 0;
@@ -829,7 +1054,7 @@
         const tools = Object.entries(m.tool_usage_counts || {}).sort((a, b) => b[1] - a[1]);
         if (tools.length > 0) {
             const max = tools[0][1];
-            html += `<section class="tool-usage"><h3>Tools</h3><ul class="tool-list">`;
+            html += `<section class="tool-usage">${sectionLabel('Tools')}<ul class="tool-list">`;
             tools.forEach(([name, count]) => {
                 const { tool, server } = splitToolName(name);
                 // Every row emits the server cell, empty or not. The list is one
@@ -881,7 +1106,7 @@
             timelineTotal = 0;
             timelineEntries = [];
             timelineLoadMoreClicks = 0;
-            detailTimeline.innerHTML = '<div class="loading">Loading timeline...</div>';
+            detailTimeline.innerHTML = stateBlock({ title: 'Loading timeline' });
         }
 
         // The server pages in filtered space, so the filter travels with every
@@ -897,9 +1122,7 @@
                 // full page rather than deriving a size from a total of zero.
                 const remaining = timelineTotal > 0 ? Math.max(1, timelineTotal - timelineOffset) : SERVER_MAX;
                 const limit = mode === 'all' ? Math.min(SERVER_MAX, remaining) : 50;
-                const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`);
-                if (!resp.ok) throw new Error(await resp.text());
-                const data = await resp.json();
+                const data = await fetchJSON(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`);
                 if (token !== timelineLoadToken) return;
                 timelineTotal = data.total;
                 const batch = data.entries || [];
@@ -910,7 +1133,7 @@
             renderTimeline();
         } catch (err) {
             if (token !== timelineLoadToken) return;
-            timelineError = 'Failed to load timeline';
+            timelineError = err.message || 'the request failed';
             renderTimeline();
         }
     }
@@ -932,11 +1155,19 @@
         // sends a request now, so it can fail, and wiping the bar would leave
         // nothing to retry with.
         if (timelineError) {
-            html += `<div class="empty-state">${esc(timelineError)}</div>`;
+            // The filter bar alone is not a way back: clicking the filter you
+            // are already on returns early, so a failure under it would leave
+            // no control that retries.
+            html += stateBlock({
+                title: 'Could not load the timeline',
+                hint: esc(timelineError),
+                error: true,
+                retry: true,
+            });
         } else if (timelineEntries.length === 0) {
-            html += timelineFilter === 'all'
-                ? '<div class="empty-state">No entries</div>'
-                : '<div class="empty-state">No matching entries</div>';
+            html += stateBlock({
+                title: timelineFilter === 'all' ? 'No entries' : 'No matching entries',
+            });
         }
 
         html += '<div class="timeline">';
@@ -995,6 +1226,8 @@
 
         detailTimeline.innerHTML = html;
 
+        wireRetry(detailTimeline, () => loadTimeline(currentLogFile, true));
+
         detailTimeline.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.dataset.filter === timelineFilter) return;
@@ -1018,23 +1251,106 @@
 
     // --- Helpers ---
     function statusClass(status) {
-        switch (status) {
-            case 'Working': return 'working';
-            case 'Needs Input': return 'needs-input';
-            case 'Waiting': return 'waiting';
-            case 'Inactive': return 'inactive';
-            default: return 'inactive';
-        }
+        return statusInfo(status).cls;
     }
 
     function statusSymbol(status) {
-        switch (status) {
-            case 'Working': return '\u25CF';     // ●
-            case 'Needs Input': return '\u25B2';  // ▲
-            case 'Waiting': return '\u25C9';      // ◉
-            case 'Inactive': return '\u25CC';      // ◌
-            default: return '\u25CC';
+        return statusInfo(status).symbol;
+    }
+
+    // Every endpoint here answers a failure with {"error": "..."} and a status
+    // code, so a plain resp.json() on a 500 hands the caller that envelope as
+    // if it were data -- history did exactly that, and the list then failed on
+    // an object with no .filter. Reading the reason out of the envelope is also
+    // what stops a panel printing raw JSON at the user.
+    async function fetchJSON(url) {
+        const resp = await fetch(url);
+        let body = null;
+        try {
+            body = await resp.json();
+        } catch (err) {
+            // A non-JSON body is only worth reporting through the status below.
         }
+        if (!resp.ok) throw new Error((body && body.error) || `HTTP ${resp.status}`);
+        if (body === null) throw new Error(`HTTP ${resp.status} with a body that is not JSON`);
+        return body;
+    }
+
+    // The heading used by the two usage sections and both halves of the metrics
+    // panel. Live and history build the same markup in index.html instead,
+    // because their meta span needs a stable id for later text updates.
+    // `label` is markup the caller controls, never session data, so it is not
+    // escaped here.
+    function sectionLabel(label) {
+        return `<div class="section-label">
+            <span class="section-label-text">${label}</span>
+            <span class="section-label-rule"></span>
+        </div>`;
+    }
+
+    // One spelling of the plural rule, which was written inline seven times
+    // in two different forms.
+    function plural(n, word) {
+        return `${n} ${word}${n === 1 ? '' : 's'}`;
+    }
+
+    // The "N sessions / M projects" line both the live and history tabs show.
+    function countSummary(sessions, projects) {
+        return `${plural(sessions, 'session')} \u00b7 ${plural(projects, 'project')}`;
+    }
+
+    // One severity ramp for every bar and figure that has one, so a threshold
+    // moves in one place. The metrics panel spells the same three steps with
+    // its own words and maps the result rather than repeating the numbers.
+    const SEVERITY_WORDS = { low: 'ok', medium: 'warning', high: 'danger' };
+
+    function severityClass(pct) {
+        return pct >= 90 ? 'high' : pct >= 75 ? 'medium' : 'low';
+    }
+
+    // The empty, loading and error block every panel shows. It returns markup
+    // rather than assigning innerHTML, because the timeline builds its state
+    // into a larger string. `title` and `hint` are markup the caller controls,
+    // like sectionLabel's label, so they are not escaped here. A block asking
+    // for retry needs wireRetry on whatever received the markup.
+    function stateBlock({ title, hint, error, retry }) {
+        return `<div class="state">
+            <div class="state-title${error ? ' error' : ''}">${title}</div>
+            ${hint ? `<div class="state-hint">${hint}</div>` : ''}
+            ${retry ? `<button type="button" class="state-retry">Retry</button>` : ''}
+        </div>`;
+    }
+
+    function wireRetry(container, fn) {
+        const button = container.querySelector('.state-retry');
+        if (button) button.addEventListener('click', fn);
+    }
+
+    // One pass for the per-status tally. The group stats row used to ask the
+    // same list eight separate questions, on every scan.
+    function countByStatus(sessions) {
+        const counts = {};
+        sessions.forEach(s => { counts[s.status] = (counts[s.status] || 0) + 1; });
+        return counts;
+    }
+
+    // The project group shell both tabs draw. The live list passes status
+    // dots; history has no live status to count and passes none.
+    function groupShell({ project, stats, count, age, collapsed, body }) {
+        return `<div class="group${collapsed ? ' collapsed' : ''}" data-project="${esc(project)}">
+            <div class="group-header">
+                <span class="group-toggle">&#x25B6;</span>
+                <span class="group-name">${esc(project)}</span>
+                ${stats ? `<span class="group-stats">${stats}</span>` : ''}
+                <span class="group-count">${plural(count, 'session')}</span>
+                <span class="group-age">${age || ''}</span>
+            </div>
+            <div class="group-body">${body}</div>
+        </div>`;
+    }
+
+    function statusWord(status) {
+        return statusInfo(status).word;
     }
 
     // The badge shows the short id the API sends; the tooltip spells it out, so

@@ -34,7 +34,8 @@ header {
     display: flex;
     align-items: center;
     gap: 1.5rem;
-    padding: 0.75rem 1.5rem;
+    height: 3.25rem;
+    padding: 0 1.5rem;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     position: sticky;
@@ -50,23 +51,46 @@ header h1 {
 
 nav {
     display: flex;
-    gap: 0.25rem;
+    gap: 0.125rem;
+    align-self: stretch;
 }
 
+/* The active tab is marked by a rule sitting on the header's own bottom
+   border. A filled pill would be a third chrome surface beside --bg-surface
+   and --bg-card, and the underline is the same mark the detail panel's tabs
+   use, so one gesture means "you are here" everywhere.
+   nav stretches and .tab is a full-height flex box so that bottom: 0 lands on
+   that border rather than under the text. */
 .tab {
-    padding: 0.375rem 0.75rem;
-    /* The header is the smallest type in the UI (11-13px) on the lightest
-       chrome, so it sits one tier up from --text-dim: 6.43:1 rather than
-       5.28:1, and an inactive tab stays legible next to the active one. */
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem;
+    /* The header is the smallest type in the UI (11-13px), so it sits one tier
+       up from --text-dim: on --bg-surface that is 6.43:1 rather than 5.28:1,
+       and an inactive tab stays legible next to the active one. */
     color: var(--text-muted);
     text-decoration: none;
     font-size: 0.8125rem;
-    border-radius: 4px;
-    transition: all 0.15s;
+    transition: color 0.15s;
 }
 
-.tab:hover { color: var(--text); background: var(--bg-hover); }
-.tab.active { color: var(--text); background: var(--bg); }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); }
+
+.tab.active::after {
+    content: '';
+    position: absolute;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0;
+    height: 2px;
+    /* The product's own green, the one in the mark to its left, not the
+       Working status hue: this marks where you are, never what a session is
+       doing, and it never appears beside a status glyph. */
+    background: var(--green);
+    border-radius: 1px;
+}
 
 /* Header API quota */
 .header-quota {
@@ -90,23 +114,59 @@ nav {
     letter-spacing: 0.05em;
 }
 
-.header-quota-bar {
-    width: 50px;
-    height: 5px;
-    background: var(--border);
+/* Every meter in the dashboard is the same track: a rounded well with a fill
+   clipped to it. A variant below sets only its own size; the radius follows the
+   height, and each fill inherits the radius of the track it sits in. */
+.header-quota-bar,
+.usage-bar,
+.share-bar,
+.context-bar,
+.meter-track,
+.tool-bar {
+    height: 6px;
+    background: var(--bg-hover);
     border-radius: 3px;
     overflow: hidden;
 }
 
-.header-quota-fill {
+.header-quota-fill,
+.usage-bar-fill,
+.share-bar-fill,
+.context-fill,
+.meter-fill,
+.tool-bar-fill {
     display: block;
     height: 100%;
-    border-radius: 3px;
+    border-radius: inherit;
 }
 
-.header-quota-fill.low { background: var(--green); }
-.header-quota-fill.medium { background: var(--yellow); }
-.header-quota-fill.high { background: var(--red); }
+/* The three that animate. `0.3s` and `0.3s ease` are the same declaration;
+   the fills that never re-render without a full rebuild have neither. */
+.usage-bar-fill,
+.context-fill,
+.meter-fill {
+    transition: width 0.3s;
+}
+
+.header-quota-bar {
+    width: 56px;
+    height: 5px;
+}
+
+.header-quota-fill.low,
+.usage-bar-fill.low,
+.context-fill.low,
+.meter-fill.ok { background: var(--green); }
+
+.header-quota-fill.medium,
+.usage-bar-fill.medium,
+.context-fill.medium,
+.meter-fill.warning { background: var(--yellow); }
+
+.header-quota-fill.high,
+.usage-bar-fill.high,
+.context-fill.high,
+.meter-fill.danger { background: var(--red); }
 
 .header-quota-pct {
     color: var(--text-muted);
@@ -157,16 +217,46 @@ nav {
     border-radius: 50%;
     flex-shrink: 0;
 }
-#connection-status.connected { background: var(--green); }
-#connection-status.disconnected { background: var(--red); }
+#connection-status.connected {
+    background: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+#connection-status.disconnected {
+    background: var(--red);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 16%, transparent);
+}
+
 /* Connected, but the newest scan failed: the data on screen is stale even
    though the stream is healthy. */
-#connection-status.stale { background: var(--yellow); }
+#connection-status.stale {
+    background: var(--yellow);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 16%, transparent);
+}
 
 /* This row's log could not be read in full, so its numbers are not a
-   measurement. */
-.session-degraded-badge { background: var(--yellow); color: var(--bg); }
-.usage-partial { color: var(--yellow); font-size: 0.85em; margin-top: 8px; }
+   measurement. Filled rather than outlined, because it has to stay visible
+   against the card, the recessed stopped card and the page alike. */
+.session-degraded-badge {
+    background: var(--yellow);
+    border-color: var(--yellow);
+    color: var(--bg);
+    justify-content: center;
+    min-width: 1.125rem;
+    font-weight: 700;
+    opacity: 1;
+}
+
+/* The same fact at page level, under the usage table. Same mark, same
+   wording, so a reader learns it once. */
+.usage-partial {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--yellow);
+    font-size: 0.75rem;
+    margin-top: 0.625rem;
+}
 
 /* Status bar */
 .status-bar {
@@ -194,20 +284,11 @@ nav {
 .status-dot.working { background: var(--green); }
 .status-dot.needs-input { background: var(--yellow); }
 .status-dot.waiting { background: var(--blue); }
-.status-dot.idle { background: var(--gray); }
 .status-dot.inactive { background: var(--text-dim); }
 
 /* Usage view */
 .usage-section {
     margin-bottom: 1.5rem;
-}
-
-.usage-section-title {
-    font-size: 0.875rem;
-    font-weight: 600;
-    margin-bottom: 0.75rem;
-    padding-bottom: 0.375rem;
-    border-bottom: 1px solid var(--border);
 }
 
 .usage-bars {
@@ -232,24 +313,11 @@ nav {
 }
 
 .usage-bar {
-    width: 200px;
+    width: 320px;
     height: 10px;
-    background: var(--border);
     border-radius: 5px;
-    overflow: hidden;
     flex-shrink: 0;
 }
-
-.usage-bar-fill {
-    display: block;
-    height: 100%;
-    border-radius: 5px;
-    transition: width 0.3s;
-}
-
-.usage-bar-fill.low { background: var(--green); }
-.usage-bar-fill.medium { background: var(--yellow); }
-.usage-bar-fill.high { background: var(--red); }
 
 .usage-bar-pct {
     width: 3rem;
@@ -263,7 +331,16 @@ nav {
     font-size: 0.75rem;
 }
 
+/* Amber, not red: the app is working, the numbers are out of reach. Only ever
+   a failure to look -- a measured zero wears .usage-none below, because
+   painting a true zero in the alarm colour says something is wrong. */
 .usage-unavailable {
+    color: var(--yellow);
+    font-size: 0.8125rem;
+    padding: 0.5rem 0;
+}
+
+.usage-none {
     color: var(--text-dim);
     font-size: 0.8125rem;
     padding: 0.5rem 0;
@@ -297,14 +374,14 @@ nav {
     margin-bottom: 0.25rem;
 }
 
+/* Volume, so text ink. The status hues on this tab mean state and belong to
+   the quota meters; --blue is the magnitude channel and belongs to the bars.
+   A figure wears neither -- the rule the metrics panel already follows. */
 .usage-summary-value {
     font-size: 1.25rem;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
-
-.usage-summary-value.blue { color: var(--blue); }
-.usage-summary-value.green { color: var(--green); }
-.usage-summary-value.yellow { color: var(--yellow); }
 
 .usage-table {
     border: 1px solid var(--border);
@@ -319,6 +396,7 @@ nav {
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     font-size: 0.6875rem;
+    align-items: center;
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -326,6 +404,7 @@ nav {
 
 .usage-table-row {
     display: flex;
+    align-items: center;
     gap: 0;
     padding: 0.5rem 0.75rem;
     font-size: 0.8125rem;
@@ -354,6 +433,43 @@ nav {
     text-align: right;
     flex-shrink: 0;
     color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* How much of the window this project spent, as the magnitude bar the metrics
+   panel's tool list uses. One hue: the bar carries how much, not which. The
+   rows stay in the server's newest-first order, the same as the terminal's
+   usage table, so this reads as a share and not as a ranking. */
+.usage-col-share {
+    width: 10rem;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.share-bar {
+    flex: 1;
+}
+
+.share-bar-fill {
+    background: var(--blue);
+}
+
+.share-pct {
+    /* Wide enough for "100.0%": the cell shows formatShare's one decimal, the
+       same figure the metrics panel's tool list uses. */
+    width: 2.75rem;
+    text-align: right;
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+/* The header cell holds a label, not a bar, so it drops the flex layout the
+   rows use. */
+.usage-table-header .usage-col-share {
+    display: block;
 }
 
 .usage-table-header .usage-col-tokens {
@@ -390,6 +506,38 @@ nav {
     border-color: var(--blue);
 }
 
+/* The heading every section wears: live, history, both usage sections and
+   both halves of the metrics panel. One element, so the tabs stop each
+   inventing their own. */
+.section-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.875rem;
+}
+
+.section-label-text {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.section-label-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+.section-label-meta {
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Main content */
 main {
     padding: 1rem 1.5rem;
@@ -404,14 +552,52 @@ main {
 .sessions-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.875rem;
+}
+
+/* The live list nests cards under a project header, so the gap between them
+   lives on the body. History's rows bring their own spacing. */
+.sessions-list .group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+/* The stopped sessions a project has accumulated, in one row. Dashed rather
+   than solid because it is a control that opens, not a session that exists. */
+.session-fold {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.4375rem 0.75rem;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.session-fold:hover { border-color: var(--text-dim); color: var(--text-muted); }
+.session-fold.open .group-toggle { transform: rotate(90deg); }
+
+.session-fold-glyph {
+    width: 0.875rem;
+    text-align: center;
+    color: var(--text-dim);
+}
+
+.session-fold-age {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
 }
 
 .session-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    padding: 0.625rem 0.75rem;
     cursor: pointer;
     transition: border-color 0.15s;
 }
@@ -434,32 +620,35 @@ main {
 .session-status.working { color: var(--green); }
 .session-status.needs-input { color: var(--yellow); }
 .session-status.waiting { color: var(--blue); }
-.session-status.idle { color: var(--gray); }
 .session-status.inactive { color: var(--text-dim); }
 
-.session-project {
+/* A session outside a git checkout has no branch to lead with and falls back
+   to the project name. Not dressed as a branch, because it is the group
+   header's own text repeated. */
+.session-lead-plain {
     font-weight: 600;
     font-size: 0.8125rem;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: var(--text-muted);
+    flex-shrink: 0;
 }
 
 .session-branch {
     color: var(--purple);
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
     flex-shrink: 0;
 }
 
-.session-branch::before { content: '@'; }
+/* The detail panel puts the branch after the project name, where it still
+   needs the separator. In the list it leads the row and does not. */
+.detail-header .session-branch::before { content: '@'; }
 
 .session-title {
     color: var(--text-muted);
     font-size: 0.75rem;
     font-style: italic;
-    flex-shrink: 1;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -469,8 +658,11 @@ main {
 .session-title::after { content: '"'; }
 
 .badge {
-    font-size: 0.7rem;
-    padding: 1px 6px;
+    display: inline-flex;
+    align-items: center;
+    height: 1.125rem;
+    font-size: 0.6875rem;
+    padding: 0 6px;
     border-radius: 3px;
     border: 1px solid currentColor;
     flex-shrink: 0;
@@ -488,6 +680,18 @@ main {
    status hues are spoken for, and this is an identifier, not a state. */
 .session-harness-badge { color: var(--text-muted); }
 
+/* The chips, the meter and the age travel together at the right edge. They
+   are one element rather than seven siblings because a card with no title has
+   nothing flexible before them, and they would otherwise bunch up against the
+   branch on exactly the rows that carry the least information. */
+.session-meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
 .session-context {
     flex-shrink: 0;
     display: flex;
@@ -497,23 +701,8 @@ main {
 }
 
 .context-bar {
-    width: 60px;
-    height: 6px;
-    background: var(--border);
-    border-radius: 3px;
-    overflow: hidden;
+    width: 64px;
 }
-
-.context-fill {
-    display: block;
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.3s;
-}
-
-.context-fill.low { background: var(--green); }
-.context-fill.medium { background: var(--yellow); }
-.context-fill.high { background: var(--red); }
 
 .session-activity {
     color: var(--text-dim);
@@ -555,11 +744,16 @@ main {
    The trunk bridges the flex gap into neighboring rows so it reads as one
    continuous line; the first row extends it up through session-subagents'
    own margin so the list visibly hangs from the parent card, and the last
-   row stops it at its own elbow. */
+   row stops it at its own elbow.
+
+   left is half of .session-status's 1.25rem width, because this row and that
+   glyph start at the same content edge. Recompute it if the glyph's width
+   changes, or if .session-subagents gains a left inset. The card's padding
+   does not enter the sum: it shifts both together. */
 .subagent::before {
     content: '';
     position: absolute;
-    left: 0.375rem;
+    left: 0.625rem;
     top: -0.375rem;
     bottom: -0.375rem;
     width: 1px;
@@ -577,7 +771,7 @@ main {
 .subagent::after {
     content: '';
     position: absolute;
-    left: 0.375rem;
+    left: 0.625rem;
     top: 0.75rem;
     width: 0.5rem;
     height: 1px;
@@ -705,68 +899,105 @@ main {
     gap: 0.25rem;
 }
 
-/* Project grouping in history */
-.project-group {
+/* Project grouping, shared by the live list and history. History omits the
+   status counts -- a finished session has no live status to count -- and is
+   otherwise the same element, so a project reads the same on both tabs. */
+.group {
     margin-bottom: 0.25rem;
 }
 
-.project-group-header {
+.group-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.625rem 0.75rem;
+    gap: 0.625rem;
+    padding: 0.5rem 0.625rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
     cursor: pointer;
-    border-bottom: 1px solid var(--border);
     transition: background 0.15s;
     user-select: none;
 }
 
-.project-group-header:hover {
+.group-header:hover {
     background: var(--bg-hover);
 }
 
-.project-group-toggle {
+.group-toggle {
     font-size: 0.625rem;
     color: var(--text-dim);
     transition: transform 0.15s;
     display: inline-block;
+    flex-shrink: 0;
 }
 
-.project-group:not(.collapsed) .project-group-toggle {
+/* The child combinator is load-bearing: .session-fold carries a .group-toggle
+   of its own inside .group-body, and a descendant selector here would turn the
+   fold's arrow down whenever its project was open. */
+.group:not(.collapsed) > .group-header .group-toggle {
     transform: rotate(90deg);
 }
 
-.project-group-name {
+/* A collapsed group recedes, but it is also the row that has to be clicked to
+   open it, so hover has to win. This rule's three classes outrank
+   .group-header:hover on its own, hence the second selector. */
+.group.collapsed > .group-header {
+    background: var(--bg);
+}
+
+.group.collapsed > .group-header:hover {
+    background: var(--bg-hover);
+}
+
+.group-name {
     font-weight: 600;
     font-size: 0.8125rem;
-    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.project-group-count {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    flex-shrink: 0;
-    width: 6.5rem;
-    text-align: left;
+/* How the project's sessions are doing, without opening it. Same dot and
+   same order as the status bar above. */
+.group-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
-.project-group-age {
-    font-size: 0.75rem;
+.group-stat {
+    display: flex;
+    align-items: center;
+    gap: 0.3125rem;
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.group-count {
+    margin-left: auto;
+    font-size: 0.6875rem;
     color: var(--text-dim);
     flex-shrink: 0;
-    width: 5.5rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.group-age {
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    width: 5rem;
     text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
-.project-group-body {
-    padding-left: 1.25rem;
+.group-body {
+    padding-left: 1rem;
+    margin-top: 0.5rem;
 }
 
-.project-group.collapsed .project-group-body {
+.group.collapsed .group-body {
     display: none;
 }
 
@@ -813,10 +1044,14 @@ main {
     margin-bottom: 0.25rem;
 }
 
+/* The column heads wear the section label's treatment, so the tables on
+   history and usage read as one thing. */
 .history-header span {
     color: var(--text-dim);
-    font-size: 0.75rem;
+    font-size: 0.6875rem;
     font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
 
 .history-project {
@@ -868,7 +1103,7 @@ main {
 .detail-overlay.hidden { display: none; }
 
 .detail-panel {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
     width: 100%;
@@ -886,9 +1121,19 @@ main {
     border-bottom: 1px solid var(--border);
 }
 
+/* Several live sessions can share a project now that the list is grouped, so
+   the header repeats the row that was clicked rather than only its project. */
 .detail-header h2 {
-    font-size: 0.9375rem;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    font-size: 0.875rem;
+    font-weight: 400;
+}
+
+.detail-project {
     font-weight: 600;
+    color: var(--text);
 }
 
 .close-btn {
@@ -905,25 +1150,40 @@ main {
 
 .detail-tabs {
     display: flex;
-    gap: 0.25rem;
+    gap: 0.125rem;
     padding: 0.5rem 1.25rem;
     border-bottom: 1px solid var(--border);
 }
 
+/* Same mark as the top nav: a rule on the strip's own bottom border. */
 .detail-tab {
-    padding: 0.375rem 0.75rem;
+    position: relative;
+    padding: 0.5rem 0.75rem;
     background: none;
     border: none;
-    color: var(--text-dim);
+    color: var(--text-muted);
     font-family: inherit;
     font-size: 0.8125rem;
-    border-radius: 4px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: color 0.15s;
 }
 
-.detail-tab:hover { color: var(--text); background: var(--bg-hover); }
-.detail-tab.active { color: var(--text); background: var(--bg); }
+.detail-tab:hover { color: var(--text); }
+.detail-tab.active { color: var(--text); }
+
+/* bottom cancels .detail-tabs' 0.5rem vertical padding so the rule lands on
+   the strip's border, the way the top nav's lands on the header's. Change that
+   padding and this number follows it. */
+.detail-tab.active::after {
+    content: '';
+    position: absolute;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: -0.5rem;
+    height: 2px;
+    background: var(--green);
+    border-radius: 1px;
+}
 
 .detail-content {
     display: none;
@@ -982,21 +1242,9 @@ main {
    whole bar and not only across the filled part. */
 .meter-track {
     height: 8px;
-    background: var(--bg);
     border-radius: 4px;
-    overflow: hidden;
     margin-bottom: 0.625rem;
 }
-
-.meter-fill {
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-.meter-fill.ok { background: var(--green); }
-.meter-fill.warning { background: var(--yellow); }
-.meter-fill.danger { background: var(--red); }
 
 .lead-support {
     display: flex;
@@ -1037,15 +1285,6 @@ main {
 
 .token-composition, .tool-usage { margin-bottom: 1.5rem; }
 
-.token-composition h3, .tool-usage h3 {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 0.625rem;
-}
-
 /* One stacked bar, because the four kinds are parts of one total. The 2px gap
    is the surface showing through -- it is what separates touching segments, so
    no segment needs a border. */
@@ -1055,7 +1294,7 @@ main {
     height: 14px;
     border-radius: 3px;
     overflow: hidden;
-    background: var(--bg);
+    background: var(--bg-card);
 }
 
 .token-seg { flex-grow: 0; flex-shrink: 1; }
@@ -1137,17 +1376,10 @@ main {
 
 .tool-bar {
     min-width: 2rem;
-    height: 6px;
-    background: var(--bg);
-    border-radius: 3px;
-    overflow: hidden;
 }
 
 .tool-bar-fill {
-    display: block;
-    height: 100%;
     background: var(--blue);
-    border-radius: 3px;
 }
 
 .tool-count {
@@ -1275,25 +1507,57 @@ main {
 }
 
 /* Utility */
-.empty-state {
+
+/* One shape for every state a view can be in instead of a list: loading,
+   nothing found, and a failed request. Muted ink says "nothing to show";
+   red says "the number you wanted is missing". The hint carries what the
+   reader can do about it. */
+.state {
     text-align: center;
-    color: var(--text-dim);
     padding: 3rem 1rem;
-    font-size: 0.875rem;
 }
 
-.loading {
-    text-align: center;
-    color: var(--text-dim);
-    padding: 2rem 1rem;
+.state-title {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.state-title.error { color: var(--red); }
+
+.state-hint {
+    margin-top: 0.5rem;
     font-size: 0.8125rem;
+    color: var(--text-dim);
+}
+
+.state-retry {
+    margin-top: 0.875rem;
+    padding: 0.375rem 1rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.state-retry:hover {
+    background: var(--bg-hover);
+    border-color: var(--blue);
 }
 
 /* Responsive */
 @media (max-width: 640px) {
-    header { padding: 0.5rem 1rem; gap: 0.75rem; }
+    /* Horizontal only: the header keeps its 3.25rem height, and vertical
+       padding would shrink the content box so nav no longer stretches to the
+       bottom border the active tab's rule sits on. */
+    header { padding: 0 1rem; gap: 0.75rem; }
     main { padding: 0.75rem 1rem; }
     .session-top { flex-wrap: wrap; }
+    .section-label-meta { display: none; }
+    .group-body { padding-left: 0.5rem; }
     .session-context { display: none; }
     .detail-panel { margin: 0; max-height: 100vh; border-radius: 0; }
     .detail-overlay { padding: 0; }

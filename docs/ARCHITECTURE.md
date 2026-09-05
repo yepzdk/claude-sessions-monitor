@@ -504,6 +504,10 @@ No framework, no bundler, no `package.json`. Iterate with
 
 - All HTML is built from template literals; every interpolated value goes
   through `esc()`.
+- The live list is grouped by project and rebuilt from scratch on every scan,
+  so what the user has collapsed lives in module-level sets rather than in the
+  DOM. The comment on `collapsedProjects` says why; history's collapse state is
+  a DOM class because that list only re-renders on demand.
 - Live data arrives over `EventSource('/api/events')`; everything else is
   `fetch`. Pollers stop on `visibilitychange`.
 - The header quota poll has a circuit breaker: the usage endpoint can stick at
