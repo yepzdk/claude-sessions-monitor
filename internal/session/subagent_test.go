@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -79,5 +80,55 @@ func TestDiscoverKeepsSubagentParsesPastThePrune(t *testing.T) {
 	if !cached {
 		t.Error("the subagent's parse was evicted by the sweep that created it; " +
 			"every following tick re-reads and re-decodes a log nothing has written to")
+	}
+}
+
+// Subagent rows swapped places on every refresh. The list was ordered by
+// LastActivity, which each agent's log advances at its own moment, while the UI
+// prints "Now" for every one of them -- so the rows moved on a difference the
+// user could not see. Order must not depend on LastActivity at all.
+func TestSubagentOrderHoldsWhenActivityJitters(t *testing.T) {
+	resetParseCache()
+	t.Cleanup(resetParseCache)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectDir := filepath.Join(home, ".claude", "projects", encodeProjectPath(fakeCwd))
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionLog := filepath.Join(projectDir, "11111111-2222-3333-4444-555555555555.jsonl")
+	subDir := subagentsDir(sessionLog)
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two live subagents, rewritten so that whichever one wrote last flips
+	// between the two ticks. "aaa" sorts first by ID on both.
+	tick := func(newest string) []string {
+		t.Helper()
+		resetParseCache()
+		for _, id := range []string{"aaa", "bbb"} {
+			age := 30 * time.Second
+			if id == newest {
+				age = 2 * time.Second
+			}
+			ts := time.Now().Add(-age).UTC().Format(time.RFC3339Nano)
+			writeLog(t, subDir, "agent-"+id+".jsonl",
+				`{"type":"assistant","timestamp":"`+ts+`","message":{"content":[{"type":"text","text":"working"}]}}`+"\n")
+		}
+		var ids []string
+		for _, sa := range discoverSubagents(sessionLog, map[string]bool{}, true) {
+			ids = append(ids, sa.ID)
+		}
+		return ids
+	}
+
+	first, second := tick("bbb"), tick("aaa")
+
+	want := []string{"aaa", "bbb"}
+	if !slices.Equal(first, want) || !slices.Equal(second, want) {
+		t.Errorf("subagent order = %v then %v, want %v on both ticks; the rows move when only LastActivity changes",
+			first, second, want)
 	}
 }

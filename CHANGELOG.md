@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - csm no longer re-parses a session's subagent logs on every refresh, so watching a session that runs agents costs less CPU
+- Subagent rows hold their places. They were ordered by last activity, which each agent's log advances at its own moment, so the rows swapped on every refresh while all of them still read "Now"
 - Flags work on either side of the subcommand: `csm upgrade -v` prints the version, and `csm -l upgrade` is refused instead of upgrading and dropping the `-l`
 
 ## [1.2.0] - 2026-09-04

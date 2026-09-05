@@ -103,13 +103,23 @@ func discoverSubagents(logFile string, pending map[string]bool, isRunning bool) 
 		}
 
 		path := filepath.Join(dir, name)
+		stale := time.Since(info.ModTime()) > subagentActiveWindow
+		// Only a blocking agent survives going quiet, and nothing can be
+		// blocking when the parent has no tool_use outstanding. Settling that
+		// first skips the sidecar read for every finished agent: their logs are
+		// never deleted, so a long session accumulates them and paid a read and
+		// an unmarshal per agent per refresh to list the one or two still live.
+		if stale && len(pending) == 0 {
+			continue
+		}
+
 		id := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
 		meta := readSubagentMeta(dir, id)
 
 		blocking := meta.ToolUseID != "" && pending[meta.ToolUseID]
 		// A blocking agent stays listed however long it has been quiet — the
 		// parent is provably still waiting on it.
-		if !blocking && time.Since(info.ModTime()) > subagentActiveWindow {
+		if !blocking && stale {
 			continue
 		}
 
@@ -143,10 +153,22 @@ func discoverSubagents(logFile string, pending map[string]bool, isRunning bool) 
 	}
 
 	sort.Slice(subagents, func(i, j int) bool {
-		return subagents[i].LastActivity.After(subagents[j].LastActivity)
+		return subagentLess(subagents[i], subagents[j])
 	})
 
 	return subagents
+}
+
+// subagentLess orders subagents by ID.
+//
+// Ordering by LastActivity swaps rows on nothing the user can see. Every
+// subagent here is Working by construction, renderSubagentRow prints "Now" for
+// any of them under a minute old, and each agent's log picks up entries at
+// slightly different real-world moments -- so that jitter alone reordered the
+// list on every refresh. The ID is fixed for the subagent's lifetime, so the
+// rows hold their places. Same reasoning as the Working case in sessionLess.
+func subagentLess(a, b Subagent) bool {
+	return a.ID < b.ID
 }
 
 // readSubagentMeta loads agent-<id>.meta.json, returning a zero value if the
