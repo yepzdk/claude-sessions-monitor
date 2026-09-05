@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- An upgrade asks before it replaces the binary, naming the file it is about to overwrite. Enter declines; `-y` (or `--yes`) skips the question, and so does a non-interactive stdin, so scripts and CI do not hang on it
+- An upgrade asks before replacing the binary, naming the file it will overwrite. Enter declines; `-y`/`--yes` and a non-interactive stdin skip the question
 
 ### Changed
 
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - csm no longer re-parses a session's subagent logs on every refresh, so watching a session that runs agents costs less CPU
-- Flags work on either side of the subcommand: `csm upgrade -v` prints the version instead of reporting a flag csm has as an unknown argument, and `csm -l upgrade` is refused as a contradiction rather than upgrading and dropping the `-l`
+- Flags work on either side of the subcommand: `csm upgrade -v` prints the version, and `csm -l upgrade` is refused instead of upgrading and dropping the `-l`
 
 ## [1.2.0] - 2026-09-04
 

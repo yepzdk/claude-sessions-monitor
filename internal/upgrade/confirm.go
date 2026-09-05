@@ -19,13 +19,18 @@ type confirmer func(out io.Writer, question string) bool
 // Anything other than y/yes declines, so a bare Enter, an EOF and a typo all
 // mean "leave the binary alone" -- the safe reading of an ambiguous answer.
 func newPrompt(in io.Reader, interactive, assumeYes bool) confirmer {
+	// One reader for the life of the confirmer: bufio reads ahead, so building
+	// a second one would drop whatever the first had already buffered. It reads
+	// nothing until asked, so the two silent cases below still leave stdin
+	// untouched.
+	r := bufio.NewReader(in)
 	return func(out io.Writer, question string) bool {
 		if assumeYes || !interactive {
 			return true
 		}
 		printf(out, "%s [y/N] ", question)
 
-		line, err := bufio.NewReader(in).ReadString('\n')
+		line, err := r.ReadString('\n')
 		if err != nil && line == "" {
 			printf(out, "\n")
 			return false

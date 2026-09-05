@@ -150,9 +150,10 @@ func registerFlags(fs *flag.FlagSet) *options {
 	fs.IntVar(&o.webPort, "port", 9847, "Port for web dashboard")
 	fs.BoolVar(&o.doUpgrade, "upgrade", false, "Upgrade csm to the latest release")
 	// One variable, two spellings: -y is what a hand types, --yes is what a
-	// script reads back. Go treats --yes and -yes as the same flag.
+	// script reads back. Go treats --yes and -yes as the same flag, and prints
+	// a line per registration, so the second names itself as the alias it is.
 	fs.BoolVar(&o.assumeYes, "y", false, "Upgrade without asking for confirmation")
-	fs.BoolVar(&o.assumeYes, "yes", false, "Upgrade without asking for confirmation")
+	fs.BoolVar(&o.assumeYes, "yes", false, "Alias for -y")
 	return &o
 }
 
