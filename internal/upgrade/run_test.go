@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,19 @@ func managedBinary(t *testing.T, rel string) (path, original string) {
 		t.Fatal(err)
 	}
 	return path, original
+}
+
+// alwaysYes stands in for a user who typed y, or for -y.
+func alwaysYes(io.Writer, string) bool { return true }
+
+// neverAsked fails the test if it is called: the managed and already-latest
+// paths change nothing, and a prompt there only teaches a reflexive y.
+func neverAsked(t *testing.T) confirmer {
+	t.Helper()
+	return func(_ io.Writer, question string) bool {
+		t.Errorf("csm asked %q on a path that touches nothing", question)
+		return false
+	}
 }
 
 // The property the whole feature rests on: when another tool owns the binary,
@@ -48,7 +62,7 @@ func TestRunRefusesToTouchManagedInstalls(t *testing.T) {
 			path, original := managedBinary(t, tt.relPath)
 
 			var out strings.Builder
-			if code := runFor("v0.1.0", path, &out); code != 0 {
+			if code := runFor("v0.1.0", path, &out, neverAsked(t)); code != 0 {
 				t.Errorf("runFor() = %d, want 0 — a managed install is a normal outcome, not a failure", code)
 			}
 
@@ -76,7 +90,7 @@ func TestRunSaysNothingToDoWhenCurrent(t *testing.T) {
 	path, original := managedBinary(t, "bin/csm")
 
 	var out strings.Builder
-	if code := runFor("v0.6.0", path, &out); code != 0 {
+	if code := runFor("v0.6.0", path, &out, neverAsked(t)); code != 0 {
 		t.Errorf("runFor() = %d, want 0", code)
 	}
 	if !strings.Contains(out.String(), "already the latest") {
@@ -94,7 +108,7 @@ func TestRunLeavesDevBuildsAheadOfTheirTagAlone(t *testing.T) {
 	path, original := managedBinary(t, "bin/csm")
 
 	var out strings.Builder
-	if code := runFor("v0.6.0-11-g660745b-dirty", path, &out); code != 0 {
+	if code := runFor("v0.6.0-11-g660745b-dirty", path, &out, neverAsked(t)); code != 0 {
 		t.Errorf("runFor() = %d, want 0", code)
 	}
 	if !strings.Contains(out.String(), "already the latest") {
@@ -116,7 +130,7 @@ func TestRunUpgradesDirectInstalls(t *testing.T) {
 	path, original := managedBinary(t, "bin/csm") // .../bin/csm: nothing owns it
 
 	var out strings.Builder
-	if code := runFor("v0.1.0", path, &out); code != 0 {
+	if code := runFor("v0.1.0", path, &out, alwaysYes); code != 0 {
 		t.Fatalf("runFor() = %d, want 0:\n%s", code, out.String())
 	}
 	got, err := os.ReadFile(path)
@@ -129,6 +143,50 @@ func TestRunUpgradesDirectInstalls(t *testing.T) {
 	if !strings.Contains(string(got), "v9.9.9") {
 		t.Errorf("installed binary is not the new release: %q", got)
 	}
+	// The path being overwritten is the one fact a user needs to answer the
+	// prompt, and nothing on screen used to say it.
+	if !strings.Contains(out.String(), path) {
+		t.Errorf("output does not name the binary it replaced:\n%s", out.String())
+	}
+}
+
+// Declining is the whole point of the prompt: the binary stays as it was, and
+// saying no is not an error.
+func TestRunLeavesTheBinaryAloneWhenDeclined(t *testing.T) {
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", "/nonexistent-gopath")
+
+	_, rel := fakeRelease(t, csmLikeScript("v9.9.9"))
+	fakeAPI(t, rel)
+
+	path, original := managedBinary(t, "bin/csm")
+
+	var out strings.Builder
+	asked := ""
+	decline := func(_ io.Writer, question string) bool {
+		asked = question
+		return false
+	}
+	if code := runFor("v0.1.0", path, &out, decline); code != 0 {
+		t.Errorf("runFor() = %d, want 0 — declining is not a failure", code)
+	}
+	if asked == "" {
+		t.Error("an unmanaged upgrade replaced the binary without asking")
+	}
+	if got, _ := os.ReadFile(path); string(got) != original {
+		t.Errorf("a declined upgrade replaced the binary:\n%s", got)
+	}
+	if !strings.Contains(out.String(), path) {
+		t.Errorf("the question did not name the binary at stake:\n%s", out.String())
+	}
+	// Nothing was downloaded, so nothing is left behind to clean up.
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("a declined upgrade left files behind: %v", entries)
+	}
 }
 
 func TestRunReportsAnUnreachableAPI(t *testing.T) {
@@ -139,7 +197,7 @@ func TestRunReportsAnUnreachableAPI(t *testing.T) {
 	path, original := managedBinary(t, "bin/csm")
 
 	var out strings.Builder
-	if code := runFor("v0.1.0", path, &out); code != 1 {
+	if code := runFor("v0.1.0", path, &out, neverAsked(t)); code != 1 {
 		t.Errorf("runFor() = %d, want 1 — an explicit upgrade that could not check must fail", code)
 	}
 	if !strings.Contains(out.String(), "Could not check for updates") {

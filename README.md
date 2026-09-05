@@ -136,6 +136,18 @@ Otherwise it downloads the new binary, verifies it against the release's
 `checksums.txt`, checks that it runs, and replaces itself — a failure at any
 step leaves the working csm untouched.
 
+Before it replaces anything it names the file and asks:
+
+```
+csm v1.2.0 is available (you have v1.1.0).
+This will replace /home/you/.local/bin/csm.
+Continue? [y/N]
+```
+
+Enter declines. Pass `-y` (or `--yes`) to skip the question. When stdin is not a
+terminal — a script, CI — the question is skipped as well rather than hanging on
+an answer that will never come.
+
 The live dashboard also checks once a day, in the background, and shows a
 footer line when a newer release exists. To turn that off, set
 `CSM_NO_UPDATE_CHECK` to **any** non-empty value — including `0`:
@@ -176,6 +188,12 @@ csm -kill-ghosts
 
 # Custom refresh interval
 csm -interval 5s
+
+# Upgrade, asking first (see Upgrading)
+csm upgrade
+
+# Upgrade without the confirmation
+csm upgrade -y
 
 # Show version
 csm -v

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // printf writes user-facing progress. The error is dropped deliberately and in
@@ -17,14 +19,20 @@ func printf(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
 }
 
-// Run implements `csm -upgrade`. It returns the process exit code.
-func Run(version string, out io.Writer) int {
+// Run implements `csm -upgrade` and `csm upgrade`. It returns the process exit
+// code. assumeYes is -y: the answer to the confirmation, given in advance.
+//
+// Whether stdin can answer a prompt is decided here, once, rather than at the
+// point the question is asked: it is the only fact in this package that needs
+// a real terminal, and everything downstream is a plain bool.
+func Run(version string, out io.Writer, assumeYes bool) int {
 	exe, err := resolveExecutable()
 	if err != nil {
 		printf(out, "Could not locate the running csm binary: %v\n", err)
 		return 1
 	}
-	return runFor(version, exe, out)
+	interactive := term.IsTerminal(int(os.Stdin.Fd()))
+	return runFor(version, exe, out, newPrompt(os.Stdin, interactive, assumeYes))
 }
 
 // runFor is Run with the binary's location supplied rather than discovered.
@@ -33,7 +41,7 @@ func Run(version string, out io.Writer) int {
 // install is told what to run and nothing on disk is touched -- is a test
 // rather than something a reviewer has to take on trust. Run itself is then
 // only the os.Executable call.
-func runFor(version, exe string, out io.Writer) int {
+func runFor(version, exe string, out io.Writer, ask confirmer) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -46,7 +54,9 @@ func runFor(version, exe string, out io.Writer) int {
 	// A version we cannot parse is a build from a checkout. The user asked to
 	// upgrade, so do it, but say what is being replaced -- silently swapping a
 	// developer's own build for a release would be a surprise.
+	dev := false
 	if _, ok := parseVersion(version); !ok {
+		dev = true
 		printf(out, "This is a development build (%s); the latest release is %s.\n", version, rel.TagName)
 	} else if !IsNewer(version, rel.TagName) {
 		printf(out, "csm %s is already the latest release.\n", version)
@@ -58,6 +68,18 @@ func runFor(version, exe string, out io.Writer) int {
 		printf(out, "This csm was installed with %s, so upgrading it is that tool's job:\n\n  %s\n\n",
 			method.Name(), method.Command())
 		printf(out, "Replacing the file directly would leave %s's records wrong, so csm won't.\n", method.Name())
+		return 0
+	}
+
+	// The replacement is irreversible and one keystroke away, so name the file
+	// that is about to be overwritten and ask. Neither branch above reaches
+	// here: nothing is touched when another tool owns the binary or when there
+	// is nothing newer, and asking there would only train a reflexive `y`.
+	if !dev {
+		printf(out, "csm %s is available (you have %s).\n", rel.TagName, version)
+	}
+	printf(out, "This will replace %s.\n", exe)
+	if !ask(out, "Continue?") {
 		return 0
 	}
 

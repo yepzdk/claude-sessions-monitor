@@ -32,75 +32,73 @@ func main() {
 	// and it needs it to identify csm in outgoing API requests.
 	session.SetVersion(version)
 
-	// Parse flags
-	listOnce := flag.Bool("l", false, "List sessions once and exit")
-	jsonOutput := flag.Bool("json", false, "Output as JSON (requires -l)")
-	showVersion := flag.Bool("v", false, "Show version")
-	interval := flag.Duration("interval", 2*time.Second, "Refresh interval for live view")
-	historyMode := flag.Bool("history", false, "Show session history")
-	historyDays := flag.Int("days", 7, "Number of days for history")
-	killGhosts := flag.Bool("kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
-	webMode := flag.Bool("web", false, "Start web dashboard server")
-	webOnly := flag.Bool("web-only", false, "Start web dashboard server without terminal UI (headless)")
-	webPort := flag.Int("port", 9847, "Port for web dashboard")
-	doUpgrade := flag.Bool("upgrade", false, "Upgrade csm to the latest release")
+	opts := registerFlags(flag.CommandLine)
 	flag.Parse()
 
 	// flag stops parsing at the first non-flag argument and leaves the rest in
-	// flag.Args(), which nothing read: `csm upgrade` dropped the word entirely
-	// and started the dashboard, the one thing someone asking to upgrade did
-	// not ask for. A wrong guess about the spelling has to say so.
-	if wantUpgrade, err := resolveArgs(flag.Args()); err != nil {
+	// flag.Args(): `csm upgrade` dropped the word entirely and started the
+	// dashboard, and `csm upgrade -v` blamed the user for a flag csm has.
+	// resolveArgs consumes the subcommand and hands what follows back to the
+	// FlagSet, so a flag means the same thing on either side of the word.
+	wantUpgrade, err := resolveArgs(flag.Args(), flag.CommandLine)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		flag.Usage()
 		os.Exit(2)
-	} else if wantUpgrade {
-		*doUpgrade = true
+	}
+	if wantUpgrade {
+		opts.doUpgrade = true
 	}
 
 	// Check for conflicting flags
-	if *webMode && *webOnly {
+	if opts.webMode && opts.webOnly {
 		fmt.Fprintf(os.Stderr, "Error: --web and --web-only are mutually exclusive\n")
 		os.Exit(1)
 	}
+	if opts.doUpgrade {
+		if err := upgradeConflicts(flag.CommandLine); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Handle version
-	if *showVersion {
+	if opts.showVersion {
 		fmt.Printf("csm version %s\n", version)
 		os.Exit(0)
 	}
 
 	// Handle upgrade mode. Before every other mode: it neither reads sessions
 	// nor draws anything, so nothing below needs to have run first.
-	if *doUpgrade {
-		os.Exit(upgrade.Run(version, os.Stdout))
+	if opts.doUpgrade {
+		os.Exit(upgrade.Run(version, os.Stdout, opts.assumeYes))
 	}
 
 	// Handle kill-ghosts mode
-	if *killGhosts {
+	if opts.killGhosts {
 		handleKillGhosts()
 		return
 	}
 
 	// Handle history mode
-	if *historyMode {
-		sessions, err := session.DiscoverHistory(*historyDays)
+	if opts.historyMode {
+		sessions, err := session.DiscoverHistory(opts.historyDays)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error discovering history: %v\n", err)
 			os.Exit(1)
 		}
-		ui.RenderHistory(sessions, *historyDays, false, "")
+		ui.RenderHistory(sessions, opts.historyDays, false, "")
 		return
 	}
 	// Handle list mode
-	if *listOnce {
+	if opts.listOnce {
 		sessions, err := session.Discover()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error discovering sessions: %v\n", err)
 			os.Exit(1)
 		}
 
-		if *jsonOutput {
+		if opts.jsonOutput {
 			if err := ui.RenderJSON(sessions); err != nil {
 				fmt.Fprintf(os.Stderr, "Error rendering JSON: %v\n", err)
 				os.Exit(1)
@@ -112,12 +110,50 @@ func main() {
 	}
 
 	// Headless web-only mode (no terminal UI)
-	if *webOnly {
-		os.Exit(runWebOnly(*webPort))
+	if opts.webOnly {
+		os.Exit(runWebOnly(opts.webPort))
 	}
 
 	// Live view mode
-	os.Exit(runLiveView(*interval, *webMode, *webPort))
+	os.Exit(runLiveView(opts.interval, opts.webMode, opts.webPort))
+}
+
+// options is every flag csm takes. It exists so main and the tests register
+// the same set: resolveArgs hands leftover words back to the FlagSet, and a
+// test that declared its own flags would be checking a parser csm does not use.
+type options struct {
+	listOnce    bool
+	jsonOutput  bool
+	showVersion bool
+	interval    time.Duration
+	historyMode bool
+	historyDays int
+	killGhosts  bool
+	webMode     bool
+	webOnly     bool
+	webPort     int
+	doUpgrade   bool
+	assumeYes   bool
+}
+
+func registerFlags(fs *flag.FlagSet) *options {
+	var o options
+	fs.BoolVar(&o.listOnce, "l", false, "List sessions once and exit")
+	fs.BoolVar(&o.jsonOutput, "json", false, "Output as JSON (requires -l)")
+	fs.BoolVar(&o.showVersion, "v", false, "Show version")
+	fs.DurationVar(&o.interval, "interval", 2*time.Second, "Refresh interval for live view")
+	fs.BoolVar(&o.historyMode, "history", false, "Show session history")
+	fs.IntVar(&o.historyDays, "days", 7, "Number of days for history")
+	fs.BoolVar(&o.killGhosts, "kill-ghosts", false, "Find and terminate ghost (orphaned) Claude processes")
+	fs.BoolVar(&o.webMode, "web", false, "Start web dashboard server")
+	fs.BoolVar(&o.webOnly, "web-only", false, "Start web dashboard server without terminal UI (headless)")
+	fs.IntVar(&o.webPort, "port", 9847, "Port for web dashboard")
+	fs.BoolVar(&o.doUpgrade, "upgrade", false, "Upgrade csm to the latest release")
+	// One variable, two spellings: -y is what a hand types, --yes is what a
+	// script reads back. Go treats --yes and -yes as the same flag.
+	fs.BoolVar(&o.assumeYes, "y", false, "Upgrade without asking for confirmation")
+	fs.BoolVar(&o.assumeYes, "yes", false, "Upgrade without asking for confirmation")
+	return &o
 }
 
 // resolveArgs interprets the arguments left over after flag parsing, reporting
@@ -129,19 +165,58 @@ func main() {
 // who asked to upgrade watching a dashboard start instead, with nothing on
 // screen to say why. Anything else is an error, because silently ignoring an
 // argument means doing something other than what was typed.
-func resolveArgs(args []string) (upgrade bool, err error) {
-	if len(args) == 0 {
-		return false, nil
-	}
-	switch args[0] {
-	case "upgrade", "update":
-		if len(args) > 1 {
-			return false, fmt.Errorf("%s takes no arguments, got %q", args[0], args[1])
+//
+// The loop is what makes flags work after the word. flag stops parsing at the
+// first non-flag argument, so `csm upgrade -v` left "-v" in flag.Args() and it
+// was reported as an argument csm cannot run -- for a flag csm has. Consuming
+// the subcommand and re-parsing the remainder puts it back in front of the
+// FlagSet. A word after the subcommand is still an error, and still names
+// itself: "upgrade takes no arguments" is actionable where the generic
+// "unknown argument" would blame the wrong word.
+func resolveArgs(args []string, fs *flag.FlagSet) (upgrade bool, err error) {
+	verb := ""
+	for len(args) > 0 {
+		switch {
+		case upgrade:
+			return false, fmt.Errorf("%s takes no arguments, got %q", verb, args[0])
+		case args[0] == "upgrade", args[0] == "update":
+			upgrade, verb = true, args[0]
+		default:
+			return false, fmt.Errorf("unknown argument %q; csm takes flags, plus `upgrade`", args[0])
 		}
-		return true, nil
-	default:
-		return false, fmt.Errorf("unknown argument %q; csm takes flags, plus `upgrade`", args[0])
+		if err := fs.Parse(args[1:]); err != nil {
+			return false, err
+		}
+		args = fs.Args()
 	}
+	return upgrade, nil
+}
+
+// upgradeConflicts reports a flag that cannot mean anything alongside an
+// upgrade. `csm -l upgrade` used to run the upgrade and drop the -l silently,
+// which is the same "ran a different command than the one typed" that the
+// argument errors above exist to prevent. Refusing it matches how --web and
+// --web-only are handled.
+//
+// Only flags actually given are considered, which is why this reads the FlagSet
+// rather than options: a false in the struct cannot be told from an unset flag.
+func upgradeConflicts(fs *flag.FlagSet) error {
+	clash := ""
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "upgrade", "v", "y", "yes":
+			// -upgrade is the request itself, -v prints the version and exits
+			// before the upgrade runs, and -y answers its confirmation.
+		default:
+			if clash == "" {
+				clash = f.Name
+			}
+		}
+	})
+	if clash == "" {
+		return nil
+	}
+	return fmt.Errorf("-%s and upgrade are mutually exclusive", clash)
 }
 
 // nextHarnessFilter cycles the live view's harness filter: everything, then each

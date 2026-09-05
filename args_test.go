@@ -1,11 +1,27 @@
 package main
 
 import (
+	"flag"
+	"io"
 	"slices"
 	"testing"
 
 	"github.com/yepzdk/claude-sessions-monitor/internal/session"
 )
+
+// parseArgs runs a command line through the same flags and the same resolver
+// csm uses, and reports what they made of it.
+func parseArgs(t *testing.T, args ...string) (*options, bool, error) {
+	t.Helper()
+	fs := flag.NewFlagSet("csm", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	opts := registerFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return opts, false, err
+	}
+	upgrade, err := resolveArgs(fs.Args(), fs)
+	return opts, upgrade, err
+}
 
 // `csm upgrade` and `csm update` used to start the dashboard: flag stops parsing
 // at the first non-flag argument, and nothing looked at what it left behind. The
@@ -13,20 +29,45 @@ import (
 // word had been thrown away.
 func TestResolveArgsAcceptsTheUpgradeSubcommand(t *testing.T) {
 	for _, word := range []string{"upgrade", "update"} {
-		upgrade, err := resolveArgs([]string{word})
+		_, upgrade, err := parseArgs(t, word)
 		if err != nil {
-			t.Errorf("resolveArgs([%q]) = %v, want an upgrade", word, err)
+			t.Errorf("csm %s = %v, want an upgrade", word, err)
 		}
 		if !upgrade {
-			t.Errorf("resolveArgs([%q]) did not ask for an upgrade, so csm would start the dashboard instead", word)
+			t.Errorf("csm %s did not ask for an upgrade, so csm would start the dashboard instead", word)
 		}
 	}
 }
 
 func TestResolveArgsLeavesNormalInvocationsAlone(t *testing.T) {
-	upgrade, err := resolveArgs(nil)
+	_, upgrade, err := parseArgs(t)
 	if err != nil || upgrade {
-		t.Errorf("resolveArgs(nil) = (%v, %v), want (false, nil)", upgrade, err)
+		t.Errorf("csm = (%v, %v), want (false, nil)", upgrade, err)
+	}
+}
+
+// flag stops at the first non-flag word, so everything after `upgrade` used to
+// be reported as an argument csm cannot run -- including flags csm has.
+func TestResolveArgsAcceptsFlagsAfterTheSubcommand(t *testing.T) {
+	opts, upgrade, err := parseArgs(t, "upgrade", "-v")
+	if err != nil {
+		t.Fatalf("csm upgrade -v = %v, want the version flag to be honoured", err)
+	}
+	if !upgrade || !opts.showVersion {
+		t.Errorf("csm upgrade -v = (upgrade %v, -v %v), want both", upgrade, opts.showVersion)
+	}
+
+	opts, upgrade, err = parseArgs(t, "upgrade", "-y")
+	if err != nil {
+		t.Fatalf("csm upgrade -y = %v", err)
+	}
+	if !upgrade || !opts.assumeYes {
+		t.Errorf("csm upgrade -y = (upgrade %v, -y %v), want both", upgrade, opts.assumeYes)
+	}
+
+	// --yes is the same variable under its long spelling.
+	if opts, _, err := parseArgs(t, "--yes", "upgrade"); err != nil || !opts.assumeYes {
+		t.Errorf("csm --yes upgrade = (%v, %v), want --yes honoured", opts.assumeYes, err)
 	}
 }
 
@@ -37,20 +78,79 @@ func TestResolveArgsRejectsWhatItCannotRun(t *testing.T) {
 		{"upgrades"},         // a near-miss, which must not silently start the dashboard
 		{"--upgrade=please"}, // flag already refused it; it reaches here as a positional
 		{"history"},
+		{"upgrade", "update"}, // the word twice is still a word too many
 	} {
-		if _, err := resolveArgs(args); err == nil {
-			t.Errorf("resolveArgs(%q) was accepted, so csm would do something else instead", args)
+		if _, _, err := parseArgs(t, args...); err == nil {
+			t.Errorf("csm %q was accepted, so csm would do something else instead", args)
 		}
 	}
 
 	// Naming the extra argument matters: "upgrade takes no arguments" is
-	// actionable where "unknown argument" would blame the wrong word.
-	_, err := resolveArgs([]string{"upgrade", "now"})
+	// actionable where "unknown argument" would blame the wrong word. Re-parsing
+	// the remainder must not cost this message.
+	_, _, err := parseArgs(t, "upgrade", "now")
 	if err == nil {
-		t.Fatal("resolveArgs([upgrade now]) was accepted")
+		t.Fatal("csm upgrade now was accepted")
 	}
 	if got := err.Error(); got != `upgrade takes no arguments, got "now"` {
 		t.Errorf("error = %q, which does not name the argument that is wrong", got)
+	}
+
+	// The word that was typed is the word that is named.
+	if _, _, err := parseArgs(t, "update", "now"); err == nil ||
+		err.Error() != `update takes no arguments, got "now"` {
+		t.Errorf("csm update now = %v, want the error to name `update`", err)
+	}
+}
+
+// `csm -l upgrade` upgraded and dropped the -l without a word, which is the same
+// "ran a different command than the one typed" the argument errors prevent.
+func TestUpgradeRefusesFlagsItCannotHonour(t *testing.T) {
+	for _, args := range [][]string{
+		{"-l", "upgrade"},
+		{"upgrade", "-l"},
+		{"-web", "-upgrade"},
+		{"-interval", "5s", "upgrade"},
+	} {
+		fs := flag.NewFlagSet("csm", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		opts := registerFlags(fs)
+		if err := fs.Parse(args); err != nil {
+			t.Fatalf("csm %q: %v", args, err)
+		}
+		upgrade, err := resolveArgs(fs.Args(), fs)
+		if err != nil {
+			t.Fatalf("csm %q: %v", args, err)
+		}
+		if !upgrade && !opts.doUpgrade {
+			t.Fatalf("csm %q did not ask for an upgrade", args)
+		}
+		if err := upgradeConflicts(fs); err == nil {
+			t.Errorf("csm %q was accepted, so the flag would be silently ignored", args)
+		}
+	}
+
+	// -v and -y are the two flags an upgrade can honour: -v prints the version
+	// and exits before it, -y answers its confirmation.
+	for _, args := range [][]string{
+		{"upgrade"},
+		{"upgrade", "-v"},
+		{"upgrade", "-y"},
+		{"--yes", "upgrade"},
+		{"-upgrade", "-y"},
+	} {
+		fs := flag.NewFlagSet("csm", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		registerFlags(fs)
+		if err := fs.Parse(args); err != nil {
+			t.Fatalf("csm %q: %v", args, err)
+		}
+		if _, err := resolveArgs(fs.Args(), fs); err != nil {
+			t.Fatalf("csm %q: %v", args, err)
+		}
+		if err := upgradeConflicts(fs); err != nil {
+			t.Errorf("csm %q was refused: %v", args, err)
+		}
 	}
 }
 
