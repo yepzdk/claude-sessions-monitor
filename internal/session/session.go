@@ -747,9 +747,12 @@ func parseLogFileWithLimit(logFile string, keep int, maxLineBytes int) (parsedLo
 		entries = append(entries, entry)
 	}
 
-	// Keep only the last N entries.
+	// Keep only the last N entries. Copied, not resliced: a reslice keeps the
+	// whole backing array alive, and pl goes into the parse cache, so that array
+	// would stay reachable for as long as the session is listed -- the size of
+	// the log rather than of keep. Claude logs are the multi-MB ones.
 	if len(entries) > keep {
-		entries = entries[len(entries)-keep:]
+		entries = append([]LogEntry(nil), entries[len(entries)-keep:]...)
 	}
 	pl.entries = entries
 

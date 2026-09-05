@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
+- Watching a Claude Code session with a long log costs less memory. The parse cache held every entry read from the file, not the last hundred it keeps
 
 ### Fixed
 

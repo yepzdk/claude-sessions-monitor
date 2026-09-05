@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"syscall"
 	"time"
 
@@ -229,17 +230,11 @@ func upgradeConflicts(fs *flag.FlagSet) error {
 // started. A flag would also have had to mean something for the web dashboard,
 // which has no key to press to undo it and serves more than one client.
 func nextHarnessFilter(current session.Harness) session.Harness {
-	roster := session.Harnesses()
-	for i, h := range roster {
-		if h == current {
-			if i+1 < len(roster) {
-				return roster[i+1]
-			}
-			return ""
-		}
-	}
-	// "" and anything no longer in the roster both restart the cycle.
-	return roster[0]
+	// "" ends the cycle, so the roster plus one empty is the whole ring.
+	// slices.Index gives -1 for a harness no longer listed, which -- like "",
+	// the last item -- lands on the first roster entry and restarts it.
+	ring := append(session.Harnesses(), "")
+	return ring[(slices.Index(ring, current)+1)%len(ring)]
 }
 
 // ViewMode represents the current display mode

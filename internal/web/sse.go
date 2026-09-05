@@ -103,13 +103,8 @@ func (h *SSEHub) Run(ctx context.Context, fatal chan<- error) {
 				h.broadcast(formatSSE("scan_error", []byte(`{"message":"session scan failed"}`)))
 				continue
 			}
-			frames, err := sessionFrames(allSessions)
-			for _, frame := range frames {
+			for _, frame := range sessionFrames(allSessions) {
 				h.broadcast(frame)
-			}
-			if err != nil {
-				// The badge frame still went out; only the rows are missing.
-				continue
 			}
 
 		case <-heartbeat.C:
@@ -124,18 +119,18 @@ func (h *SSEHub) Run(ctx context.Context, fatal chan<- error) {
 // keeps the two senders from drifting.
 //
 // A frame that cannot be marshalled is absent rather than empty, so a sender
-// that writes everything returned always sends a well-formed stream. The error
-// reports that the rows are the missing one.
-func sessionFrames(all []session.Session) ([][]byte, error) {
+// that writes everything returned always sends a well-formed stream. Both
+// frames follow that one rule, so neither sender has a failure case to handle.
+func sessionFrames(all []session.Session) [][]byte {
 	var frames [][]byte
 	if harness := harnessEvent(all); harness != nil {
 		frames = append(frames, harness)
 	}
 	data, err := json.Marshal(filterLiveSessions(all))
 	if err != nil {
-		return frames, err
+		return frames
 	}
-	return append(frames, formatSSE("sessions", data)), nil
+	return append(frames, formatSSE("sessions", data))
 }
 
 // harnessEvent renders the badge decision for these sessions as an SSE frame,
@@ -228,8 +223,7 @@ func (h *SSEHub) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		// leave it registered with the hub, because the unregister defer is not
 		// set until below; the r.Context().Done() case takes it off moments
 		// later.
-		frames, _ := sessionFrames(allSessions)
-		for _, frame := range frames {
+		for _, frame := range sessionFrames(allSessions) {
 			_, _ = w.Write(frame)
 		}
 		flusher.Flush()
