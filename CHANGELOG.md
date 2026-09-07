@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
+- The live view lists a session needing input above one that is merely working, and the status summary names it first. It ranked below Working before, though the window title already put it first
 
 ### Fixed
 
