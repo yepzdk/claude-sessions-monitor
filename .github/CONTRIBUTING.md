@@ -86,6 +86,11 @@ literal colours, and keep the contrast contract documented there. Escape
 every value you interpolate into HTML with `esc()`. The architecture doc has
 the rest.
 
+A change anyone can see needs a before and an after screenshot in the pull
+request — the dashboard and the terminal UI both. There is no visual test
+suite here, so those two images are the only record of what the change looks
+like, and a layout decision cannot be reviewed from a diff of `style.css`.
+
 ## Writing tests
 
 Tests sandbox `$HOME` with `t.Setenv` and build fixture logs with the helpers
