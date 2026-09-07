@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Every list csm produces — the live view, `csm -l` and its `-json` output, the web dashboard and its event stream — ranks a session needing input above one that is merely working, and the live status summary names it first. It ranked below Working before, though the window title already put it first
 - Watching a Claude Code session with a long log costs less memory. The parse cache held every entry read from the file, not the last hundred it keeps
 - A finished subagent's sidecar file is no longer read once it goes stale and the parent has no `tool_use` outstanding, so a long session that ran many agents costs less per refresh
+- The web dashboard's live list groups a project once it has more than one live session, so a busy machine reads by project instead of as a wall of cards. A lone session still renders as a single card carrying its project name, and a Needs Input session in a collapsed group lifts to the top of the list instead of staying hidden until the group reopens
+- The three web dashboard tabs and the detail panel share one set of section headings, group headers, chips and meters, so a project reads the same wherever it appears
 
 ### Fixed
 
