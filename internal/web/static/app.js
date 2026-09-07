@@ -59,9 +59,7 @@
         // init and a #history/#usage deep link both see a stale 0 and fire.
         headerQuotaFetchedAt = Date.now();
         try {
-            const resp = await fetch('/api/quota');
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            renderHeaderQuota(await resp.json());
+            renderHeaderQuota(await fetchJSON('/api/quota'));
         } catch (err) {
             breakHeaderQuota(err.message || 'fetch failed');
         }
@@ -97,10 +95,17 @@
             breakHeaderQuota((apiQuota && apiQuota.error) || 'unknown error');
             return;
         }
-        let html = '';
-        if (apiQuota.five_hour) html += renderHeaderQuotaBar('5h', '5-hour', apiQuota.five_hour, apiQuota.source);
-        if (apiQuota.seven_day) html += renderHeaderQuotaBar('7d', '7-day', apiQuota.seven_day, apiQuota.source);
-        headerQuotaEl.innerHTML = html;
+        // The Usage tab draws both windows in full, with their resets and their
+        // source. The header shows one, because on that tab the two were
+        // otherwise drawn twice on the same screen. The one worth the space is
+        // whichever is nearer its limit: that is the one about to stop work.
+        const windows = [];
+        if (apiQuota.five_hour) windows.push(['5h', '5-hour', apiQuota.five_hour]);
+        if (apiQuota.seven_day) windows.push(['7d', '7-day', apiQuota.seven_day]);
+        windows.sort((a, b) => (b[2].utilization || 0) - (a[2].utilization || 0));
+        headerQuotaEl.innerHTML = windows.length
+            ? renderHeaderQuotaBar(windows[0][0], windows[0][1], windows[0][2], apiQuota.source)
+            : '';
     }
 
     // The header chip and the usage row must agree on how full a bucket is and
@@ -173,8 +178,7 @@
 
     async function loadClaudeStatus() {
         try {
-            const resp = await fetch('/api/claude-status');
-            claudeStatusData = await resp.json();
+            claudeStatusData = await fetchJSON('/api/claude-status');
             claudeStatusFetchedAt = Date.now();
         } catch (err) {
             claudeStatusData = { available: false, error: 'fetch failed' };
@@ -291,21 +295,20 @@
     // --- Render live sessions ---
     function renderSessions() {
         if (!currentSessions || currentSessions.length === 0) {
-            sessionsList.innerHTML = '<div class="empty-state">No active sessions found</div>';
+            // An empty dashboard looks broken, so say what would fill it.
+            sessionsList.innerHTML = stateBlock({
+                title: 'No active sessions',
+                hint: 'Start a session in any project and it shows up here.',
+            });
             statusBar.innerHTML = '';
             return;
         }
 
-        // Status summary
-        const counts = {};
-        currentSessions.forEach(s => {
-            const label = s.status === 'Inactive' ? 'Stopped' : s.status;
-            counts[label] = (counts[label] || 0) + 1;
-        });
-        statusBar.innerHTML = Object.entries(counts).map(([status, count]) => {
-            const cls = statusClass(status);
-            return `<span class="status-badge"><span class="status-dot ${cls}"></span>${count} ${status}</span>`;
-        }).join('');
+        const counts = countByStatus(currentSessions);
+        statusBar.innerHTML = STATUS_ORDER
+            .filter(status => counts[status])
+            .map(status => `<span class="status-badge"><span class="status-dot ${statusClass(status)}"></span>${counts[status]} ${statusWord(status)}</span>`)
+            .join('');
 
         // Whether to name each card's agent is the server's call: it is decided
         // from every session on the machine, and this list is only the last
@@ -410,12 +413,18 @@
     // --- History ---
     async function loadHistory() {
         const days = historyDays.value;
+        historyList.innerHTML = stateBlock({ title: 'Loading history' });
         try {
-            const resp = await fetch(`/api/history?days=${days}`);
-            historyData = (await resp.json()) || [];
+            historyData = (await fetchJSON(`/api/history?days=${days}`)) || [];
             renderHistory();
         } catch (err) {
-            historyList.innerHTML = `<div class="empty-state">Failed to load history</div>`;
+            historyList.innerHTML = stateBlock({
+                title: 'Could not load history',
+                hint: esc(err.message || 'the request failed'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(historyList, loadHistory);
         }
     }
 
@@ -428,7 +437,17 @@
         );
 
         if (filtered.length === 0) {
-            historyList.innerHTML = '<div class="empty-state">No sessions found</div>';
+            // Two filters can empty this list, and the fix differs, so say which
+            // one is in the way rather than only that nothing was found.
+            historyList.innerHTML = query
+                ? stateBlock({
+                    title: `No sessions match &quot;${esc(historySearch.value)}&quot;`,
+                    hint: 'Clear the search to see every project.',
+                })
+                : stateBlock({
+                    title: 'No sessions in this range',
+                    hint: 'Try a wider range.',
+                });
             return;
         }
 
@@ -486,22 +505,22 @@
         });
 
         historyList.innerHTML = html;
-
-        // Attach collapse/expand handlers
-        historyList.querySelectorAll('.project-group-header').forEach(header => {
-            header.addEventListener('click', () => {
-                header.parentElement.classList.toggle('collapsed');
-            });
-        });
-
-        historyList.querySelectorAll('.history-row:not(.history-header)').forEach(row => {
-            row.addEventListener('click', () => {
-                const logFile = row.dataset.logfile;
-                const project = row.closest('.project-group').querySelector('.project-group-name').textContent;
-                if (logFile) openDetail(logFile, project);
-            });
-        });
     }
+
+    // One delegated listener, bound once, rather than one per row on every
+    // render: the search box re-renders the whole list on each keystroke, and
+    // a 30-day range is hundreds of rows.
+    historyList.addEventListener('click', e => {
+        const header = e.target.closest('.project-group-header');
+        if (header) {
+            header.parentElement.classList.toggle('collapsed');
+            return;
+        }
+        const row = e.target.closest('.history-row:not(.history-header)');
+        if (!row || !row.dataset.logfile) return;
+        const project = row.closest('.project-group').querySelector('.project-group-name').textContent;
+        openDetail(row.dataset.logfile, project);
+    });
 
     historySearch.addEventListener('input', renderHistory);
     historyDays.addEventListener('change', loadHistory);
@@ -513,13 +532,19 @@
     async function loadUsage() {
         if (usageLoading) return;
         usageLoading = true;
+        usageContent.innerHTML = stateBlock({ title: 'Loading usage' });
         try {
-            const resp = await fetch('/api/usage');
-            usageData = await resp.json();
+            usageData = await fetchJSON('/api/usage');
             usageLastUpdated = new Date();
             renderUsageView(usageData);
         } catch (err) {
-            usageContent.innerHTML = '<div class="empty-state">Failed to load usage data</div>';
+            usageContent.innerHTML = stateBlock({
+                title: 'Could not load usage',
+                hint: esc(err.message || 'the request failed'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(usageContent, loadUsage);
         } finally {
             usageLoading = false;
         }
@@ -527,7 +552,7 @@
 
     function renderUsageView(data) {
         if (!data) {
-            usageContent.innerHTML = '<div class="empty-state">No usage data available</div>';
+            usageContent.innerHTML = stateBlock({ title: 'No usage data available' });
             return;
         }
 
@@ -695,16 +720,20 @@
 
     async function loadMetrics(logFile) {
         const token = ++metricsLoadToken;
-        detailMetrics.innerHTML = '<div class="loading">Loading metrics...</div>';
+        detailMetrics.innerHTML = stateBlock({ title: 'Loading metrics' });
         try {
-            const resp = await fetch(`/api/sessions/metrics?file=${encodeURIComponent(logFile)}`);
-            if (!resp.ok) throw new Error(await resp.text());
-            const m = await resp.json();
+            const m = await fetchJSON(`/api/sessions/metrics?file=${encodeURIComponent(logFile)}`);
             if (token !== metricsLoadToken) return;
             renderMetrics(m);
         } catch (err) {
             if (token !== metricsLoadToken) return;
-            detailMetrics.innerHTML = `<div class="empty-state">Failed to load metrics</div>`;
+            detailMetrics.innerHTML = stateBlock({
+                title: 'Could not load metrics',
+                hint: esc(err.message || 'the log file could not be read'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(detailMetrics, () => loadMetrics(logFile));
         }
     }
 
@@ -881,7 +910,7 @@
             timelineTotal = 0;
             timelineEntries = [];
             timelineLoadMoreClicks = 0;
-            detailTimeline.innerHTML = '<div class="loading">Loading timeline...</div>';
+            detailTimeline.innerHTML = stateBlock({ title: 'Loading timeline' });
         }
 
         // The server pages in filtered space, so the filter travels with every
@@ -897,9 +926,7 @@
                 // full page rather than deriving a size from a total of zero.
                 const remaining = timelineTotal > 0 ? Math.max(1, timelineTotal - timelineOffset) : SERVER_MAX;
                 const limit = mode === 'all' ? Math.min(SERVER_MAX, remaining) : 50;
-                const resp = await fetch(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`);
-                if (!resp.ok) throw new Error(await resp.text());
-                const data = await resp.json();
+                const data = await fetchJSON(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`);
                 if (token !== timelineLoadToken) return;
                 timelineTotal = data.total;
                 const batch = data.entries || [];
@@ -910,7 +937,7 @@
             renderTimeline();
         } catch (err) {
             if (token !== timelineLoadToken) return;
-            timelineError = 'Failed to load timeline';
+            timelineError = err.message || 'the request failed';
             renderTimeline();
         }
     }
@@ -932,11 +959,19 @@
         // sends a request now, so it can fail, and wiping the bar would leave
         // nothing to retry with.
         if (timelineError) {
-            html += `<div class="empty-state">${esc(timelineError)}</div>`;
+            // The filter bar alone is not a way back: clicking the filter you
+            // are already on returns early, so a failure under it would leave
+            // no control that retries.
+            html += stateBlock({
+                title: 'Could not load the timeline',
+                hint: esc(timelineError),
+                error: true,
+                retry: true,
+            });
         } else if (timelineEntries.length === 0) {
-            html += timelineFilter === 'all'
-                ? '<div class="empty-state">No entries</div>'
-                : '<div class="empty-state">No matching entries</div>';
+            html += stateBlock({
+                title: timelineFilter === 'all' ? 'No entries' : 'No matching entries',
+            });
         }
 
         html += '<div class="timeline">';
@@ -995,6 +1030,8 @@
 
         detailTimeline.innerHTML = html;
 
+        wireRetry(detailTimeline, () => loadTimeline(currentLogFile, true));
+
         detailTimeline.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.dataset.filter === timelineFilter) return;
@@ -1017,24 +1054,82 @@
     }
 
     // --- Helpers ---
+
+    // The order a person triages in: what is blocked on them, then what is
+    // moving, then what is parked. Fixed rather than data order, so the status
+    // bar does not reshuffle between scans. These are every status
+    // session.Status defines; anything else sorts last and wears the Inactive
+    // styling that statusClass falls back to.
+    const STATUSES = [
+        { name: 'Needs Input', cls: 'needs-input', symbol: '\u25B2', word: 'needs input' },
+        { name: 'Working', cls: 'working', symbol: '\u25CF', word: 'working' },
+        { name: 'Waiting', cls: 'waiting', symbol: '\u25C9', word: 'waiting' },
+        { name: 'Inactive', cls: 'inactive', symbol: '\u25CC', word: 'stopped' },
+    ];
+    const STATUS_ORDER = STATUSES.map(s => s.name);
+    const STATUS_BY_NAME = new Map(STATUSES.map(s => [s.name, s]));
+
+    // The class, glyph and word a status is spelled with, in one place:
+    // "Inactive" is the API's word, "stopped" is what the status bar says. A
+    // status this page does not know wears the last row.
+    function statusInfo(status) {
+        return STATUS_BY_NAME.get(status) || STATUSES[STATUSES.length - 1];
+    }
+
     function statusClass(status) {
-        switch (status) {
-            case 'Working': return 'working';
-            case 'Needs Input': return 'needs-input';
-            case 'Waiting': return 'waiting';
-            case 'Inactive': return 'inactive';
-            default: return 'inactive';
-        }
+        return statusInfo(status).cls;
     }
 
     function statusSymbol(status) {
-        switch (status) {
-            case 'Working': return '\u25CF';     // ●
-            case 'Needs Input': return '\u25B2';  // ▲
-            case 'Waiting': return '\u25C9';      // ◉
-            case 'Inactive': return '\u25CC';      // ◌
-            default: return '\u25CC';
+        return statusInfo(status).symbol;
+    }
+
+    function statusWord(status) {
+        return statusInfo(status).word;
+    }
+
+    // One pass for the per-status tally, used by the status bar.
+    function countByStatus(sessions) {
+        const counts = {};
+        sessions.forEach(s => { counts[s.status] = (counts[s.status] || 0) + 1; });
+        return counts;
+    }
+
+    // Every endpoint here answers a failure with {"error": "..."} and a status
+    // code, so a plain resp.json() on a 500 hands the caller that envelope as
+    // if it were data -- history did exactly that, and the list then failed on
+    // an object with no .filter. Reading the reason out of the envelope is also
+    // what stops a panel printing raw JSON at the user.
+    async function fetchJSON(url) {
+        const resp = await fetch(url);
+        let body = null;
+        try {
+            body = await resp.json();
+        } catch (err) {
+            // A non-JSON body is only worth reporting through the status below.
         }
+        if (!resp.ok) throw new Error((body && body.error) || `HTTP ${resp.status}`);
+        if (body === null) throw new Error(`HTTP ${resp.status} with a body that is not JSON`);
+        return body;
+    }
+
+    // The empty, loading and error block every panel shows. It returns markup
+    // rather than assigning innerHTML, because a caller can fold it into a
+    // larger string. `title` and `hint` are markup the caller controls, so
+    // they are not escaped here -- a caller passing session data through them
+    // must escape it itself. A block asking for retry needs wireRetry on
+    // whatever received the markup.
+    function stateBlock({ title, hint, error, retry }) {
+        return `<div class="state">
+            <div class="state-title${error ? ' error' : ''}">${title}</div>
+            ${hint ? `<div class="state-hint">${hint}</div>` : ''}
+            ${retry ? `<button type="button" class="state-retry">Retry</button>` : ''}
+        </div>`;
+    }
+
+    function wireRetry(container, fn) {
+        const button = container.querySelector('.state-retry');
+        if (button) button.addEventListener('click', fn);
     }
 
     // The badge shows the short id the API sends; the tooltip spells it out, so

@@ -1275,18 +1275,45 @@ main {
 }
 
 /* Utility */
-.empty-state {
+
+/* One shape for every state a view can be in instead of a list: loading,
+   nothing found, and a failed request. Muted ink says "nothing to show";
+   red says "the number you wanted is missing". The hint carries what the
+   reader can do about it. */
+.state {
     text-align: center;
-    color: var(--text-dim);
     padding: 3rem 1rem;
-    font-size: 0.875rem;
 }
 
-.loading {
-    text-align: center;
-    color: var(--text-dim);
-    padding: 2rem 1rem;
+.state-title {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.state-title.error { color: var(--red); }
+
+.state-hint {
+    margin-top: 0.5rem;
     font-size: 0.8125rem;
+    color: var(--text-dim);
+}
+
+.state-retry {
+    margin-top: 0.875rem;
+    padding: 0.375rem 1rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.state-retry:hover {
+    background: var(--bg-hover);
+    border-color: var(--blue);
 }
 
 /* Responsive */

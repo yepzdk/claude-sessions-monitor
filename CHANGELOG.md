@@ -14,11 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
+- The web dashboard's header shows one API quota window instead of two: whichever is nearer its limit, since that is the one about to stop work
+- The web dashboard's loading, empty and error states say what happened and, where it helps, offer a retry, instead of a bare "Failed to load X"
 
 ### Fixed
 
 - csm no longer re-parses a session's subagent logs on every refresh, so watching a session that runs agents costs less CPU
 - Flags work on either side of the subcommand: `csm upgrade -v` prints the version, and `csm -l upgrade` is refused instead of upgrading and dropping the `-l`
+- The web dashboard's history search no longer hands a 500 response's `{"error": ...}` envelope to the list as if it were data, which failed on `.filter` with no message the user could act on
 
 ## [1.2.0] - 2026-09-04
 
