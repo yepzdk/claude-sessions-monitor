@@ -178,3 +178,23 @@ func TestHarnessFilterCyclesEveryAgentAndBackToAll(t *testing.T) {
 		t.Errorf("cycle ended at %q, want \"\": the filter never returns to showing every agent", last)
 	}
 }
+
+// The membership test above passes for a ring stepped by two, or for a
+// reversed cycle, or for an unlisted harness landing anywhere but the first
+// roster entry. Pin the mapping itself.
+func TestNextHarnessFilterMapping(t *testing.T) {
+	tests := []struct {
+		current session.Harness
+		want    session.Harness
+	}{
+		{"", session.HarnessClaude},
+		{session.HarnessClaude, session.HarnessOMP},
+		{session.HarnessOMP, ""},
+		{session.Harness("unknown"), session.HarnessClaude},
+	}
+	for _, tt := range tests {
+		if got := nextHarnessFilter(tt.current); got != tt.want {
+			t.Errorf("nextHarnessFilter(%q) = %q, want %q", tt.current, got, tt.want)
+		}
+	}
+}

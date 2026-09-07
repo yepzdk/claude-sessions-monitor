@@ -2,6 +2,7 @@ package session
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,33 @@ func TestParseLogFile_ExtractsAllFields(t *testing.T) {
 	}
 	if pl.lastEntryTime.IsZero() {
 		t.Error("lastEntryTime is zero")
+	}
+}
+
+// A reslice of entries[len(entries)-keep:] keeps the whole backing array
+// alive through pl.entries, and pl sits in the parse cache for as long as the
+// session is listed -- so a long log pins memory proportional to its own size
+// rather than to keep. This is the one line in the parse-cache change a
+// reader cannot check by eye; cap is the only way to observe it.
+func TestParseLogFile_TrimmedEntriesDoNotPinTheWholeLog(t *testing.T) {
+	dir := t.TempDir()
+	const keep = 100
+	var content strings.Builder
+	for i := range 5000 {
+		content.WriteString(`{"type":"assistant","timestamp":"2026-06-01T10:00:` +
+			fmt.Sprintf("%02d", i%60) + `Z","message":{"role":"assistant","content":[{"type":"text","text":"line"}]}}` + "\n")
+	}
+	path, _, _ := writeLog(t, dir, "s.jsonl", content.String())
+
+	pl, err := parseLogFile(path, keep)
+	if err != nil {
+		t.Fatalf("parseLogFile: %v", err)
+	}
+	if len(pl.entries) != keep {
+		t.Fatalf("entries = %d, want %d", len(pl.entries), keep)
+	}
+	if cap(pl.entries) > 2*keep {
+		t.Errorf("cap %d for %d kept entries: the parse cache pins the whole log", cap(pl.entries), keep)
 	}
 }
 
