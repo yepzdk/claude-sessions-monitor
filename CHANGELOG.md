@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
+- A finished subagent's sidecar file is no longer read once it goes stale and the parent has no `tool_use` outstanding, so a long session that ran many agents costs less per refresh
 
 ### Fixed
 
