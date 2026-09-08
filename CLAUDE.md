@@ -9,8 +9,18 @@ Coding Sessions Monitor (csm) is a CLI tool that monitors coding agent sessions 
 - Go 1.25+
 - Standard library, plus `golang.org/x/term` for raw terminal input and `golang.org/x/sys` for the macOS process table. No other third-party dependencies.
 
-Tests sandbox `$HOME`. To run them against a clean one, keep the caches where they are:
-`HOME=<tmpdir> GOMODCACHE=$(go env GOMODCACHE) GOCACHE=$(go env GOCACHE) go test ./... -count=1`
+Tests sandbox `$HOME`. To run them against a clean one, keep the caches where
+they are — and note that `HOME` goes **last**: assignments in a command prefix
+take effect left to right, so a leading `HOME=<tmpdir>` is already in force when
+`$(go env GOMODCACHE)` expands and the pins resolve to the fake home instead.
+
+```bash
+GOPATH=$(go env GOPATH) GOMODCACHE=$(go env GOMODCACHE) GOCACHE=$(go env GOCACHE) HOME=<tmpdir> go test ./... -count=1
+```
+
+`GOPATH` is pinned for the same reason `make lint` and `make deadcode` need it:
+they resolve their binaries through it, and an unpinned run rebuilds
+golangci-lint from source.
 
 ## Project Structure
 
