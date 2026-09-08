@@ -85,9 +85,9 @@ session Inactive. An empty table with no error is rejected for the same reason.
    any log modified in the last 30 minutes, so a quiet-but-live session cannot
    lose the recency race to an unrelated file and vanish.
 4. `parseSession` → `parseLogFile` → `applyParsedLog` → `determineStatus`.
-5. Results are sorted by status priority (Working, Needs Input, Waiting,
-   Inactive) then recency; two Working sessions sort by name so they don't
-   swap places every frame.
+5. Results are sorted by status priority (Needs Input, Working, Waiting,
+   Inactive) then recency; two Working sessions sort by project then session
+   ID so they don't swap places every frame.
 
 The encoded directory name is only a fallback for the project name. The real
 working directory is the `cwd` field inside the log, and `extractProjectName`
