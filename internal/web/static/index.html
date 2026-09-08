@@ -25,7 +25,7 @@
     <main>
         <section id="live-view" class="view active">
             <div id="sessions-list" class="sessions-list">
-                <div class="empty-state">Connecting...</div>
+                <div class="state"><div class="state-title">Connecting to the session stream</div></div>
             </div>
         </section>
 
@@ -41,13 +41,13 @@
                 </select>
             </div>
             <div id="history-list" class="history-list">
-                <div class="empty-state">Loading history...</div>
+                <div class="state"><div class="state-title">Loading history</div></div>
             </div>
         </section>
 
         <section id="usage-view" class="view">
             <div id="usage-content">
-                <div class="empty-state">Loading usage data...</div>
+                <div class="state"><div class="state-title">Loading usage</div></div>
             </div>
         </section>
     </main>
@@ -63,10 +63,10 @@
                 <button class="detail-tab" data-detail="timeline">Timeline</button>
             </div>
             <div id="detail-metrics" class="detail-content active">
-                <div class="loading">Loading metrics...</div>
+                <div class="state"><div class="state-title">Loading metrics</div></div>
             </div>
             <div id="detail-timeline" class="detail-content">
-                <div class="loading">Loading timeline...</div>
+                <div class="state"><div class="state-title">Loading timeline</div></div>
             </div>
         </div>
     </div>
