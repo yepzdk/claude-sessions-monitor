@@ -16,10 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
 - The web dashboard's header shows one API quota window instead of two: whichever is nearer its limit, since that is the one about to stop work
 - The web dashboard's loading, empty and error states say what happened and, where it helps, offer a retry, instead of a bare "Failed to load X"
+- The live view lists a session needing input above one that is merely working, and the status summary names it first. It ranked below Working before, though the window title already put it first
+- Watching a Claude Code session with a long log costs less memory. The parse cache held every entry read from the file, not the last hundred it keeps
+- A finished subagent's sidecar file is no longer read once it goes stale and the parent has no `tool_use` outstanding, so a long session that ran many agents costs less per refresh
 
 ### Fixed
 
 - csm no longer re-parses a session's subagent logs on every refresh, so watching a session that runs agents costs less CPU
+- Subagent rows hold their places. They were ordered by last activity, which each agent's log advances at its own moment, so the rows swapped on every refresh while all of them still read "Now"
 - Flags work on either side of the subcommand: `csm upgrade -v` prints the version, and `csm -l upgrade` is refused instead of upgrading and dropping the `-l`
 - The web dashboard's history search no longer hands a 500 response's `{"error": ...}` envelope to the list as if it were data, which failed on `.filter` with no message the user could act on
 

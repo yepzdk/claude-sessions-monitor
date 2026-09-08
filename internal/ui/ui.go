@@ -193,8 +193,8 @@ func RenderLive(v LiveView) {
 
 	// Status summary (only active sessions)
 	counts := countByStatus(active)
-	fmt.Fprintf(&buf, "%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
 	fmt.Fprintf(&buf, "%s%s Needs Input: %d%s  ", Yellow, SymbolNeedsInput, counts[session.StatusNeedsInput], Reset)
+	fmt.Fprintf(&buf, "%s%s Working: %d%s  ", Green, SymbolWorking, counts[session.StatusWorking], Reset)
 	fmt.Fprintf(&buf, "%s%s Waiting: %d%s", Blue, SymbolWaiting, counts[session.StatusWaiting], Reset)
 	buf.WriteString(rawNewline)
 
@@ -801,7 +801,7 @@ func formatProject(s session.Session, maxLen int, showHarness bool) string {
 	truncated := truncate(name, nameWidth)
 	// Runes, not bytes: truncate cut by rune, and padding to a byte count makes
 	// every column right of a non-ASCII project name shift left.
-	visibleLen := len([]rune(truncated))
+	visibleLen := utf8.RuneCountInString(truncated)
 
 	// Build result
 	result := truncated
