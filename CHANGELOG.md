@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
+- The live view lists a session needing input above one that is merely working, and the status summary names it first. It ranked below Working before, though the window title already put it first
 - Watching a Claude Code session with a long log costs less memory. The parse cache held every entry read from the file, not the last hundred it keeps
 - A finished subagent's sidecar file is no longer read once it goes stale and the parent has no `tool_use` outstanding, so a long session that ran many agents costs less per refresh
 

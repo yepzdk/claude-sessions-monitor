@@ -60,6 +60,23 @@ func TestSessionLessStatusPriority(t *testing.T) {
 	}
 }
 
+// Needs Input is the only state that will not move without the user, so it
+// outranks a merely busy session -- the window title (buildTerminalTitle)
+// already treats it this way. Recency must not override this: a Needs Input
+// session idle for an hour still sorts above one that has been Working for a
+// minute.
+func TestSessionLessNeedsInputOutranksWorking(t *testing.T) {
+	needsInput := Session{Status: StatusNeedsInput, LastActivity: time.Now().Add(-time.Hour)}
+	working := Session{Status: StatusWorking, LastActivity: time.Now()}
+
+	if !sessionLess(needsInput, working) {
+		t.Errorf("sessionLess(needsInput, working) = false, want true (Needs Input outranks Working)")
+	}
+	if sessionLess(working, needsInput) {
+		t.Errorf("sessionLess(working, needsInput) = true, want false")
+	}
+}
+
 func TestExtractContextUsage(t *testing.T) {
 	tests := []struct {
 		name           string

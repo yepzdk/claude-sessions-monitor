@@ -506,12 +506,17 @@ func sessionLess(a, b Session) bool {
 	return a.LastActivity.After(b.LastActivity)
 }
 
-// statusPriority returns the sort priority for a status (lower = higher priority)
+// statusPriority returns the sort priority for a status (lower = higher priority).
+//
+// Needs Input outranks Working: it is the only state that will not move
+// without the user, so it belongs above a session that is merely busy.
+// buildTerminalTitle already ranks them this way for the window title; this
+// makes the row order agree with it.
 func statusPriority(s Status) int {
 	switch s {
-	case StatusWorking:
-		return 0
 	case StatusNeedsInput:
+		return 0
+	case StatusWorking:
 		return 1
 	case StatusWaiting:
 		return 2
