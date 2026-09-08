@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Watching an Oh My Pi session with a long log costs less CPU per refresh
 - The web dashboard's header shows one API quota window instead of two: whichever is nearer its limit, since that is the one about to stop work
 - The web dashboard's loading, empty and error states say what happened and, where it helps, offer a retry, instead of a bare "Failed to load X"
-- The live view lists a session needing input above one that is merely working, and the status summary names it first. It ranked below Working before, though the window title already put it first
+- Every list csm produces — the live view, `csm -l` and its `-json` output, the web dashboard and its event stream — ranks a session needing input above one that is merely working, and the live status summary names it first. It ranked below Working before, though the window title already put it first
 - Watching a Claude Code session with a long log costs less memory. The parse cache held every entry read from the file, not the last hundred it keeps
 - A finished subagent's sidecar file is no longer read once it goes stale and the parent has no `tool_use` outstanding, so a long session that ran many agents costs less per refresh
 
