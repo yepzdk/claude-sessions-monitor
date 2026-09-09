@@ -467,14 +467,18 @@
 
     // renderStoppedFold is shared by grouped and ungrouped projects, so it
     // carries its own data-project rather than relying on a .group ancestor
-    // that an ungrouped project does not have.
+    // that an ungrouped project does not have. For the same reason it carries
+    // the project tag when there is no header above it: without one the fold
+    // is the project's only row, and two of them would differ by age alone.
     function renderStoppedFold(g) {
         if (g.stopped.length === 0) return '';
         const foldOpen = openStoppedFolds.has(g.project);
         const lastActive = Math.max(...g.stopped.map(activityTime));
+        const projectTag = g.grouped ? '' : `<span class="project-tag">${esc(g.project)}</span>`;
         let html = `<div class="session-fold${foldOpen ? ' open' : ''}" data-project="${esc(g.project)}">
             <span class="group-toggle">&#x25B6;</span>
             <span class="session-fold-glyph">${statusSymbol('Inactive')}</span>
+            ${projectTag}
             <span>${plural(g.stopped.length, 'stopped session')}</span>
             <span class="session-fold-age">last active ${lastActive ? formatAge(lastActive) : '-'}</span>
         </div>`;
