@@ -80,12 +80,8 @@ when the change was fresh.
 ## Phase 4: PR the changelog
 
 1. `git checkout -b chore/release-vX.Y.Z`
-2. Commit `CHANGELOG.md` only:
-   ```
-   chore: release vX.Y.Z
-
-   Co-authored-by: Claude <noreply@anthropic.com>
-   ```
+2. Commit `CHANGELOG.md` only, with `chore: release vX.Y.Z` as the whole
+   message — no body, no trailers; the section it rolls says the rest
 3. `git push -u origin chore/release-vX.Y.Z`
 4. `gh pr create` — title `chore: release vX.Y.Z`, body = the new section's
    entries, so the PR shows exactly what ships
