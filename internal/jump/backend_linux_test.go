@@ -5,6 +5,7 @@ package jump
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -183,6 +184,9 @@ func TestDetectBackendReportsWhatIsMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("detectBackend() succeeded under GNOME Wayland, where csm cannot focus windows")
 	}
+	if !strings.Contains(err.Error(), "GNOME") {
+		t.Errorf("detectBackend() = %q, want the desktop named so the user knows which one is refused", err)
+	}
 	if !errors.Is(err, ErrUnsupported) {
 		t.Errorf("detectBackend() = %v, want an ErrUnsupported so the UI reports it as a limitation", err)
 	}
@@ -196,5 +200,25 @@ func TestDetectBackendWithNoDisplay(t *testing.T) {
 
 	if _, err := detectBackend(); err == nil {
 		t.Error("detectBackend() succeeded with no display server at all")
+	}
+}
+
+// The message named the desktop from XDG_CURRENT_DESKTOP and fell back to the
+// literal "unknown" when it was unset, so a session that sets nothing -- WSLg,
+// a bare compositor, a login shell that lost the variable -- read "works under
+// Hyprland and sway only, not unknown".
+func TestDetectBackendOnWaylandWithNoDesktopName(t *testing.T) {
+	t.Setenv("HYPRLAND_INSTANCE_SIGNATURE", "")
+	t.Setenv("SWAYSOCK", "")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
+	t.Setenv("DISPLAY", "")
+	t.Setenv("XDG_CURRENT_DESKTOP", "")
+
+	_, err := detectBackend()
+	if err == nil {
+		t.Fatal("detectBackend() succeeded on a Wayland session csm cannot drive")
+	}
+	if strings.Contains(err.Error(), "unknown") {
+		t.Errorf("detectBackend() = %q, want no dangling name when the desktop is not set", err)
 	}
 }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The refusal to jump on a Wayland compositor csm cannot drive no longer ends in "not unknown". It named the desktop from `XDG_CURRENT_DESKTOP` and printed a placeholder when the session sets nothing
+
 ## [1.3.0] - 2026-09-10
 
 ### Added
