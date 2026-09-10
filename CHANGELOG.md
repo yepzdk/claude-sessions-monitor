@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-10
+
 ### Added
 
 - An upgrade asks before replacing the binary, naming the file it will overwrite. Enter declines; `-y`/`--yes` and a non-interactive stdin skip the question
