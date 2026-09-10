@@ -1,0 +1,60 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+
+    // The frontend is the only JS and CSS in the repo. Everything else Biome
+    // would happily read -- .github workflows, package manifests it invents a
+    // meaning for -- is not ours to format or judge.
+    "files": {
+        "includes": ["internal/web/static/**"]
+    },
+
+    // Lint only. Biome's formatter would rewrite both files end to end, which
+    // is a separate decision and belongs in its own commit.
+    "formatter": { "enabled": false },
+    "assist": { "enabled": false },
+
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended",
+
+            // Same bar as .golangci.yml: a rule stays on only if it reports a
+            // defect rather than a preference. Each one off below was read
+            // against the code first, not switched off to get a green run.
+            "style": {
+                // 22 hits, all `a + b` string joins that read fine.
+                "useTemplate": "off",
+                // Two hits, both a base rule sitting after a variant that is
+                // more specific. Neither pair shares a declaration, so nothing
+                // is overridden; satisfying it means moving base rules out of
+                // the component sections the file is organised by.
+                "noDescendingSpecificity": "off"
+            },
+            "complexity": {
+                "useOptionalChain": "off",
+                "useArrowFunction": "off"
+            },
+            "suspicious": {
+                // app.js is a classic script, not a module. The IIFE's
+                // directive is what puts the file in strict mode, so it is
+                // required rather than redundant.
+                "noRedundantUseStrict": "off",
+                // The four hits are one-expression arrows over
+                // classList.toggle. forEach discards the boolean they return,
+                // which is the intent.
+                "useIterableCallbackReturn": "off"
+            },
+            "a11y": {
+                // #detail-title is empty in the markup because openDetail
+                // writes the session's name into it.
+                "useHeadingContent": "off",
+                // The only SVG is favicon.svg, which is never inline content.
+                "noSvgWithoutTitle": "off"
+            }
+        }
+    },
+
+    "javascript": {
+        "globals": ["EventSource"]
+    }
+}

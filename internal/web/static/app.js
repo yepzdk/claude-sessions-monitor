@@ -182,7 +182,7 @@
         try {
             claudeStatusData = await fetchJSON('/api/claude-status');
             claudeStatusFetchedAt = Date.now();
-        } catch (err) {
+        } catch {
             claudeStatusData = { available: false, error: 'fetch failed' };
         }
         renderClaudeStatus();
@@ -255,14 +255,14 @@
         sseSource.addEventListener('harnesses', e => {
             try {
                 mixedHarnesses = JSON.parse(e.data).mixed === true;
-            } catch (err) { /* leave the previous answer in place */ }
+            } catch { /* leave the previous answer in place */ }
         });
 
         sseSource.addEventListener('sessions', e => {
             let payload;
             try {
                 payload = JSON.parse(e.data);
-            } catch (err) {
+            } catch {
                 // A frame we cannot read is a frame we cannot draw, and the
                 // next one is two seconds away. Say the view is stale rather
                 // than leaving a green dot over the last good render.
@@ -1237,7 +1237,7 @@
                         html += `<details class="timeline-tool"><summary>${esc(c.tool || 'tool')}</summary>`;
                         if (c.input) {
                             let formatted = c.input;
-                            try { formatted = JSON.stringify(JSON.parse(c.input), null, 2); } catch (e) { /* keep raw */ }
+                            try { formatted = JSON.stringify(JSON.parse(c.input), null, 2); } catch { /* keep raw */ }
                             html += `<div class="timeline-tool-input">${esc(formatted)}</div>`;
                         }
                         html += '</details>';
@@ -1311,7 +1311,7 @@
         let body = null;
         try {
             body = await resp.json();
-        } catch (err) {
+        } catch {
             // A non-JSON body is only worth reporting through the status below.
         }
         if (!resp.ok) throw new Error((body && body.error) || `HTTP ${resp.status}`);
