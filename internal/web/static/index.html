@@ -24,6 +24,11 @@
 
     <main>
         <section id="live-view" class="view active">
+            <div class="section-label">
+                <span class="section-label-text">Live sessions</span>
+                <span class="section-label-rule"></span>
+                <span class="section-label-meta" id="live-summary"></span>
+            </div>
             <div id="sessions-list" class="sessions-list">
                 <div class="state"><div class="state-title">Connecting to the session stream</div></div>
             </div>
@@ -39,6 +44,11 @@
                     <option value="14">Last 14 days</option>
                     <option value="30">Last 30 days</option>
                 </select>
+            </div>
+            <div class="section-label">
+                <span class="section-label-text">History</span>
+                <span class="section-label-rule"></span>
+                <span class="section-label-meta" id="history-summary"></span>
             </div>
             <div id="history-list" class="history-list">
                 <div class="state"><div class="state-title">Loading history</div></div>

@@ -516,6 +516,13 @@ No framework, no bundler, no `package.json`. Iterate with
   need the same measurement. Status colours (green / yellow / red) are
   semantic; everything else is neutral. Status glyphs are the same Unicode
   shapes the terminal uses (● ▲ ◉ ◌); don't introduce emoji.
+- The live list groups a project only once it has more than one live session;
+  a lone session renders as a bare card instead. See `groupSessions` and
+  `renderGroupOrCard` in `app.js` for the rule and why a collapsed group lifts
+  a Needs Input session out to the top of the list rather than hiding it.
+- `collapsedProjects` and `openStoppedFolds` are module-level `Set`s, not DOM
+  state, because the live list is rebuilt from scratch on every scan (see the
+  comment above their declaration in `app.js`).
 
 ## `internal/jump`
 
