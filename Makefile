@@ -71,9 +71,9 @@ deadcode:
 # golangci-lint pin exists: a gate that reports different findings locally and
 # in CI is worse than none.
 #
-# biome.jsonc keeps the formatter off, so this reports defects only. Biome
-# ships a standalone binary, so nothing here needs Node or a package.json --
-# the frontend keeps its no-build-step property.
+# `check` is lint plus a formatting check. Biome ships a standalone binary, so
+# nothing here needs Node or a package.json -- the frontend keeps its
+# no-build-step property. `biome check --write .` fixes what it can.
 #
 # Skipped with a note rather than failing when it is absent, the same as
 # shellcheck: it is not part of the Go toolchain, so requiring it would make
@@ -93,7 +93,7 @@ biome:
 	installed=$$(biome --version | awk '{print $$NF}'); \
 	[ "$$installed" = "$(BIOME_VERSION)" ] || \
 		echo "note: biome $$installed installed, $(BIOME_VERSION) pinned -- CI decides"; \
-	biome lint . && echo "biome: 0 issues"
+	biome check . && echo "biome: 0 issues"
 
 # Everything CI enforces, runnable locally before pushing
 check:

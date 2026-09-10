@@ -117,7 +117,7 @@ jobs:
         with:
           version: ${{ steps.pin.outputs.version }}
 
-      # `make biome` runs the same command, but it skips when Biome is absent
-      # and a CI gate must not.
-      - name: Lint the web dashboard
-        run: biome lint .
+      # Lint plus a formatting check. `make biome` runs the same command, but it
+      # skips when Biome is absent and a CI gate must not.
+      - name: Check the web dashboard
+        run: biome check .
