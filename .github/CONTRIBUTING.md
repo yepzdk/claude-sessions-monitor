@@ -52,6 +52,17 @@ live. It prints its findings and exits 0 either way, so the Makefile turns any
 output into a failure.
 
 The config carries no baseline, so `main` is expected to report zero findings.
+
+`make biome` runs [Biome](https://biomejs.dev) over `internal/web/static`: it
+lints `app.js`, `style.css` and `index.html`, and checks the JavaScript
+formatting. `biome.jsonc` records why each rule is off and why the CSS
+formatter is off with it. It is a single binary and needs no Node: see
+[manual installation](https://biomejs.dev/guides/manual-installation/), and
+take the version `BIOME_VERSION` in the Makefile names. A version that differs
+from the pin is reported and then used, and the target skips only when Biome is
+absent, so `make check` still runs with only the Go toolchain. CI installs the
+pin and is the one that decides.
+
 A finding that is correct as written gets a `//nolint:<linter>` with the reason
 at the site, not an entry in an ignore list.
 

@@ -1,0 +1,88 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+
+    // The frontend is the only JS and CSS in the repo. Everything else Biome
+    // would happily read -- .github workflows, package manifests it invents a
+    // meaning for -- is not ours to format or judge.
+    "files": {
+        "includes": ["internal/web/static/**"]
+    },
+
+    // Every setting below is Biome's default unless taking the default would
+    // have rewritten the file for no reason. Measured in lines of app.js the
+    // formatter changes, each row differing from the chosen config by one
+    // setting:
+    //
+    //   chosen: lineWidth 120, single quotes, arrowParentheses always   236
+    //   quoteStyle double (the default)                                 746
+    //   lineWidth 80       (the default)                                486
+    //   lineWidth 100                                                   277
+    //   arrowParentheses asNeeded                                       170
+    //
+    // So the two defaults worth overriding cost 510 and 250 lines. The ones
+    // left alone are not worth a config line: arrowParentheses asNeeded would
+    // save 66, and this file's own lines are 95 characters at the 95th
+    // percentile, which 120 clears.
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 120
+    },
+    "javascript": {
+        "formatter": { "quoteStyle": "single" }
+    },
+
+    // The CSS formatter is the one default not taken. Its only effect here is
+    // expanding roughly a hundred deliberate one-line rules -- `.tab:hover {
+    // color: var(--text); }` and the severity ramp -- into three lines each:
+    // 335 changed lines and about 170 added, for no correctness gain. There is
+    // no option to keep them, so the formatter is off and the CSS linter,
+    // which is the half that finds defects, stays on.
+    "css": {
+        "formatter": { "enabled": false }
+    },
+
+    "assist": { "enabled": false },
+
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended",
+
+            // Same bar as .golangci.yml: a rule stays on only if it reports a
+            // defect rather than a preference. Each one off below was read
+            // against the code first, not switched off to get a green run.
+            "style": {
+                // 22 hits, all `a + b` string joins that read fine.
+                "useTemplate": "off",
+                // Two hits, both a base rule sitting after a variant that is
+                // more specific. Neither pair shares a declaration, so nothing
+                // is overridden; satisfying it means moving base rules out of
+                // the component sections the file is organised by.
+                "noDescendingSpecificity": "off"
+            },
+            "complexity": {
+                "useOptionalChain": "off",
+                "useArrowFunction": "off"
+            },
+            "suspicious": {
+                // app.js is a classic script, not a module. The IIFE's
+                // directive is what puts the file in strict mode, so it is
+                // required rather than redundant.
+                "noRedundantUseStrict": "off",
+                // The four hits are one-expression arrows over
+                // classList.toggle. forEach discards the boolean they return,
+                // which is the intent.
+                "useIterableCallbackReturn": "off"
+            },
+            "a11y": {
+                // #detail-title is empty in the markup because openDetail
+                // writes the session's name into it.
+                "useHeadingContent": "off",
+                // The only SVG is favicon.svg, which is never inline content.
+                "noSvgWithoutTitle": "off"
+            }
+        }
+    }
+}

@@ -89,9 +89,10 @@
                 // Never signed in is a normal local configuration state and
                 // says nothing. A token that has lapsed is worth a word: the
                 // numbers are missing for a reason the user can act on.
-                headerQuotaEl.innerHTML = apiQuota.reason === 'expired'
-                    ? `<span class="header-quota-item header-quota-error" title="${esc(apiQuota.error || '')}">token expired</span>`
-                    : '';
+                headerQuotaEl.innerHTML =
+                    apiQuota.reason === 'expired'
+                        ? `<span class="header-quota-item header-quota-error" title="${esc(apiQuota.error || '')}">token expired</span>`
+                        : '';
                 return;
             }
             breakHeaderQuota((apiQuota && apiQuota.error) || 'unknown error');
@@ -145,15 +146,18 @@
     }
 
     function stopHeaderQuotaPolling() {
-        if (headerQuotaInterval) { clearInterval(headerQuotaInterval); headerQuotaInterval = null; }
+        if (headerQuotaInterval) {
+            clearInterval(headerQuotaInterval);
+            headerQuotaInterval = null;
+        }
     }
 
     loadHeaderQuota();
     startHeaderQuotaPolling();
 
     // --- Tab navigation ---
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', e => {
+    document.querySelectorAll('.tab').forEach((tab) => {
+        tab.addEventListener('click', (e) => {
             e.preventDefault();
             switchView(tab.dataset.tab);
         });
@@ -161,8 +165,8 @@
 
     function switchView(view) {
         currentView = view;
-        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === view));
-        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === view + '-view'));
+        document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === view));
+        document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === view + '-view'));
         statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
         if (view === 'usage') loadUsage();
@@ -182,7 +186,7 @@
         try {
             claudeStatusData = await fetchJSON('/api/claude-status');
             claudeStatusFetchedAt = Date.now();
-        } catch (err) {
+        } catch {
             claudeStatusData = { available: false, error: 'fetch failed' };
         }
         renderClaudeStatus();
@@ -194,7 +198,10 @@
     }
 
     function stopClaudeStatusPolling() {
-        if (claudeStatusInterval) { clearInterval(claudeStatusInterval); claudeStatusInterval = null; }
+        if (claudeStatusInterval) {
+            clearInterval(claudeStatusInterval);
+            claudeStatusInterval = null;
+        }
     }
 
     document.addEventListener('visibilitychange', () => {
@@ -252,17 +259,19 @@
         if (sseSource) sseSource.close();
         sseSource = new EventSource('/api/events');
 
-        sseSource.addEventListener('harnesses', e => {
+        sseSource.addEventListener('harnesses', (e) => {
             try {
                 mixedHarnesses = JSON.parse(e.data).mixed === true;
-            } catch (err) { /* leave the previous answer in place */ }
+            } catch {
+                /* leave the previous answer in place */
+            }
         });
 
-        sseSource.addEventListener('sessions', e => {
+        sseSource.addEventListener('sessions', (e) => {
             let payload;
             try {
                 payload = JSON.parse(e.data);
-            } catch (err) {
+            } catch {
                 // A frame we cannot read is a frame we cannot draw, and the
                 // next one is two seconds away. Say the view is stale rather
                 // than leaving a green dot over the last good render.
@@ -292,7 +301,10 @@
         sseSource.addEventListener('open', () => {
             connStatus.className = 'connected';
             connStatus.title = 'SSE connected';
-            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
         });
 
         sseSource.addEventListener('error', () => {
@@ -314,8 +326,8 @@
     // rather than position, because groups reorder as activity moves between
     // them, and neither is pruned: a set of project names cannot grow past the
     // number of projects the user has touched.
-    const collapsedProjects = new Set();   // projects the user closed
-    const openStoppedFolds = new Set();    // projects whose stopped rows they opened
+    const collapsedProjects = new Set(); // projects the user closed
+    const openStoppedFolds = new Set(); // projects whose stopped rows they opened
 
     // The order a person triages in: what is blocked on them, then what is
     // moving, then what is parked. Fixed rather than data order, so the status
@@ -328,8 +340,8 @@
         { name: 'Waiting', cls: 'waiting', symbol: '\u25C9', word: 'waiting' },
         { name: 'Inactive', cls: 'inactive', symbol: '\u25CC', word: 'stopped' },
     ];
-    const STATUS_ORDER = STATUSES.map(s => s.name);
-    const STATUS_BY_NAME = new Map(STATUSES.map(s => [s.name, s]));
+    const STATUS_ORDER = STATUSES.map((s) => s.name);
+    const STATUS_BY_NAME = new Map(STATUSES.map((s) => [s.name, s]));
 
     // The class, glyph and word a status is spelled with, in one place:
     // "Inactive" is the API's word and the one a card's tooltip shows,
@@ -361,9 +373,11 @@
         }
 
         const counts = countByStatus(currentSessions);
-        statusBar.innerHTML = STATUS_ORDER
-            .filter(status => counts[status])
-            .map(status => `<span class="status-badge"><span class="status-dot ${statusClass(status)}"></span>${counts[status]} ${statusWord(status)}</span>`)
+        statusBar.innerHTML = STATUS_ORDER.filter((status) => counts[status])
+            .map(
+                (status) =>
+                    `<span class="status-badge"><span class="status-dot ${statusClass(status)}"></span>${counts[status]} ${statusWord(status)}</span>`,
+            )
             .join('');
 
         const groups = groupSessions();
@@ -373,11 +387,13 @@
         // reach it from -- renderGroupOrCard lifts it into this array instead
         // of leaving it reachable only by reopening the group.
         const pinned = [];
-        const rows = groups.map(g => renderGroupOrCard(g, pinned)).join('');
-        const pinnedHtml = pinned.length ? `<div class="pinned-strip">
+        const rows = groups.map((g) => renderGroupOrCard(g, pinned)).join('');
+        const pinnedHtml = pinned.length
+            ? `<div class="pinned-strip">
                 <div class="pinned-strip-label">Waiting on you</div>
-                ${pinned.map(s => renderSessionCard(s, false)).join('')}
-            </div>` : '';
+                ${pinned.map((s) => renderSessionCard(s, false)).join('')}
+            </div>`
+            : '';
 
         sessionsList.innerHTML = pinnedHtml + rows;
     }
@@ -390,7 +406,7 @@
     // by activity in this file would put the jitter straight back.
     function groupSessions() {
         const groups = new Map();
-        currentSessions.forEach(s => {
+        currentSessions.forEach((s) => {
             // Same fallback name history uses, so a project with no name is one
             // group across both tabs rather than two differently-labelled ones.
             const project = s.project || 'Unknown';
@@ -399,12 +415,12 @@
         });
 
         const ordered = [...groups.entries()].map(([project, sessions]) => {
-            const active = sessions.filter(s => s.status !== 'Inactive');
+            const active = sessions.filter((s) => s.status !== 'Inactive');
             return {
                 project,
                 sessions,
                 active,
-                stopped: sessions.filter(s => s.status === 'Inactive'),
+                stopped: sessions.filter((s) => s.status === 'Inactive'),
                 // A header is only worth the row it costs when there is more
                 // than one live session to introduce. A lone session already
                 // names its project on a tag, and a header over a single row
@@ -415,15 +431,14 @@
                 // needs an age, and the header is the only place left to show
                 // one once the rows are folded away.
                 age: Math.max(...sessions.map(activityTime)),
-                blocked: active.some(s => s.status === 'Needs Input'),
+                blocked: active.some((s) => s.status === 'Needs Input'),
             };
         });
 
         // A project waiting on the user outranks a busy one: it is the only
         // state that will not move again without them. Ties fall back to the
         // name so the order is stable when two groups have no timestamps.
-        ordered.sort((a, b) =>
-            (b.blocked - a.blocked) || (b.age - a.age) || a.project.localeCompare(b.project));
+        ordered.sort((a, b) => b.blocked - a.blocked || b.age - a.age || a.project.localeCompare(b.project));
         return ordered;
     }
 
@@ -435,24 +450,26 @@
         if (!g.grouped) {
             // Nothing here collapses, so nothing here can hide a row: a lone
             // live session, or none at all with only stopped ones folded.
-            return g.active.map(s => renderSessionCard(s, false)).join('') + renderStoppedFold(g);
+            return g.active.map((s) => renderSessionCard(s, false)).join('') + renderStoppedFold(g);
         }
 
         const collapsed = collapsedProjects.has(g.project);
 
         const counts = countByStatus(g.sessions);
-        const stats = STATUS_ORDER
-            .filter(status => counts[status])
-            .map(status => `<span class="group-stat"><span class="status-dot ${statusClass(status)}"></span>${counts[status]}</span>`)
+        const stats = STATUS_ORDER.filter((status) => counts[status])
+            .map(
+                (status) =>
+                    `<span class="group-stat"><span class="status-dot ${statusClass(status)}"></span>${counts[status]}</span>`,
+            )
             .join('');
 
         // A closed project's cards are never painted, so they are not built.
         // Opening one calls renderSessions, which rebuilds this group with them.
         let body = '';
         if (!collapsed) {
-            body = g.active.map(s => renderSessionCard(s, true)).join('') + renderStoppedFold(g);
+            body = g.active.map((s) => renderSessionCard(s, true)).join('') + renderStoppedFold(g);
         } else {
-            pinned.push(...g.active.filter(s => s.status === 'Needs Input'));
+            pinned.push(...g.active.filter((s) => s.status === 'Needs Input'));
         }
 
         return groupShell({
@@ -482,7 +499,7 @@
             <span>${plural(g.stopped.length, 'stopped session')}</span>
             <span class="session-fold-age">last active ${lastActive ? formatAge(lastActive) : '-'}</span>
         </div>`;
-        if (foldOpen) html += g.stopped.map(s => renderSessionCard(s, g.grouped)).join('');
+        if (foldOpen) html += g.stopped.map((s) => renderSessionCard(s, g.grouped)).join('');
         return html;
     }
 
@@ -506,16 +523,19 @@
         // It renders with the origin and context-window chips rather than
         // before the branch: it belongs to that cluster of "what this session
         // is" identifiers, and alone at the front it reads as a stray word.
-        const harnessBadge = mixedHarnesses && s.harness
-            ? `<span class="badge session-harness-badge" title="${esc(harnessName(s.harness))}">${esc(s.harness)}</span>`
-            : '';
+        const harnessBadge =
+            mixedHarnesses && s.harness
+                ? `<span class="badge session-harness-badge" title="${esc(harnessName(s.harness))}">${esc(s.harness)}</span>`
+                : '';
         const projectTag = grouped ? '' : `<span class="project-tag">${esc(s.project)}</span>`;
         // Under a header, the branch leads the row instead of repeating the
         // project name above it. A session outside a git checkout has no
         // branch, and falls back to the project name rather than to nothing.
         const lead = s.git_branch
             ? `<span class="session-branch">${esc(s.git_branch)}</span>`
-            : (grouped ? `<span class="session-lead-plain">${esc(s.project)}</span>` : '');
+            : grouped
+              ? `<span class="session-lead-plain">${esc(s.project)}</span>`
+              : '';
 
         return `<div class="${cardCls}" data-logfile="${esc(s.log_file || '')}" data-project="${esc(s.project)}" data-branch="${esc(s.git_branch || '')}" data-status="${esc(s.status)}">
             <div class="session-top">
@@ -585,7 +605,8 @@
     });
 
     function toggleMembership(set, key) {
-        if (set.has(key)) set.delete(key); else set.add(key);
+        if (set.has(key)) set.delete(key);
+        else set.add(key);
     }
 
     // Render a session's live subagents as rows nested under its card.
@@ -593,15 +614,18 @@
     function renderSubagents(subagents) {
         if (!subagents || subagents.length === 0) return '';
 
-        return `<div class="session-subagents">` + subagents.map(a => {
-            const label = a.agent_type || (a.id || '').slice(0, 8);
-            // a.description is the short label the agent was spawned with; a.task
-            // is its latest freeform status message. The label is the more useful
-            // title, with the live status (if any) elaborating on the second line.
-            const title = a.description || a.task || '';
-            const detail = a.description && a.task ? a.task : '';
+        return (
+            `<div class="session-subagents">` +
+            subagents
+                .map((a) => {
+                    const label = a.agent_type || (a.id || '').slice(0, 8);
+                    // a.description is the short label the agent was spawned with; a.task
+                    // is its latest freeform status message. The label is the more useful
+                    // title, with the live status (if any) elaborating on the second line.
+                    const title = a.description || a.task || '';
+                    const detail = a.description && a.task ? a.task : '';
 
-            return `<div class="subagent" data-logfile="${esc(a.log_file || '')}" data-label="${esc(label)}">
+                    return `<div class="subagent" data-logfile="${esc(a.log_file || '')}" data-label="${esc(label)}">
                 <div class="subagent-top">
                     <span class="session-status working">&#x25CF;</span>
                     <span class="subagent-label">${esc(label)}</span>
@@ -611,7 +635,10 @@
                 </div>
                 ${detail ? `<div class="subagent-bottom">${esc(detail)}</div>` : ''}
             </div>`;
-        }).join('') + `</div>`;
+                })
+                .join('') +
+            `</div>`
+        );
     }
 
     // Navigate to history tab filtered by project
@@ -642,10 +669,12 @@
 
     function renderHistory() {
         const query = (historySearch.value || '').toLowerCase();
-        const filtered = historyData.filter(s =>
-            !query || s.project.toLowerCase().includes(query) ||
-            (s.git_branch && s.git_branch.toLowerCase().includes(query)) ||
-            (s.first_prompt && s.first_prompt.toLowerCase().includes(query))
+        const filtered = historyData.filter(
+            (s) =>
+                !query ||
+                s.project.toLowerCase().includes(query) ||
+                (s.git_branch && s.git_branch.toLowerCase().includes(query)) ||
+                (s.first_prompt && s.first_prompt.toLowerCase().includes(query)),
         );
 
         if (filtered.length === 0) {
@@ -654,19 +683,19 @@
             // one is in the way rather than only that nothing was found.
             historyList.innerHTML = query
                 ? stateBlock({
-                    title: `No sessions match &quot;${esc(historySearch.value)}&quot;`,
-                    hint: 'Clear the search to see every project.',
-                })
+                      title: `No sessions match &quot;${esc(historySearch.value)}&quot;`,
+                      hint: 'Clear the search to see every project.',
+                  })
                 : stateBlock({
-                    title: 'No sessions in this range',
-                    hint: 'Try a wider range.',
-                });
+                      title: 'No sessions in this range',
+                      hint: 'Try a wider range.',
+                  });
             return;
         }
 
         // Group by project, then by date within each project
         const projectGroups = {};
-        filtered.forEach(s => {
+        filtered.forEach((s) => {
             const proj = s.project || 'Unknown';
             if (!projectGroups[proj]) projectGroups[proj] = [];
             projectGroups[proj].push(s);
@@ -690,9 +719,13 @@
                     <span class="history-duration">Duration</span>
                 </div>
             </div>`;
-            sessions.forEach(s => {
+            sessions.forEach((s) => {
                 const dur = formatDuration(s.duration);
-                const date = s.start_time ? dateGroup(s.start_time) + ' ' + new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
+                const date = s.start_time
+                    ? dateGroup(s.start_time) +
+                      ' ' +
+                      new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : '-';
                 const promptLine = s.first_prompt ? `<div class="history-prompt">${esc(s.first_prompt)}</div>` : '';
                 body += `<div class="history-row" data-logfile="${esc(s.log_file || '')}" data-branch="${esc(s.git_branch || '')}">
                     <div class="history-row-main">
@@ -723,7 +756,7 @@
     // One delegated listener, bound once, rather than one per row on every
     // render: the search box re-renders the whole list on each keystroke, and
     // a 30-day range is hundreds of rows. Same reason the live list delegates.
-    historyList.addEventListener('click', e => {
+    historyList.addEventListener('click', (e) => {
         const header = e.target.closest('.group-header');
         if (header) {
             header.parentElement.classList.toggle('collapsed');
@@ -847,7 +880,7 @@
                 html += '<span class="usage-col-tokens">Cache</span>';
                 html += '<span class="usage-col-tokens">Total</span>';
                 html += '</div>';
-                local.sessions.forEach(s => {
+                local.sessions.forEach((s) => {
                     html += '<div class="usage-table-row">';
                     html += `<span class="usage-col-project">${esc(s.project)}</span>`;
                     // The block only renders when local.total_tokens > 0, so
@@ -889,9 +922,7 @@
 
     function renderUsageBar(label, bucket) {
         const { pct, cls, resetsIn } = quotaBarParts(bucket);
-        const resetHtml = resetsIn
-            ? `<span class="usage-bar-reset">resets in ${esc(resetsIn)}</span>`
-            : '';
+        const resetHtml = resetsIn ? `<span class="usage-bar-reset">resets in ${esc(resetsIn)}</span>` : '';
         return `<div class="usage-bar-row">
             <span class="usage-bar-label">${esc(label)}</span>
             <span class="usage-bar"><span class="usage-bar-fill ${cls}" style="width:${pct}%"></span></span>
@@ -930,7 +961,9 @@
         detailOverlay.classList.remove('hidden');
 
         // Reset to metrics tab
-        document.querySelectorAll('.detail-tab').forEach(t => t.classList.toggle('active', t.dataset.detail === 'metrics'));
+        document
+            .querySelectorAll('.detail-tab')
+            .forEach((t) => t.classList.toggle('active', t.dataset.detail === 'metrics'));
         detailMetrics.classList.add('active');
         detailTimeline.classList.remove('active');
 
@@ -939,16 +972,16 @@
     }
 
     detailClose.addEventListener('click', () => detailOverlay.classList.add('hidden'));
-    detailOverlay.addEventListener('click', e => {
+    detailOverlay.addEventListener('click', (e) => {
         if (e.target === detailOverlay) detailOverlay.classList.add('hidden');
     });
-    document.addEventListener('keydown', e => {
+    document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') detailOverlay.classList.add('hidden');
     });
 
-    document.querySelectorAll('.detail-tab').forEach(tab => {
+    document.querySelectorAll('.detail-tab').forEach((tab) => {
         tab.addEventListener('click', () => {
-            document.querySelectorAll('.detail-tab').forEach(t => t.classList.toggle('active', t === tab));
+            document.querySelectorAll('.detail-tab').forEach((t) => t.classList.toggle('active', t === tab));
             detailMetrics.classList.toggle('active', tab.dataset.detail === 'metrics');
             detailTimeline.classList.toggle('active', tab.dataset.detail === 'timeline');
         });
@@ -1014,9 +1047,10 @@
     }
 
     function renderMetrics(m) {
-        const duration = m.last_timestamp && m.first_timestamp
-            ? formatDuration((new Date(m.last_timestamp) - new Date(m.first_timestamp)) * 1000000)
-            : '-';
+        const duration =
+            m.last_timestamp && m.first_timestamp
+                ? formatDuration((new Date(m.last_timestamp) - new Date(m.first_timestamp)) * 1000000)
+                : '-';
         const totalTokens = TOKEN_KINDS.reduce((sum, k) => sum + (m[k.key] || 0), 0);
 
         // Context usage is the one metric here with a consequence -- the session
@@ -1073,13 +1107,13 @@
             html += `<section class="token-composition">
                 ${sectionLabel('Token composition')}
                 <div class="token-stack">`;
-            TOKEN_KINDS.forEach(k => {
+            TOKEN_KINDS.forEach((k) => {
                 const v = m[k.key] || 0;
                 if (v <= 0) return;
                 html += `<span class="token-seg" style="flex-basis:${(v / totalTokens) * 100}%;background:${k.color}"></span>`;
             });
             html += `</div><ul class="token-legend">`;
-            TOKEN_KINDS.forEach(k => {
+            TOKEN_KINDS.forEach((k) => {
                 const v = m[k.key] || 0;
                 html += `<li>
                     <span class="token-key" style="background:${k.color}"></span>
@@ -1115,7 +1149,7 @@
 
         detailMetrics.innerHTML = html;
 
-        detailMetrics.querySelectorAll('[data-timeline-filter]').forEach(btn => {
+        detailMetrics.querySelectorAll('[data-timeline-filter]').forEach((btn) => {
             btn.addEventListener('click', () => showFilteredTimeline(btn.dataset.timelineFilter));
         });
     }
@@ -1130,7 +1164,7 @@
     }
 
     function showFilteredTimeline(filter) {
-        document.querySelectorAll('.detail-tab').forEach(t => {
+        document.querySelectorAll('.detail-tab').forEach((t) => {
             t.classList.toggle('active', t.dataset.detail === 'timeline');
         });
         detailMetrics.classList.remove('active');
@@ -1165,7 +1199,9 @@
                 // full page rather than deriving a size from a total of zero.
                 const remaining = timelineTotal > 0 ? Math.max(1, timelineTotal - timelineOffset) : SERVER_MAX;
                 const limit = mode === 'all' ? Math.min(SERVER_MAX, remaining) : 50;
-                const data = await fetchJSON(`/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`);
+                const data = await fetchJSON(
+                    `/api/sessions/timeline?file=${encodeURIComponent(logFile)}&offset=${timelineOffset}&limit=${limit}${typeParam}`,
+                );
                 if (token !== timelineLoadToken) return;
                 timelineTotal = data.total;
                 const batch = data.entries || [];
@@ -1184,7 +1220,7 @@
     function renderTimeline() {
         const filters = ['all', 'assistant', 'user'];
         let html = '<div class="timeline-filters">';
-        filters.forEach(f => {
+        filters.forEach((f) => {
             const active = f === timelineFilter ? ' active' : '';
             html += `<button class="filter-btn${active}" data-filter="${f}">${f.charAt(0).toUpperCase() + f.slice(1)}</button>`;
         });
@@ -1214,9 +1250,15 @@
         }
 
         html += '<div class="timeline">';
-        timelineEntries.forEach(e => {
+        timelineEntries.forEach((e) => {
             const cls = e.type;
-            const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+            const time = e.timestamp
+                ? new Date(e.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                  })
+                : '';
 
             html += `<div class="timeline-entry ${esc(cls)}">`;
             html += `<div class="timeline-header">`;
@@ -1230,14 +1272,18 @@
             }
 
             if (e.content) {
-                e.content.forEach(c => {
+                e.content.forEach((c) => {
                     if (c.type === 'text' && c.text) {
                         html += `<div class="timeline-text">${esc(c.text)}</div>`;
                     } else if (c.type === 'tool_use') {
                         html += `<details class="timeline-tool"><summary>${esc(c.tool || 'tool')}</summary>`;
                         if (c.input) {
                             let formatted = c.input;
-                            try { formatted = JSON.stringify(JSON.parse(c.input), null, 2); } catch (e) { /* keep raw */ }
+                            try {
+                                formatted = JSON.stringify(JSON.parse(c.input), null, 2);
+                            } catch {
+                                /* keep raw */
+                            }
                             html += `<div class="timeline-tool-input">${esc(formatted)}</div>`;
                         }
                         html += '</details>';
@@ -1271,7 +1317,7 @@
 
         wireRetry(detailTimeline, () => loadTimeline(currentLogFile, true));
 
-        detailTimeline.querySelectorAll('.filter-btn').forEach(btn => {
+        detailTimeline.querySelectorAll('.filter-btn').forEach((btn) => {
             btn.addEventListener('click', () => {
                 if (btn.dataset.filter === timelineFilter) return;
                 timelineFilter = btn.dataset.filter;
@@ -1311,7 +1357,7 @@
         let body = null;
         try {
             body = await resp.json();
-        } catch (err) {
+        } catch {
             // A non-JSON body is only worth reporting through the status below.
         }
         if (!resp.ok) throw new Error((body && body.error) || `HTTP ${resp.status}`);
@@ -1373,7 +1419,9 @@
     // same list eight separate questions, on every scan.
     function countByStatus(sessions) {
         const counts = {};
-        sessions.forEach(s => { counts[s.status] = (counts[s.status] || 0) + 1; });
+        sessions.forEach((s) => {
+            counts[s.status] = (counts[s.status] || 0) + 1;
+        });
         return counts;
     }
 
@@ -1400,9 +1448,12 @@
     // "omp" on a card is never a mystery.
     function harnessName(harness) {
         switch (harness) {
-            case 'claude': return 'Claude Code';
-            case 'omp': return 'Oh My Pi';
-            default: return harness;
+            case 'claude':
+                return 'Claude Code';
+            case 'omp':
+                return 'Oh My Pi';
+            default:
+                return harness;
         }
     }
 
@@ -1471,5 +1522,4 @@
         // this inside double-quoted HTML attributes, so escape those too.
         return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
-
 })();

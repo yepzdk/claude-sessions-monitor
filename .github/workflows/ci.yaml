@@ -94,3 +94,30 @@ jobs:
       # rely on.
       - name: Shellcheck shell scripts
         run: shellcheck --shell=sh install.sh packaging/aur/render.sh
+
+  # app.js and style.css are the only code in the repo that no Go test reads and
+  # gofmt never sees. Biome ships a standalone binary, so this job adds no Node
+  # and no package.json. The version matches the Makefile's BIOME_VERSION.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The pin stays in the Makefile so there is one copy of it, the way the
+      # deadcode gate keeps its version in one place.
+      - id: pin
+        run: echo "version=$(sed -n 's/^BIOME_VERSION := //p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      # The download is not verified. Biome publishes no checksum file, so the
+      # only option would be a hash measured from the asset by hand, per
+      # platform, edited on every bump. golangci-lint and deadcode get this for
+      # free from the Go checksum database and shellcheck comes from the runner
+      # image; Biome is the one gate without it.
+      - uses: biomejs/setup-biome@v2
+        with:
+          version: ${{ steps.pin.outputs.version }}
+
+      # Lint plus a formatting check. `make biome` runs the same command, but it
+      # skips when Biome is absent and a CI gate must not.
+      - name: Check the web dashboard
+        run: biome check .
