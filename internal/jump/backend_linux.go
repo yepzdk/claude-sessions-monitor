@@ -3,7 +3,6 @@
 package jump
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -48,8 +47,13 @@ func detectBackend() (backend, error) {
 		// short of a shell extension. KWin has a scripting interface
 		// (org.kde.KWin /Scripting) that could do it, which csm does not
 		// drive yet.
-		return nil, unsupportedf("jumping on Wayland works under Hyprland and sway only, not %s",
-			desktopName())
+		// The desktop is named only when it says who it is. XDG_CURRENT_DESKTOP
+		// is unset on more sessions than it is set on -- WSLg among them -- and
+		// a fallback string put "not unknown" at the end of the sentence.
+		if desktop := os.Getenv("XDG_CURRENT_DESKTOP"); desktop != "" {
+			return nil, unsupportedf("jumping on Wayland works under Hyprland and sway only, not %s", desktop)
+		}
+		return nil, unsupportedf("jumping on Wayland works under Hyprland and sway only")
 	case os.Getenv("DISPLAY") != "":
 		return needsTool(x11{}, "wmctrl")
 	}
@@ -62,12 +66,6 @@ func needsTool(b backend, tool string) (backend, error) {
 		return nil, unsupportedf("jumping on %s needs %s, which is not installed", b.name(), tool)
 	}
 	return b, nil
-}
-
-// desktopName reports the desktop environment for error messages, falling back
-// to something honest rather than empty.
-func desktopName() string {
-	return cmp.Or(os.Getenv("XDG_CURRENT_DESKTOP"), "unknown")
 }
 
 // run executes a compositor command and returns its stdout.
