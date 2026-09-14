@@ -1,4 +1,4 @@
-.PHONY: build build-all install packages checksums clean fmt lint shellcheck deadcode check
+.PHONY: build build-all install packages checksums clean fmt lint shellcheck biome deadcode check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -66,12 +66,42 @@ deadcode:
 	            GOOS=darwin GOARCH=arm64 $(DEADCODE) -test ./... || echo "deadcode failed for GOOS=darwin (see above)"; } | sort -u); \
 		[ -z "$$found" ] || { echo "$$found"; echo "Delete the unreachable function, call it, or fix the run that failed."; exit 1; }
 
+# The web dashboard's JS and CSS, which no Go test reads and gofmt never sees.
+# Pinned to match .github/workflows/ci.yaml, for the same reason the
+# golangci-lint pin exists: a gate that reports different findings locally and
+# in CI is worse than none.
+#
+# `check` is lint plus a formatting check. Biome ships a standalone binary, so
+# nothing here needs Node or a package.json -- the frontend keeps its
+# no-build-step property. `biome check --write .` fixes what it can.
+#
+# Skipped with a note rather than failing when it is absent, the same as
+# shellcheck: it is not part of the Go toolchain, so requiring it would make
+# `make check` unrunnable on a machine that can build and test fine. Probed by
+# running it, not with `command -v`, because a version manager can leave a shim
+# on PATH that exists but fails.
+BIOME_VERSION := 2.5.13
+
+# A wrong version cannot be corrected here the way lint and deadcode correct
+# theirs: Biome is not a Go module, so there is no `go install` to fall back on.
+# It runs anyway and says which version it used. Any install drifts from a
+# hand-edited pin sooner or later, and `check` only reads, so the worst a
+# mismatch does is give a verdict CI disagrees with. Refusing to run trades
+# that for no local gate. CI installs the pin and is the one that decides.
+biome:
+	@biome --version >/dev/null 2>&1 || { echo "biome not installed -- skipping (CI will run it)"; exit 0; }; \
+	installed=$$(biome --version | awk '{print $$NF}'); \
+	[ "$$installed" = "$(BIOME_VERSION)" ] || \
+		echo "note: biome $$installed installed, $(BIOME_VERSION) pinned -- CI decides"; \
+	biome check . && echo "biome: 0 issues"
+
 # Everything CI enforces, runnable locally before pushing
 check:
 	@gofmt -l . | grep . && { echo "Not gofmt-clean — run 'make fmt'"; exit 1; } || true
 	go vet ./...
 	$(MAKE) lint
 	$(MAKE) shellcheck
+	$(MAKE) biome
 	$(MAKE) deadcode
 	go build $(LDFLAGS) -o /dev/null .
 	go test ./...

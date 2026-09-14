@@ -502,6 +502,10 @@ Vanilla JS in one IIFE, one CSS file, one HTML file, embedded with `go:embed`.
 No framework, no bundler, no `package.json`. Iterate with
 `make build && ./csm --web-only` and reload the browser.
 
+`make biome` lints `app.js` and `style.css` and checks the JavaScript
+formatting. `biome.jsonc` records why each rule is off and why the CSS
+formatter is off with it.
+
 - All HTML is built from template literals; every interpolated value goes
   through `esc()`.
 - Live data arrives over `EventSource('/api/events')`; everything else is

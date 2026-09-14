@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `make biome` and a CI step running [Biome](https://biomejs.dev) over the web dashboard's JavaScript and CSS. It lints both and checks the JavaScript formatting, the two files no Go test reads and gofmt never sees. Biome is a standalone binary, so the frontend still has no `package.json` and no build step
+
 ### Fixed
 
 - The refusal to jump on a Wayland compositor csm cannot drive no longer ends in "not unknown". It named the desktop from `XDG_CURRENT_DESKTOP` and printed a placeholder when the session sets nothing
