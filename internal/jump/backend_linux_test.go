@@ -218,7 +218,16 @@ func TestDetectBackendOnWaylandWithNoDesktopName(t *testing.T) {
 	if err == nil {
 		t.Fatal("detectBackend() succeeded on a Wayland session csm cannot drive")
 	}
-	if strings.Contains(err.Error(), "unknown") {
-		t.Errorf("detectBackend() = %q, want no dangling name when the desktop is not set", err)
+	// The sentence, not merely the absence of "unknown": feeding an unset
+	// XDG_CURRENT_DESKTOP back into the old "%s" ends the message in "not "
+	// -- the same dangling clause with an emptier filler.
+	if want := "jumping on Wayland works under Hyprland and sway only"; err.Error() != want {
+		t.Errorf("detectBackend() = %q, want %q", err, want)
+	}
+	// The named branch above asserts this, and this one is the branch every
+	// session that sets nothing takes: unwrapping to ErrUnsupported is what
+	// makes the UI report a limitation rather than a failure.
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("detectBackend() = %v, want an ErrUnsupported so the UI reports it as a limitation", err)
 	}
 }
