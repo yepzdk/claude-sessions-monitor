@@ -247,6 +247,131 @@ nav {
     opacity: 1;
 }
 
+/* Flags on a row. Filled like the degraded badge and for the same reason: it
+   has to read against the card, the recessed stopped card and the page. Only
+   two hues, matching the TUI -- red is "look now", yellow is "look". A low-only
+   session stays neutral so routine noise does not compete with a ghost. */
+.session-flag-badge {
+    justify-content: center;
+    min-width: 1.125rem;
+    font-weight: 700;
+    opacity: 1;
+    background: var(--gray);
+    border-color: var(--gray);
+    color: var(--bg);
+}
+
+.session-flag-badge.sev-medium {
+    background: var(--yellow);
+    border-color: var(--yellow);
+}
+
+.session-flag-badge.sev-high,
+.session-flag-badge.sev-critical {
+    background: var(--red);
+    border-color: var(--red);
+}
+
+/* The flags panel. A list, not a table: the detail line wraps and a table
+   column would either clip it or set the width of every other row. */
+.flag-note {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.flag-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.flag-row {
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: 4px;
+    padding: 0.5rem 0.625rem;
+}
+
+.flag-row.sev-medium { border-left-color: var(--yellow); }
+.flag-row.sev-high,
+.flag-row.sev-critical { border-left-color: var(--red); }
+
+.flag-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.flag-sev {
+    text-transform: uppercase;
+    font-size: 0.625rem;
+    letter-spacing: 0.04em;
+}
+
+.flag-sev.sev-medium { color: var(--yellow); border-color: var(--yellow); }
+.flag-sev.sev-high,
+.flag-sev.sev-critical { color: var(--red); border-color: var(--red); }
+
+.flag-label { font-weight: 600; }
+.flag-tool { color: var(--text-dim); font-size: 0.75rem; }
+
+/* Pushed to the right so a scan down the list reads labels, not timestamps. */
+.flag-time {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.flag-detail {
+    margin-top: 0.375rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+}
+
+.flag-jump {
+    margin-top: 0.5rem;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 0.75rem;
+    padding: 0.1875rem 0.5rem;
+    cursor: pointer;
+}
+
+.flag-jump:hover { color: var(--text); border-color: var(--text-dim); }
+
+/* The entry a flag jumped to, marked so it is findable after the scroll. */
+.timeline-tool-found {
+    outline: 1px solid var(--yellow);
+    outline-offset: 2px;
+}
+
+/* The feed adds a date spine and two more identifiers per row; the panel list
+   inside a session needs neither, so they are the only additions. */
+.flag-day {
+    margin-top: 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.flag-day:first-child { margin-top: 0; }
+
+.flag-feed .flag-row { cursor: pointer; }
+.flag-feed .flag-row:hover { border-color: var(--text-dim); }
+
+.flag-project { color: var(--text); font-size: 0.75rem; }
+.flag-harness { color: var(--text-dim); font-size: 0.6875rem; }
+
 /* The same fact at page level, under the usage table. Same mark, same
    wording, so a reader learns it once. */
 .usage-partial {
@@ -917,7 +1042,9 @@ main {
 
 #history-search:focus { border-color: var(--blue); }
 
-#history-days {
+/* The two range pickers are the same control; one rule so they cannot drift. */
+#history-days,
+#flags-days {
     background: var(--bg-surface);
     border: 1px solid var(--border);
     color: var(--text);

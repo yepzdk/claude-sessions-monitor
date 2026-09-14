@@ -24,12 +24,16 @@ func writeLog(t *testing.T, dir, name, content string) (string, time.Time, int64
 	return p, info.ModTime(), info.Size()
 }
 
-// resetParseCache clears the package-level parse cache so tests don't interfere.
+// resetParseCache clears the package-level parse and flag caches so tests don't
+// interfere.
 func resetParseCache() {
 	parseCacheMu.Lock()
 	parseCache = map[string]cachedParse[parsedLog]{}
 	ompParseCache = map[string]cachedParse[ompParsedLog]{}
 	parseCacheMu.Unlock()
+	flagScanMu.Lock()
+	flagScanCache = map[string]flagScan{}
+	flagScanMu.Unlock()
 }
 
 // The cache returns the non-fatal error on every hit, not just the parse that

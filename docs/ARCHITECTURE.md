@@ -40,10 +40,10 @@ SIGTERM, and `ui` decides the row tag from it.
 is view state owned by the live loop and cycled with `f`, deliberately not a
 flag: discovery always covers every agent, and a flag would have had to mean
 something for the web dashboard, which serves several clients and has no key to
-undo it. The live loop also owns the `ViewMode` (live / history / usage); `ui`
-only exposes the three renderers.
+undo it. The live loop also owns the `ViewMode` (live / history / usage /
+flags); `ui` only exposes the four renderers.
 The ticker runs at `-interval` (2s); the usage view never
-auto-refreshes and the history view is throttled to once per 30s.
+auto-refreshes, and the history and flags views are throttled to once per 30s.
 
 ## `internal/session`
 
@@ -206,11 +206,14 @@ A `user` role is always a real prompt here — omp gives tool results their own
 `toolResult` role — so there is no `isUserPrompt` equivalent to write.
 
 Fields deliberately left zero on an omp session (`applyOMPParsedLog`):
-`ContextPercent`, `ContextTokens`, `ContextWindow`, `GitBranch`,
-`HasUnsandboxed`, `Subagents`. omp is multi-provider, so a context window cannot
-be derived from the model id the way `contextWindowForModel` does for Claude, and
-a wrong percentage reads as a measurement. The rest have no equivalent in its
-log. If you add a column, blank it honestly rather than guessing.
+`ContextPercent`, `ContextTokens`, `ContextWindow`, `GitBranch` and
+`Subagents`. omp is multi-provider, so a context window cannot be derived from
+the model id the way `contextWindowForModel` does for Claude, and a wrong
+percentage reads as a measurement. The rest have no equivalent in its log. If
+you add a column, blank it honestly rather than guessing. `Session.Flags` is
+the exception that is *not* blank: omp writes each bash command into its
+`tool_execution_start` entry, so the command rules apply — see
+[Flags](#flags-flagsgo-flags_commandgo-flags_ompgo-shellgo-flagfeedgo).
 
 ### Processes, ghosts and the pairing pitfall
 
@@ -285,11 +288,59 @@ must render it so the numbers are not read as measurements: `[?]` in `ui/ui.go`
 and `ui/history.go`, the `?` badge in `web/static/app.js`. A new view or column
 that shows counts needs the same.
 
+### Flags (`flags.go`, `flags_command.go`, `flags_omp.go`, `shell.go`, `flagfeed.go`)
+
+A flag is one notable thing csm recognised in a session's log. Two kinds, and
+the difference is load-bearing:
+
+- **The harness's own verdicts** (`flags.go`, `flags_omp.go`) — a permission
+  denial, an auto-mode classifier block, a move to a more permissive permission
+  mode, a sandbox bypass, an omp user rule that matched. csm is re-reporting a
+  decision the agent recorded, so these cannot be false positives.
+- **csm's own reading of a Bash command** (`flags_command.go`) — `sudo`,
+  `rm -rf` outside the project, a force push, a download piped into a shell.
+  These are opinions, and they cost a false-positive budget.
+
+Two properties every surface must preserve. It is a **report, not a guard**:
+csm reads logs on a timer, so the command has already run and nothing here
+prevented it. And **absence is not safety**: a command assembled at runtime is
+invisible to every rule, so no view may render "no flags" as a clean bill of
+health. `RenderFlags` and the web panels both say so in words; keep them.
+
+`Session.Flags` is a `FlagSummary` — counts by severity plus the worst one, and
+nothing else. The list is per-session detail served by `/api/sessions/flags`,
+the same split `/api/sessions/metrics` makes, because an unattended run
+accumulates flags and the rows are rebroadcast to every SSE client every two
+seconds. `DiscoverFlags(days)` (`flagfeed.go`) is the cross-session feed behind
+the `!` view and `/api/flags`.
+
+Why a separate reader rather than another field on `parsedLog`: the parse keeps
+the last 100 entries, and a `sudo` in the first turn of a thousand-turn session
+is exactly what this is for. `scanFlagsWith` **accumulates** from a byte offset
+instead — logs are append-only, so re-reading finds nothing new — which also
+makes covering the whole file cheaper than the parse that covers a hundred
+entries of it. `HasUnsandboxed` was the old shape of this and had the bug:
+a sticky bool that went false once the bypass aged out of the window.
+
+`shell.go` is why the command rules work. Matching a pattern against the raw
+command string flags 8% of Bash calls in a real corpus, nearly all of it heredoc
+bodies and quoted narration; splitting into the argument vectors that actually
+run first takes the same rules to 1.5%. Severity comes from the *argument*, not
+the verb — `rm -rf .build` and `rm -rf ~/Documents` are the same command. There
+is deliberately no "low" severity: the tier was measured, every rule that
+produced one fired only on ordinary work, and it was cut rather than shipped.
+
+Adding a rule: it earns its place only if it fires on something worth reading
+and stays quiet through ordinary work, **measured against real logs**, not
+assumed. Add its id to `FLAG_LABELS` in `web/static/app.js` too, or the panel
+shows the raw id.
+
 ### Caches (`cache.go`, `quota.go`, `status.go`)
 
 | Cache | Key / TTL | Why |
 |---|---|---|
 | `parseCache` / `ompParseCache` | log path; valid while `(mtime, size)` unchanged | skip re-parsing multi-MB logs every tick. One generic `cachedParse[T]` policy, two maps, because the formats parse into different shapes |
+| `flagScanCache` | log path; resumes from a byte offset, reset only when the file shrinks | flags accumulate rather than being replaced, so a whole session's history costs one pass and every later tick reads only the appended bytes |
 | `processScanCache` | 2s | one read of the process table per tick, not per caller. Guarded by `processScanValid`, not a nil check: no agent running is a legitimate result |
 | `resultCache` | 1s | TUI loop, SSE hub and HTTP handlers collapse to one scan |
 | `apiQuotaCache` | 60s | the quota endpoint rate-limits hard. One `ttlCache[T]` policy with `claudeStatusCache`, in `cache.go` |
@@ -481,13 +532,22 @@ Routes (`handlers.go`):
 | `/api/history?days=N` | merged `DiscoverHistory` + stray inactive sessions, N ≤ 365 |
 | `/api/sessions/timeline?file=&offset=&limit=&type=` | paged entries; `type` whitelisted, unknown values mean "all" |
 | `/api/sessions/metrics?file=` | `ParseMetrics` |
+| `/api/sessions/flags?file=` | one session's flags, oldest first |
+| `/api/flags?days=N` | `DiscoverFlags`, newest first, both harnesses, N ≤ 365 |
 | `/api/usage` | local token usage + API quota |
 | `/api/quota` | API quota only (cheap poll for the header widget) |
 | `/api/claude-status` | status page |
 | `/api/events` | SSE |
 
 `file` parameters go through `session.ValidateLogFilePath`, which requires the
-resolved path to sit under the projects directory and end in `.jsonl`.
+resolved path to sit under the Claude projects directory and end in `.jsonl`.
+`/api/sessions/flags` is the exception: it uses `validateSessionLogPath`, which
+also accepts omp's store and returns the root, because unlike the timeline and
+metrics readers the flag rules exist for both formats. Both evaluate symlinks
+on each side before comparing prefixes.
+
+A list endpoint answers `[]`, never `null`: the page's `fetchJSON` treats a
+null body as a broken response.
 
 `sse.go`: the hub ticks every 2s but skips the scan when no client is
 connected, sends a heartbeat every 30s, broadcasts `scan_error` instead of

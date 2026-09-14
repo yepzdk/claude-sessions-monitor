@@ -118,3 +118,28 @@ func TestHandleTimelineTypeFilter(t *testing.T) {
 		}
 	})
 }
+
+// A session with nothing flagged is the common case, and the page's fetchJSON
+// rejects a null body as a broken response. The endpoint must say "no flags"
+// with an empty array, not with null.
+func TestFlagsEndpointAnswersAnEmptyArrayWhenNothingIsFlagged(t *testing.T) {
+	logFile := timelineFixture(t, 1, 1)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/flags?file="+logFile, nil)
+	rec := httptest.NewRecorder()
+	handleFlags(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
+		t.Fatalf("body %q, want []", got)
+	}
+	var flags []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &flags); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(flags) != 0 {
+		t.Fatalf("got %d flags, want none", len(flags))
+	}
+}

@@ -129,7 +129,7 @@ func RenderHistory(sessions []session.HistorySession, days int, showFooter bool,
 	}
 
 	if showFooter {
-		fmt.Fprintf(&buf, "%s%sl: live view | u: usage | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		fmt.Fprintf(&buf, "%s%sl: live view | u: usage | !: flags | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
 
 	fmt.Print(buf.String())

@@ -244,6 +244,7 @@ const (
 	ViewModeLive ViewMode = iota
 	ViewModeHistory
 	ViewModeUsage
+	ViewModeFlags
 )
 
 // runLiveView returns the process exit code. It calls os.Exit nowhere itself:
@@ -356,6 +357,9 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 
 	// Throttle history view refreshes (data changes infrequently)
 	var lastHistoryRender time.Time
+	// The flags feed walks every log in its window; throttled for the same
+	// reason the history view is.
+	var lastFlagsRender time.Time
 
 	// Render function that respects current mode
 	render := func() {
@@ -368,6 +372,14 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 				errMsg = err.Error()
 			}
 			ui.RenderHistory(sessions, historyDays, true, errMsg)
+		case ViewModeFlags:
+			ui.MoveCursorHome()
+			events, err := session.DiscoverFlags(historyDays)
+			errMsg := ""
+			if err != nil {
+				errMsg = err.Error()
+			}
+			ui.RenderFlags(events, historyDays, true, errMsg)
 		case ViewModeUsage:
 			ui.MoveCursorHome()
 			usage := session.ComputeUsage()
@@ -483,6 +495,18 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 					selected = -1
 					render()
 				}
+			case '!':
+				// Not a letter: every letter that reads as "flags" is taken or
+				// confusable -- `f` is the harness filter, and pairing it with
+				// `F` for a different view is the kind of near-collision this
+				// footer exists to avoid. `!` is what the row badge already
+				// shows.
+				if viewMode != ViewModeFlags {
+					viewMode = ViewModeFlags
+					selected = -1
+					render()
+					lastFlagsRender = time.Now()
+				}
 			case 'r', 'R':
 				if viewMode == ViewModeUsage {
 					render()
@@ -529,9 +553,15 @@ func runLiveView(interval time.Duration, webEnabled bool, webPort int) (code int
 			if viewMode == ViewModeHistory && time.Since(lastHistoryRender) < 30*time.Second {
 				continue
 			}
+			if viewMode == ViewModeFlags && time.Since(lastFlagsRender) < ui.FlagFeedRefresh {
+				continue
+			}
 			render()
-			if viewMode == ViewModeHistory {
+			switch viewMode {
+			case ViewModeHistory:
 				lastHistoryRender = time.Now()
+			case ViewModeFlags:
+				lastFlagsRender = time.Now()
 			}
 		}
 	}

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Flags: csm now marks sessions where something notable happened — a tool call the harness refused, a move to a more permissive permission mode, a sandbox bypass, `sudo`, a force push, `rm -rf` outside the project, a download piped into a shell. Rows carry an `[!N]` badge, the web detail panel gains a Flags tab, and a new feed (`!` in the terminal, the Flags tab on the dashboard) lists everything from the last N days across both agents. It reports what already happened; it prevents nothing, and a command it does not recognise leaves no trace
+
+### Changed
+
+- The `[!S]` unsandboxed marker is now a flag like any other, so it says when the bypass happened and which command asked. `has_unsandboxed` is gone from the session JSON; use `flags`
+
+### Fixed
+
+- Opening the web dashboard directly on `#usage` left the panel stuck on "Loading usage"
+
 ## [1.3.1] - 2026-09-14
 
 ### Added

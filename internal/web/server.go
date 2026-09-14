@@ -47,6 +47,8 @@ func (s *Server) Start(ctx context.Context) (<-chan error, error) {
 	mux.HandleFunc("/api/history", handleHistory)
 	mux.HandleFunc("/api/sessions/timeline", handleTimeline)
 	mux.HandleFunc("/api/sessions/metrics", handleMetrics)
+	mux.HandleFunc("/api/sessions/flags", handleFlags)
+	mux.HandleFunc("/api/flags", handleFlagFeed)
 	mux.HandleFunc("/api/usage", handleUsage)
 	mux.HandleFunc("/api/quota", handleQuota)
 	mux.HandleFunc("/api/claude-status", handleClaudeStatus)

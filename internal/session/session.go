@@ -58,14 +58,19 @@ type Session struct {
 	// Empty means the data below is complete. Anything else means some of it
 	// is missing, and the UI marks the row so the numbers are not read as
 	// measurements.
-	Degraded       string     `json:"degraded,omitempty"`
-	GitBranch      string     `json:"git_branch,omitempty"`      // Current git branch
-	HasUnsandboxed bool       `json:"has_unsandboxed,omitempty"` // True if any command bypassed sandbox
-	ContextPercent float64    `json:"context_percent,omitempty"` // Percentage of context window used
-	ContextTokens  int        `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
-	Model          string     `json:"model,omitempty"`           // Model id from the latest assistant usage (e.g. "claude-opus-4-7")
-	SessionTitle   string     `json:"session_title,omitempty"`   // Custom title set by user/Claude
-	Subagents      []Subagent `json:"subagents,omitempty"`       // Live subagents spawned by this session
+	Degraded  string `json:"degraded,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"` // Current git branch
+	// Flags summarises the notable things csm recognised in this session's log.
+	// Only the counts travel on the row; the flags themselves are per-session
+	// detail, the same split the token metrics already make. Empty means csm
+	// recognised nothing, which is not the same as the session being safe --
+	// see flags.go.
+	Flags          FlagSummary `json:"flags,omitzero"`
+	ContextPercent float64     `json:"context_percent,omitempty"` // Percentage of context window used
+	ContextTokens  int         `json:"context_tokens,omitempty"`  // Total input tokens from last usage entry
+	Model          string      `json:"model,omitempty"`           // Model id from the latest assistant usage (e.g. "claude-opus-4-7")
+	SessionTitle   string      `json:"session_title,omitempty"`   // Custom title set by user/Claude
+	Subagents      []Subagent  `json:"subagents,omitempty"`       // Live subagents spawned by this session
 }
 
 // LogEntry represents a single line in the JSONL log
@@ -473,6 +478,7 @@ func Discover() ([]Session, error) {
 	// Evict parse-cache entries for logs no longer in the active set, keeping the
 	// cache bounded to the current working set over a long-running server.
 	pruneParseCache(liveFiles)
+	pruneFlagScanCache(liveFiles)
 
 	// Sort by status priority, then by last activity
 	sort.Slice(sessions, func(i, j int) bool {
@@ -657,7 +663,6 @@ type parsedLog struct {
 	title          string
 	lastMessage    string
 	gitBranch      string
-	hasUnsandboxed bool
 	contextPercent float64
 	contextTokens  int
 	model          string
@@ -764,7 +769,6 @@ func parseLogFileWithLimit(logFile string, keep int, maxLineBytes int) (parsedLo
 	// Derive fields that only depend on the file contents.
 	pl.lastMessage = extractLastAssistantMessage(entries)
 	pl.gitBranch = extractGitBranch(entries)
-	pl.hasUnsandboxed = detectUnsandboxedCommands(entries)
 	pl.contextPercent, pl.contextTokens, pl.model = extractContextUsage(entries)
 	for i := len(entries) - 1; i >= 0; i-- {
 		if !entries[i].Timestamp.IsZero() {
@@ -809,6 +813,17 @@ func parseSession(projectName, logFile string, isRunning bool, pid int, orphaned
 		session.Degraded = err.Error()
 	}
 
+	// Flags are read separately from the parse, and incrementally: pl keeps only
+	// the last 100 entries, but a flag is worth remembering for the whole
+	// session -- a sudo in the first turn of a thousand-turn run is exactly the
+	// event this is for. Reading only the appended bytes is what makes covering
+	// the whole file cheaper than the parse that covers a hundred entries of it.
+	flags, flagErr := scanClaudeFlags(logFile, info.Size())
+	if flagErr != nil && session.Degraded == "" {
+		session.Degraded = flagErr.Error()
+	}
+	session.Flags = summarizeFlags(flags)
+
 	applyParsedLog(&session, pl, isRunning, pid, orphaned, info.ModTime())
 	return session, nil
 }
@@ -828,7 +843,6 @@ func applyParsedLog(session *Session, pl parsedLog, isRunning bool, pid int, orp
 	session.Summary = pl.summary
 	session.LastMessage = pl.lastMessage
 	session.GitBranch = pl.gitBranch
-	session.HasUnsandboxed = pl.hasUnsandboxed
 	session.ContextPercent = pl.contextPercent
 	session.ContextTokens = pl.contextTokens
 	session.Model = pl.model
@@ -902,26 +916,6 @@ func extractGitBranch(entries []LogEntry) string {
 		}
 	}
 	return ""
-}
-
-// detectUnsandboxedCommands checks if any Bash commands ran with sandbox disabled
-func detectUnsandboxedCommands(entries []LogEntry) bool {
-	for _, entry := range entries {
-		if entry.Type != "assistant" || entry.Message == nil {
-			continue
-		}
-		for _, content := range entry.Message.Content {
-			if content.Type == "tool_use" && content.Name == "Bash" && len(content.Input) > 0 {
-				var input BashToolInput
-				if json.Unmarshal(content.Input, &input) == nil {
-					if input.DangerouslyDisableSandbox {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
 }
 
 // extractContextUsage extracts context usage from the last assistant entry with usage data.
