@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,6 +40,17 @@ const (
 	SymbolWaiting    = "◉"
 	SymbolInactive   = "◌"
 )
+
+// flagColor maps a flag severity onto the palette the rest of the dashboard
+// already uses for trouble: red is "look at this now", yellow is "look at
+// this". An unrecognised severity gets the quieter of the two rather than the
+// louder one, so a future tier cannot shout by accident.
+func flagColor(worst session.Severity) string {
+	if worst == session.SeverityCritical || worst == session.SeverityHigh {
+		return Red
+	}
+	return Yellow
+}
 
 // RenderList renders sessions as a simple list (for -l flag)
 func RenderList(sessions []session.Session) {
@@ -278,7 +290,7 @@ func emptyLiveMessage(filter session.Harness) string {
 // dropping the key from the footer while its effect was still on screen left
 // the user filtered into a view with no advertised way out.
 func liveHelpKeys(mixed bool, filter session.Harness) string {
-	keys := "↑↓: select | Enter: jump | h: history | u: usage"
+	keys := "↑↓: select | Enter: jump | h: history | u: usage | !: flags"
 	if mixed || filter != "" {
 		keys += " | f: filter"
 	}
@@ -775,9 +787,13 @@ func formatProject(s session.Session, maxLen int, showHarness bool) string {
 		add(Yellow, "[?]")
 	}
 
-	// Unsandboxed indicator (security warning)
-	if s.HasUnsandboxed {
-		add(Yellow, "[!S]")
+	// Flags: what csm recognised in the log. The count is on the badge because
+	// one escalation and fifteen are different situations, and the colour is the
+	// worst severity so a row cannot look calm while carrying a critical flag.
+	// There is deliberately no badge for zero: csm cannot see a command it does
+	// not recognise, so an unbadged row means "nothing recognised", not "safe".
+	if n := s.Flags.Total(); n > 0 {
+		add(flagColor(s.Flags.Worst), "[!"+strconv.Itoa(n)+"]")
 	}
 
 	// Drop suffixes from the end until they fit, keeping at least 4 chars for the name

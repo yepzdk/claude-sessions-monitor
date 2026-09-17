@@ -116,7 +116,7 @@ func RenderUsage(usage *session.UsageStats, apiQuota *session.APIQuota, showFoot
 
 	// Footer
 	if showFooter {
-		fmt.Fprintf(&buf, "%s%sr: refresh | l: live | h: history | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
+		fmt.Fprintf(&buf, "%s%sr: refresh | l: live | h: history | !: flags | Ctrl+C: quit%s%s", nl, Dim, Reset, nl)
 	}
 
 	fmt.Print(buf.String())

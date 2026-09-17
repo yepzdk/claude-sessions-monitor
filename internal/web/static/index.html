@@ -14,6 +14,7 @@
             <a href="#live" class="tab active" data-tab="live">Live Sessions</a>
             <a href="#history" class="tab" data-tab="history">History</a>
             <a href="#usage" class="tab" data-tab="usage">Usage</a>
+            <a href="#flags" class="tab" data-tab="flags">Flags</a>
         </nav>
         <div id="header-quota" class="header-quota"></div>
         <div id="claude-status"></div>
@@ -60,6 +61,21 @@
                 <div class="state"><div class="state-title">Loading usage</div></div>
             </div>
         </section>
+
+        <section id="flags-view" class="view">
+            <div class="history-controls">
+                <select id="flags-days">
+                    <option value="1">Last 24h</option>
+                    <option value="3">Last 3 days</option>
+                    <option value="7" selected>Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                </select>
+            </div>
+            <div id="flags-content">
+                <div class="state"><div class="state-title">Loading flags</div></div>
+            </div>
+        </section>
     </main>
 
     <div id="detail-overlay" class="detail-overlay hidden">
@@ -71,12 +87,16 @@
             <div class="detail-tabs">
                 <button type="button" class="detail-tab active" data-detail="metrics">Metrics</button>
                 <button type="button" class="detail-tab" data-detail="timeline">Timeline</button>
+                <button type="button" class="detail-tab" data-detail="flags">Flags</button>
             </div>
             <div id="detail-metrics" class="detail-content active">
                 <div class="state"><div class="state-title">Loading metrics</div></div>
             </div>
             <div id="detail-timeline" class="detail-content">
                 <div class="state"><div class="state-title">Loading timeline</div></div>
+            </div>
+            <div id="detail-flags" class="detail-content">
+                <div class="state"><div class="state-title">Loading flags</div></div>
             </div>
         </div>
     </div>

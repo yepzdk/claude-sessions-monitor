@@ -23,11 +23,14 @@
     const historySearch = document.getElementById('history-search');
     const historyDays = document.getElementById('history-days');
     const usageContent = document.getElementById('usage-content');
+    const flagsContent = document.getElementById('flags-content');
+    const flagsDays = document.getElementById('flags-days');
     const detailOverlay = document.getElementById('detail-overlay');
     const detailTitle = document.getElementById('detail-title');
     const detailClose = document.getElementById('detail-close');
     const detailMetrics = document.getElementById('detail-metrics');
     const detailTimeline = document.getElementById('detail-timeline');
+    const detailFlags = document.getElementById('detail-flags');
     const connStatus = document.getElementById('connection-status');
     const claudeStatusEl = document.getElementById('claude-status');
     const headerQuotaEl = document.getElementById('header-quota');
@@ -170,13 +173,10 @@
         statusBar.style.display = view === 'live' ? '' : 'none';
         if (view === 'history') loadHistory();
         if (view === 'usage') loadUsage();
+        if (view === 'flags') loadFlagFeed();
         if (Date.now() - headerQuotaFetchedAt > HEADER_QUOTA_POLL_MS) loadHeaderQuota();
         window.location.hash = view;
     }
-
-    // Init from hash
-    const initHash = window.location.hash.replace('#', '');
-    if (['history', 'usage'].includes(initHash)) switchView(initHash);
 
     // --- Claude service status ---
     let claudeStatusInterval = null;
@@ -503,6 +503,42 @@
         return html;
     }
 
+    // What each rule id means, in the words the panel shows. Keeping the map
+    // here rather than sending prose from the server keeps the wire payload to
+    // an id and lets the wording change without a rescan.
+    //
+    // Every rule id in internal/session must appear here. A missing one falls
+    // back to the raw id, which is readable but reads like a leak.
+    const FLAG_LABELS = {
+        // The harness's own verdicts.
+        'sandbox-bypass': 'Sandbox disabled',
+        'permission-escalated': 'Permission mode raised',
+        'bypass-mode': 'Permission prompts bypassed',
+        'permission-denied': 'Tool call refused',
+        'classifier-blocked': 'Blocked by auto-mode classifier',
+        'user-rule-violation': 'User rule matched',
+        // csm's own reading of a command.
+        'recursive-delete': 'Recursive delete outside the project',
+        'privilege-escalation': 'Ran as root',
+        'force-push': 'Force push',
+        'history-rewrite': 'Git history rewritten',
+        'protected-branch-push': 'Push to a protected branch',
+        'hard-reset': 'Hard reset',
+        'world-writable': 'Made world-writable',
+        'remote-code-exec': 'Piped a download into a shell',
+    };
+
+    // The badge counts flags and takes its colour from the worst one, so a row
+    // cannot look calm while carrying a high-severity flag. There is no badge
+    // for zero on purpose: csm only sees what it recognises, and a "clean"
+    // marker would claim more than the scan can support.
+    function flagBadge(flags) {
+        if (!flags || !flags.worst) return '';
+        const total = (flags.medium || 0) + (flags.high || 0) + (flags.critical || 0);
+        const parts = ['critical', 'high', 'medium'].filter((k) => flags[k]).map((k) => `${flags[k]} ${k}`);
+        return `<span class="badge session-flag-badge sev-${esc(flags.worst)}" title="${esc(parts.join(', '))}">!${total}</span>`;
+    }
+
     // grouped says whether a header above this card already names its
     // project: when it does, the branch leads the row instead; when the
     // project has no header of its own, a tag carries its identity.
@@ -549,6 +585,7 @@
                     ${s.origin && s.origin.category ? `<span class="badge session-origin origin-${esc(s.origin.category)}" title="${esc(s.origin.app || '')}">${esc(s.origin.display || s.origin.app || '')}</span>` : ''}
                     ${(s.context_window || 0) > 200000 ? `<span class="badge session-model-badge" title="${esc(s.model)}">1M</span>` : ''}
                     ${s.degraded ? `<span class="badge session-degraded-badge" title="${esc(s.degraded)}">?</span>` : ''}
+                    ${flagBadge(s.flags)}
                     <span class="session-context" title="${esc(s.model || '')}">
                         <span class="context-bar"><span class="context-fill ${ctxCls}" style="width:${Math.min(pct, 100)}%"></span></span>
                         <span>${pct > 0 ? Math.round(pct) + '%' : '-'}</span>
@@ -773,6 +810,86 @@
     historySearch.addEventListener('input', renderHistory);
     historyDays.addEventListener('change', loadHistory);
 
+    // --- Flags feed ---
+    // The counterpart to the per-session Flags tab: not "what is this session
+    // doing" but "what did the agents on this machine do while nobody watched".
+    let flagFeedLoading = false;
+
+    async function loadFlagFeed() {
+        if (flagFeedLoading) return;
+        flagFeedLoading = true;
+        flagsContent.innerHTML = stateBlock({ title: 'Loading flags' });
+        try {
+            const events = await fetchJSON(`/api/flags?days=${encodeURIComponent(flagsDays.value)}`);
+            renderFlagFeed(events);
+        } catch (err) {
+            flagsContent.innerHTML = stateBlock({
+                title: 'Could not load flags',
+                hint: esc(err.message || 'the session logs could not be read'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(flagsContent, loadFlagFeed);
+        } finally {
+            flagFeedLoading = false;
+        }
+    }
+
+    function renderFlagFeed(events) {
+        const note =
+            '<p class="flag-note">csm reads logs after the fact. Everything here already happened, and a command it does not recognise leaves no trace at all.</p>';
+
+        if (!events || !events.length) {
+            flagsContent.innerHTML =
+                note +
+                stateBlock({
+                    title: 'Nothing recognised',
+                    hint: 'No permission change, refusal, sandbox bypass or notable command in this range.',
+                });
+            return;
+        }
+
+        // Which agent produced a flag is worth naming only when the feed holds
+        // more than one, the same rule the session rows follow. On a
+        // single-agent machine every row would carry the same word.
+        const mixed = new Set(events.map((e) => e.harness)).size > 1;
+
+        // The server already sorts newest first; grouping by day gives the feed
+        // the same date spine the history view has.
+        let html = note + '<ul class="flag-list flag-feed">';
+        let lastDay = '';
+        for (const e of events) {
+            const day = e.at ? dateGroup(e.at) : '';
+            if (day !== lastDay) {
+                html += `<li class="flag-day">${esc(day)}</li>`;
+                lastDay = day;
+            }
+            const time = e.at ? new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const label = FLAG_LABELS[e.rule] || e.rule;
+            html += `<li class="flag-row sev-${esc(e.severity)}" data-logfile="${esc(e.log_file || '')}" data-project="${esc(e.project || '')}">
+                <div class="flag-head">
+                    <span class="badge flag-sev sev-${esc(e.severity)}">${esc(e.severity)}</span>
+                    <span class="flag-label">${esc(label)}</span>
+                    <span class="flag-project">${esc(e.project || '')}</span>
+                    ${mixed && e.harness ? `<span class="flag-harness">${esc(e.harness)}</span>` : ''}
+                    <span class="flag-time">${esc(time)}</span>
+                </div>
+                ${e.detail ? `<div class="flag-detail">${esc(e.detail)}</div>` : ''}
+            </li>`;
+        }
+        flagsContent.innerHTML = html + '</ul>';
+    }
+
+    // Delegated for the same reason the history list is: a 90-day range is
+    // hundreds of rows, rebuilt whenever the range changes.
+    flagsContent.addEventListener('click', (e) => {
+        const row = e.target.closest('.flag-row');
+        if (!row || !row.dataset.logfile) return;
+        openDetail(row.dataset.logfile, { project: row.dataset.project });
+    });
+
+    flagsDays.addEventListener('change', loadFlagFeed);
+
     // --- Usage view ---
     let usageLoading = false;
     let usageLastUpdated = null;
@@ -946,6 +1063,7 @@
     // the timeline: opening session A and switching to B before A's request
     // lands would otherwise render A's metrics under B's title.
     let metricsLoadToken = 0;
+    let flagsLoadToken = 0;
     let timelineLoadMoreClicks = 0;
 
     function openDetail(logFile, { project = '', branch = '', status = '' } = {}) {
@@ -960,15 +1078,25 @@
         detailTitle.innerHTML = `${status ? `<span class="session-status ${statusClass(status)}" title="${esc(status)}">${statusSymbol(status)}</span>` : ''}<span class="detail-project">${esc(project)}</span>${branch ? `<span class="session-branch">${esc(branch)}</span>` : ''}`;
         detailOverlay.classList.remove('hidden');
 
-        // Reset to metrics tab
-        document
-            .querySelectorAll('.detail-tab')
-            .forEach((t) => t.classList.toggle('active', t.dataset.detail === 'metrics'));
-        detailMetrics.classList.add('active');
-        detailTimeline.classList.remove('active');
+        showDetailTab('metrics');
 
         loadMetrics(logFile);
         loadTimeline(logFile, true);
+        loadFlags(logFile);
+    }
+
+    // One place decides which tab is showing. Three panels toggled by hand at
+    // two call sites is how a fourth one ends up visible under a third one's
+    // title.
+    const DETAIL_PANELS = { metrics: detailMetrics, timeline: detailTimeline, flags: detailFlags };
+
+    function showDetailTab(name) {
+        document
+            .querySelectorAll('.detail-tab')
+            .forEach((t) => t.classList.toggle('active', t.dataset.detail === name));
+        for (const [key, el] of Object.entries(DETAIL_PANELS)) {
+            el.classList.toggle('active', key === name);
+        }
     }
 
     detailClose.addEventListener('click', () => detailOverlay.classList.add('hidden'));
@@ -980,11 +1108,7 @@
     });
 
     document.querySelectorAll('.detail-tab').forEach((tab) => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.detail-tab').forEach((t) => t.classList.toggle('active', t === tab));
-            detailMetrics.classList.toggle('active', tab.dataset.detail === 'metrics');
-            detailTimeline.classList.toggle('active', tab.dataset.detail === 'timeline');
-        });
+        tab.addEventListener('click', () => showDetailTab(tab.dataset.detail));
     });
 
     async function loadMetrics(logFile) {
@@ -1008,6 +1132,78 @@
             wireRetry(detailMetrics, () => loadMetrics(logFile));
         }
     }
+
+    async function loadFlags(logFile) {
+        const token = ++flagsLoadToken;
+        detailFlags.innerHTML = stateBlock({ title: 'Loading flags' });
+        try {
+            const flags = await fetchJSON(`/api/sessions/flags?file=${encodeURIComponent(logFile)}`);
+            if (token !== flagsLoadToken) return;
+            renderFlags(flags);
+        } catch (err) {
+            if (token !== flagsLoadToken) return;
+            detailFlags.innerHTML = stateBlock({
+                title: 'Could not load flags',
+                hint: esc(err.message || 'the log file could not be read'),
+                error: true,
+                retry: true,
+            });
+            wireRetry(detailFlags, () => loadFlags(logFile));
+        }
+    }
+
+    // Newest first: the question a flag list answers is "what just happened",
+    // and a session that has been running all day puts the answer at the bottom
+    // of a chronological list.
+    function renderFlags(flags) {
+        if (!flags || !flags.length) {
+            detailFlags.innerHTML = stateBlock({
+                title: 'Nothing flagged',
+                hint: 'csm recognised no permission change, refusal or sandbox bypass in this log. It cannot see what it does not recognise, so this is not a clean bill of health.',
+            });
+            return;
+        }
+
+        const rows = flags
+            .slice()
+            .reverse()
+            .map((f) => {
+                const when = f.at ? new Date(f.at).toLocaleString() : '';
+                const label = FLAG_LABELS[f.rule] || f.rule;
+                const jump = f.tool_use_id
+                    ? `<button type="button" class="flag-jump" data-tool-use-id="${esc(f.tool_use_id)}">Show in timeline</button>`
+                    : '';
+                return `<li class="flag-row sev-${esc(f.severity)}">
+                    <div class="flag-head">
+                        <span class="badge flag-sev sev-${esc(f.severity)}">${esc(f.severity)}</span>
+                        <span class="flag-label">${esc(label)}</span>
+                        ${f.tool ? `<span class="flag-tool">${esc(f.tool)}</span>` : ''}
+                        <span class="flag-time">${esc(when)}</span>
+                    </div>
+                    ${f.detail ? `<div class="flag-detail">${esc(f.detail)}</div>` : ''}
+                    ${jump}
+                </li>`;
+            })
+            .join('');
+
+        detailFlags.innerHTML = `<p class="flag-note">csm reads logs after the fact. These are things that already happened; nothing here was prevented.</p><ul class="flag-list">${rows}</ul>`;
+    }
+
+    // A flag names a tool call, not a page of the timeline, so the jump has to
+    // load the whole log before it can find the entry. That is why the button
+    // says what it will do rather than looking like a scroll.
+    detailFlags.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.flag-jump');
+        if (!btn || !currentLogFile) return;
+        const id = btn.dataset.toolUseId;
+        showDetailTab('timeline');
+        await loadTimeline(currentLogFile, true, 'all');
+        const target = detailTimeline.querySelector(`[data-tool-use-id="${CSS.escape(id)}"]`);
+        if (!target) return;
+        target.open = true;
+        target.scrollIntoView({ block: 'center' });
+        target.classList.add('timeline-tool-found');
+    });
 
     // The four kinds of token a session spends. Fixed order, fixed colour --
     // a slot never changes hue because a value is zero or the list is filtered.
@@ -1276,7 +1472,7 @@
                     if (c.type === 'text' && c.text) {
                         html += `<div class="timeline-text">${esc(c.text)}</div>`;
                     } else if (c.type === 'tool_use') {
-                        html += `<details class="timeline-tool"><summary>${esc(c.tool || 'tool')}</summary>`;
+                        html += `<details class="timeline-tool" data-tool-use-id="${esc(c.tool_use_id || '')}"><summary>${esc(c.tool || 'tool')}</summary>`;
                         if (c.input) {
                             let formatted = c.input;
                             try {
@@ -1288,7 +1484,7 @@
                         }
                         html += '</details>';
                     } else if (c.type === 'tool_result' && c.text) {
-                        html += `<details class="timeline-tool"><summary>tool result</summary>`;
+                        html += `<details class="timeline-tool" data-tool-use-id="${esc(c.tool_use_id || '')}"><summary>tool result</summary>`;
                         html += `<div class="timeline-tool-input">${esc(c.text)}</div>`;
                         html += '</details>';
                     }
@@ -1522,4 +1718,11 @@
         // this inside double-quoted HTML attributes, so escape those too.
         return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+
+    // Init from hash, last: switchView calls a view's loader, and every loader
+    // reads a `let` guard declared further down this IIFE. Run from where the
+    // tab navigation is defined, `#usage` and `#flags` both threw a temporal
+    // dead zone ReferenceError and the panel sat on "Loading" forever.
+    const initHash = window.location.hash.replace('#', '');
+    if (['history', 'usage', 'flags'].includes(initHash)) switchView(initHash);
 })();

@@ -152,3 +152,56 @@ func calcUsageLayout(width int) usageLayout {
 
 	return l
 }
+
+// Column width constraints for the flags feed
+const (
+	fixedFlagWhenWidth     = 12 // "Sep 14 10:32"
+	fixedFlagSeverityWidth = 8  // "critical"
+	fixedFlagRuleWidth     = 22 // the longest rule id, "protected-branch-push"
+	prefFlagProjectWidth   = 28
+	minFlagProjectWidth    = 12
+	minFlagDetailWidth     = 20
+)
+
+// flagLayout holds the computed column widths for the flags feed.
+type flagLayout struct {
+	when       int
+	severity   int
+	project    int
+	rule       int
+	detail     int
+	totalWidth int
+}
+
+// calcFlagLayout computes column widths for the flags feed.
+//
+// Unlike the other three tables, the slack goes to the *last* column: the detail
+// is a command, and a command truncated at 30 characters is a command nobody can
+// identify. The project column is capped so a deep monorepo path cannot spend
+// the whole line.
+func calcFlagLayout(width int) flagLayout {
+	l := flagLayout{
+		when:     fixedFlagWhenWidth,
+		severity: fixedFlagSeverityWidth,
+		rule:     fixedFlagRuleWidth,
+		project:  prefFlagProjectWidth,
+	}
+
+	// 4 gaps between 5 columns.
+	const columnGaps = 4
+	fixed := l.when + l.severity + l.rule + columnGaps
+	if width-fixed-l.project < minFlagDetailWidth {
+		l.project = width - fixed - minFlagDetailWidth
+	}
+	if l.project < minFlagProjectWidth {
+		l.project = minFlagProjectWidth
+	}
+
+	l.detail = width - fixed - l.project
+	if l.detail < minFlagDetailWidth {
+		l.detail = minFlagDetailWidth
+	}
+
+	l.totalWidth = l.when + l.severity + l.project + l.rule + l.detail + columnGaps
+	return l
+}

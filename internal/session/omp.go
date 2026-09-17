@@ -412,6 +412,14 @@ func parseOMPSession(bucketName, cwd, logFile string, isRunning bool, pid int,
 		session.Degraded = err.Error()
 	}
 
+	// Scanned separately from the parse and across the whole file; see the same
+	// call in parseSession for why.
+	flags, flagErr := scanOMPFlags(logFile, info.Size())
+	if flagErr != nil && session.Degraded == "" {
+		session.Degraded = flagErr.Error()
+	}
+	session.Flags = summarizeFlags(flags)
+
 	applyOMPParsedLog(&session, pl, isRunning, pid, orphaned, info.ModTime())
 	return session, nil
 }
@@ -422,10 +430,11 @@ func parseOMPSession(bucketName, cwd, logFile string, isRunning bool, pid int,
 // time and the running-process set.
 //
 // Deliberately left zero: ContextPercent, ContextTokens, ContextWindow,
-// GitBranch, HasUnsandboxed and Subagents. omp is multi-provider, so a context
-// window cannot be derived from the model id the way it can for Claude, and a
+// GitBranch, Flags and Subagents. omp is multi-provider, so a context window
+// cannot be derived from the model id the way it can for Claude, and a
 // percentage that is wrong is worse than a column that is blank. The other
-// three have no equivalent in omp's log at all.
+// three have no equivalent in omp's log at all: omp records no permission or
+// approval decision anywhere, so there is nothing to re-report.
 func applyOMPParsedLog(session *Session, pl ompParsedLog, isRunning bool, pid int, orphaned bool,
 	fileModTime time.Time) {
 	if pl.cwd != "" {

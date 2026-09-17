@@ -233,3 +233,52 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, metrics)
 }
+
+// handleFlags returns the flags recognised in one session's log.
+//
+// Separate from the session payload on purpose: an unattended run can
+// accumulate dozens of flags, and the session rows are rebroadcast to every SSE
+// client every two seconds. The rows carry the counts; this carries the list.
+func handleFlags(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("file")
+	if filePath == "" {
+		writeError(w, "file parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	flags, err := session.SessionFlags(filePath)
+	if err != nil {
+		writeError(w, "failed to read flags", http.StatusBadRequest)
+		return
+	}
+
+	// [] rather than null: fetchJSON treats a null body as a broken response,
+	// and "nothing was flagged" is the common case, not an error.
+	if flags == nil {
+		flags = []session.Flag{}
+	}
+	writeJSON(w, flags)
+}
+
+// handleFlagFeed returns every flag from the last N days, newest first, across
+// both harnesses. Unlike /api/sessions/flags it is not about one session: it
+// answers what the agents on this machine did while nobody was watching.
+func handleFlagFeed(w http.ResponseWriter, r *http.Request) {
+	const maxDays = 365
+	days := 7
+	if d := r.URL.Query().Get("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
+			days = min(parsed, maxDays)
+		}
+	}
+
+	events, err := session.DiscoverFlags(days)
+	if err != nil {
+		writeError(w, "failed to read flags", http.StatusInternalServerError)
+		return
+	}
+	if events == nil {
+		events = []session.FlaggedEvent{}
+	}
+	writeJSON(w, events)
+}

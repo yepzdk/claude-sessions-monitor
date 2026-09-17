@@ -15,6 +15,11 @@ type TimelineContent struct {
 	Text  string `json:"text,omitempty"`
 	Tool  string `json:"tool,omitempty"`  // tool name for tool_use
 	Input string `json:"input,omitempty"` // stringified JSON for tool_use
+	// ToolUseID is the call's id: the tool_use block's own id, or the id a
+	// tool_result answers. It is what lets a flag name the entry it came from,
+	// so a flag list can point into the timeline instead of describing a
+	// position in it.
+	ToolUseID string `json:"tool_use_id,omitempty"`
 }
 
 // TimelineEntry represents a single entry in a session timeline
@@ -49,37 +54,74 @@ type SessionMetrics struct {
 
 // ValidateLogFilePath checks that a log file path is under the Claude projects
 // directory and ends with .jsonl. Returns an error if the path is invalid.
+//
+// Claude-only, because its callers -- ParseTimeline and ParseMetrics -- decode
+// the Claude Code format and would report an omp log as an empty session rather
+// than as the wrong format. Readers that handle both harnesses use
+// validateSessionLogPath.
 func ValidateLogFilePath(filePath string) error {
 	projectsDir, err := ClaudeProjectsDir()
 	if err != nil {
 		return fmt.Errorf("cannot determine projects directory: %w", err)
 	}
-
-	absPath, err := filepath.Abs(filePath)
+	root, err := logPathRoot(filePath, projectsDir)
 	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
+		return err
 	}
-
-	// Evaluate symlinks to prevent traversal
-	realPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
-	}
-
-	realProjectsDir, err := filepath.EvalSymlinks(projectsDir)
-	if err != nil {
-		return fmt.Errorf("cannot resolve projects directory: %w", err)
-	}
-
-	if !strings.HasPrefix(realPath, realProjectsDir+string(filepath.Separator)) {
+	if root == "" {
 		return fmt.Errorf("path is not under Claude projects directory")
 	}
-
-	if !strings.HasSuffix(realPath, ".jsonl") {
-		return fmt.Errorf("path must end with .jsonl")
-	}
-
 	return nil
+}
+
+// validateSessionLogPath accepts a log under either harness's store and returns
+// the root it sits under, so the caller can pick the right reader for it.
+func validateSessionLogPath(filePath string) (string, error) {
+	var roots []string
+	if dir, err := ClaudeProjectsDir(); err == nil {
+		roots = append(roots, dir)
+	}
+	if dir, err := ompSessionsDir(); err == nil {
+		roots = append(roots, dir)
+	}
+	root, err := logPathRoot(filePath, roots...)
+	if err != nil {
+		return "", err
+	}
+	if root == "" {
+		return "", fmt.Errorf("path is not under a known session store")
+	}
+	return root, nil
+}
+
+// logPathRoot resolves filePath and returns whichever root contains it, or an
+// empty string when none does.
+//
+// Symlinks are evaluated on both sides before comparing: a prefix check against
+// an unresolved path is defeated by a symlink pointing out of the store, and
+// these paths arrive from an HTTP query parameter.
+func logPathRoot(filePath string, roots ...string) (string, error) {
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	if !strings.HasSuffix(realPath, ".jsonl") {
+		return "", fmt.Errorf("path must end with .jsonl")
+	}
+	for _, root := range roots {
+		realRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			continue // a store that does not exist cannot contain the path
+		}
+		if strings.HasPrefix(realPath, realRoot+string(filepath.Separator)) {
+			return realRoot, nil
+		}
+	}
+	return "", nil
 }
 
 // ParseTimeline reads a JSONL log file and returns paginated timeline entries.
@@ -282,11 +324,13 @@ func logEntryToTimeline(entry LogEntry) *TimelineEntry {
 				tc.Text = c.Text
 			case "tool_use":
 				tc.Tool = c.Name
+				tc.ToolUseID = c.ID
 				if len(c.Input) > 0 {
 					tc.Input = string(c.Input)
 				}
 			case "tool_result":
 				tc.Text = c.Text
+				tc.ToolUseID = c.ToolUseID
 			default:
 				tc.Text = c.Text
 			}
