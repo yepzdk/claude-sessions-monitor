@@ -588,10 +588,12 @@ formatter is off with it.
   state, because the live list is rebuilt from scratch on every scan (see the
   comment above their declaration in `app.js`).
 - Nothing is declared after the init-from-hash call that ends `app.js`. It
-  reaches a view's loader, every loader reads a `let` guard, and a guard
-  declared below it throws a temporal dead zone `ReferenceError` into a promise
-  nothing awaits — so the page loads fine and that one tab sits on "Loading"
-  forever. `TestNoTopLevelDeclarationAfterInitFromHash` keeps the order.
+  reaches a view's loader, loaders read top-level bindings — a `let` guard, the
+  data they assign into, the poll constants `switchView` touches on the way —
+  and any of those declared below it throws a temporal dead zone
+  `ReferenceError` into a promise nothing awaits, so the page loads fine and
+  that one tab sits on "Loading" forever.
+  `TestNoTopLevelDeclarationAfterInitFromHash` keeps the order.
 
 ## `internal/jump`
 
