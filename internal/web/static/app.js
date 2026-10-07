@@ -1719,10 +1719,13 @@
         return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    // Init from hash, last: switchView calls a view's loader, and every loader
-    // reads a `let` guard declared further down this IIFE. Run from where the
-    // tab navigation is defined, `#usage` and `#flags` both threw a temporal
-    // dead zone ReferenceError and the panel sat on "Loading" forever.
+    // Init from hash, last: switchView calls a view's loader, and the loaders
+    // read top-level bindings declared further down this IIFE. Run from where
+    // the tab navigation is defined, `#usage` and `#flags` both threw a
+    // temporal dead zone ReferenceError and the panel sat on "Loading" forever.
+    //
+    // Nothing below this line, therefore. That is the whole fix, and
+    // TestNoTopLevelDeclarationAfterInitFromHash is what keeps it true.
     const initHash = window.location.hash.replace('#', '');
     if (['history', 'usage', 'flags'].includes(initHash)) switchView(initHash);
 })();
