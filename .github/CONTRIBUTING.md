@@ -27,14 +27,23 @@ you should reuse.
 1. Branch off `main` — `feature/short-description`
 2. Make your change and run `make check` — gofmt, `go vet`, `make lint`, the
    build and the tests, which is exactly what CI runs
-3. Add an entry to the `[Unreleased]` section of `CHANGELOG.md`
-4. Open a pull request
+3. Open a pull request whose title is a Conventional Commit and whose
+   description says what changed and why — see below
 
-A changelog entry is one or two lines: what changed, and why a user cares.
-Leave the mechanism out. It belongs next to the code, where the comments
-already carry it, and a reader who wants it will look there. The same rule
-holds for `docs/ARCHITECTURE.md`: point at the comment that explains a
-decision instead of repeating it, so the two cannot drift apart.
+Do not edit `CHANGELOG.md` in your pull request. Several pull requests are
+usually open at once, and each adding an entry to the same `[Unreleased]`
+section meant each conflicted with the others. The changelog is written once
+per version, in the release pull request, from the pull requests merged since
+the last release.
+
+So your title and description are the release notes. Say what changed, and why
+a user cares, in a sentence or two the maintainer can turn into a changelog
+entry. If upgrading needs something done — a flag renamed, a file moved, a step
+in a particular order — say so in the description. Leave the mechanism out. It
+belongs next to the code, where the comments already carry it, and a reader who
+wants it will look there. The same rule holds for `docs/ARCHITECTURE.md`: point
+at the comment that explains a decision instead of repeating it, so the two
+cannot drift apart.
 
 CI runs `make check` on both Linux and macOS for every pull request.
 
@@ -122,6 +131,9 @@ Example: `fix: resolve stuck Working status on idle sessions`
 ## Releases
 
 Releases are triggered by pushing a tag, not by merging. Merging to `main`
-publishes nothing; a maintainer picks the version from what changed and pushes
-`vX.Y.Z`, which builds the binaries and updates the Homebrew formula. You do
-not need to bump any version yourself.
+publishes nothing. A maintainer opens a release pull request that adds the
+version's section to `CHANGELOG.md`, written from the merged pull requests and
+leaving out `chore`, `ci`, `test` and `build` changes, then pushes `vX.Y.Z`.
+That builds the binaries, publishes the section as the release notes and
+updates the Homebrew formula. You do not need to bump any version or touch the
+changelog yourself.

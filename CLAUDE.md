@@ -35,7 +35,7 @@ main.go     - CLI entry point and flag handling
 docs/ARCHITECTURE.md - Contributor map: data flow, status rules, ghosts, caches, test helpers
 ```
 
-Read `docs/ARCHITECTURE.md` before changing `internal/session`, and `.github/CONTRIBUTING.md` for the style, test and changelog rules.
+Read `docs/ARCHITECTURE.md` before changing `internal/session`, and `.github/CONTRIBUTING.md` for the style, test and release-notes rules.
 
 ## Development Workflow
 
@@ -67,6 +67,10 @@ The `main` branch is protected:
    git push -u origin feature/your-feature-name
    gh pr create
    ```
+   Do not touch `CHANGELOG.md` — only the release PR writes it. The PR title (a
+   Conventional Commit) and description are the release notes instead: say what
+   changed and why a user cares, and put anything an operator must do when
+   upgrading in the description.
 
 4. After review, merge the PR to `main`
 
@@ -74,15 +78,22 @@ The `main` branch is protected:
 
 ### Cutting a release
 
-`/csm-release` drives this end to end (`.claude/skills/csm-release/SKILL.md`): it rolls
-the changelog, opens the PR, tags `main` after you merge, and verifies the
-release, artifacts and Homebrew formula all landed. The manual steps below are
-what it does, and what to fall back on.
+`/csm-release` drives this end to end (`.claude/skills/csm-release/SKILL.md`): it
+writes the version's `CHANGELOG.md` section from the PRs merged since the last
+tag, opens the release PR, tags `main` after you merge, and verifies the
+release, its notes, artifacts and Homebrew formula all landed. The manual steps
+below are what it does, and what to fall back on.
 
 Releases are triggered by pushing a tag — merging to `main` does not release
 anything. This is deliberate: merges are cheap and frequent, releases are a
 decision, and letting every merge cut a patch produced runs of versions minutes
 apart that said nothing about what changed.
+
+Before tagging, merge a `chore: release vX.Y.Z` PR that adds a
+`## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`: prose written from the PRs
+merged since the last tag, grouped under the Keep a Changelog headings, leaving
+out `chore`, `ci`, `test` and `build` changes. If an old `## [Unreleased]`
+section still has entries, fold them into the new section and remove it.
 
 ```bash
 git checkout main && git pull
@@ -92,12 +103,16 @@ git push origin v0.4.0
 
 That triggers `.github/workflows/release.yaml`, which does everything in one job:
    - Builds binaries for darwin/linux × amd64/arm64 (plus `.deb`/`.rpm` packages)
-   - Creates the GitHub release with binaries attached and generated notes
+   - Creates the GitHub release with binaries attached and the tag's
+     `CHANGELOG.md` section as its notes; a tag with no section fails the job
+     before anything is built
    - Hashes the built binaries, rewrites `Formula/csm.rb`, and commits it to
      `yepzdk/homebrew-tools` using `HOMEBREW_TAP_PAT`
 
-Pick the version from what actually changed since the last tag — `CHANGELOG.md`'s
-`[Unreleased]` section is the place to look. Nothing computes it for you.
+Pick the version from what actually changed since the last tag — the PRs merged
+since then are the place to look
+(`gh pr list --state merged --search "merged:>=<last tag date>"`). Nothing
+computes it for you.
 
 It also publishes the AUR package `csm-bin` — see below — in a second job.
 
