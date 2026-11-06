@@ -15,6 +15,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # The release notes are the tag's section of CHANGELOG.md, written in the
+      # release PR, not GitHub's generated list of PR titles. This runs before
+      # the build so a tag without its section stops here, with nothing
+      # published, instead of shipping a release that says nothing.
+      - name: Extract release notes
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          # Everything between "## [X.Y.Z]" and the next "## [" heading.
+          # index() rather than a regex, so the dots in the version are literal.
+          awk -v head="## [${VERSION}]" '
+            /^## \[/ { if (found) exit; found = index($0, head) == 1; next }
+            found
+          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
+          if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/release-notes.md"; then
+            echo "CHANGELOG.md has no ## [${VERSION}] section with entries" >&2
+            exit 1
+          fi
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -54,7 +75,7 @@ jobs:
             dist/csm-*.x86_64.rpm
             dist/csm-*.aarch64.rpm
             dist/checksums.txt
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
 
       # Update the Homebrew formula directly from the binaries we just built,
       # rather than firing a repository_dispatch that makes the tap re-download
