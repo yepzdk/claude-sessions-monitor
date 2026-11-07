@@ -478,6 +478,71 @@ func TestDiscoverOMPFindsSessionsInBuckets(t *testing.T) {
 	}
 }
 
+func TestDiscoverOMPMatchesCanonicalWorkingDirectories(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	physical := filepath.Join(root, "physical", "project")
+	other := filepath.Join(root, "other", "project")
+	for _, dir := range []string{physical, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(root, "missing")
+
+	for _, tc := range []struct {
+		name       string
+		logCWD     string
+		processCWD string
+		want       Status
+	}{
+		{"symlink in log", alias, physical, StatusWorking},
+		{"symlink in process", physical, alias, StatusWorking},
+		{"different directories", physical, other, StatusInactive},
+		{"unavailable exact path", missing, missing, StatusWorking},
+		{"different unavailable paths", missing, filepath.Join(root, "absent"), StatusInactive},
+		{"empty header", "", physical, StatusInactive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetParseCache()
+			t.Cleanup(resetParseCache)
+			sessions := filepath.Join(t.TempDir(), "sessions")
+			t.Setenv(ompSessionsDirEnv, sessions)
+			bucket := filepath.Join(sessions, "workspace")
+			if err := os.MkdirAll(bucket, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			log := fmt.Sprintf("{\"type\":\"session\",\"id\":\"canonical-cwd\",\"cwd\":%q}\n%s\n",
+				tc.logCWD, toolStart(ts(-20*time.Second), "call-a", "bash", "Checking project"))
+			if err := os.WriteFile(filepath.Join(bucket, "2026_canonical-cwd.jsonl"), []byte(log), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			procs := []harnessProcess{{pid: 77, harness: HarnessOMP, cwd: tc.processCWD}}
+			got := discoverOMP(procs, map[string]struct{}{})
+			if len(got) != 1 {
+				t.Fatalf("got %d sessions, want the recorded session", len(got))
+			}
+			if got[0].Status != tc.want {
+				t.Errorf("status = %q, want %q for log cwd %q and process cwd %q",
+					got[0].Status, tc.want, tc.logCWD, tc.processCWD)
+			}
+			if got[0].CWD != tc.logCWD {
+				t.Errorf("display cwd = %q, want original recorded path %q", got[0].CWD, tc.logCWD)
+			}
+			if got[0].PIDConfident || got[0].GhostPID != 0 {
+				t.Error("directory matching alone must not grant confident process ownership")
+			}
+		})
+	}
+}
+
 // A missing store is the normal case for anyone running only one of the two
 // agents, and must not fail the sweep that also carries the Claude sessions.
 func TestDiscoverOMPToleratesMissingStore(t *testing.T) {

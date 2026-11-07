@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Opening the web dashboard directly on `#usage` left the panel stuck on "Loading usage"
+- Live Oh My Pi sessions no longer appear inactive when their working directory uses a symlink, including `/tmp` versus `/private/tmp` on macOS.
 
 ## [1.3.1] - 2026-09-14
 

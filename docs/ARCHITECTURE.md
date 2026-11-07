@@ -103,7 +103,8 @@ omp's bucket encoding is home-relative, has had several spellings, and is
 migrated best-effort on access, so csm does not reimplement it. Instead the
 working directory is read from the newest log's header through the parse cache
 (one `listLogsByRecency` per bucket, no second scan) and joined to processes
-keyed by raw cwd. `selectActiveLogs` is shared with the Claude path; it already
+keyed by resolved cwd (`ompWorkingDirectoryKey`), preserving recorded paths for
+display. `selectActiveLogs` is shared with the Claude path; it already
 skips directories, which is what excludes omp's per-session artifact directory
 sitting beside each log.
 
