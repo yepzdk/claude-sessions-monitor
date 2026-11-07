@@ -292,6 +292,19 @@ func ompLastAssistant(entries []ompEntry) (text, model string) {
 	return "", model
 }
 
+// ompWorkingDirectoryKey joins logical paths recorded by omp to physical paths
+// reported by the OS, e.g. /tmp and /private/tmp on macOS. Keep the original key
+// when resolution fails; unavailable directories must not collapse to one key.
+func ompWorkingDirectoryKey(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		return resolved
+	}
+	return cwd
+}
+
 // discoverOMP returns the omp sessions worth showing, given the process scan
 // Discover already made. liveFiles collects the logs it parsed so the caller can
 // prune the parse cache.
@@ -311,10 +324,9 @@ func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Sessio
 		return nil
 	}
 
-	// omp buckets logs by its own encoding of the working directory, so the
-	// processes are keyed by the raw cwd and joined to a bucket through the cwd
-	// recorded in that bucket's newest log.
-	pidsByCWD := pidsByDir(procs, HarnessOMP, func(cwd string) string { return cwd })
+	// Resolve both sides of the directory join without changing displayed paths
+	// or the terminal evidence required for confident process ownership.
+	pidsByCWD := pidsByDir(procs, HarnessOMP, ompWorkingDirectoryKey)
 	procByPID := procsByPID(procs)
 	// Breadcrumbs only matter for pairing a log to a pid, so with no omp process
 	// running there is nothing for them to decide and the directory read is pure
@@ -343,7 +355,7 @@ func discoverOMP(procs []harnessProcess, liveFiles map[string]struct{}) []Sessio
 		newest := logs[0]
 		header, _ := cachedParseOMPLogFile(newest.path, newest.modTime, newest.size)
 		cwd := header.cwd
-		pids := pidsByCWD[cwd]
+		pids := pidsByCWD[ompWorkingDirectoryKey(cwd)]
 
 		for _, logFile := range selectActiveLogs(logs, len(pids)) {
 			liveFiles[logFile] = struct{}{}
