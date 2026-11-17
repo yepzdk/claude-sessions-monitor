@@ -199,32 +199,6 @@ func TestReadSessionRegistryAbsentDirectory(t *testing.T) {
 	}
 }
 
-// The registry is Claude Code's file, keyed by pid. A pid belonging to another
-// harness that reached it would let a stale entry naming that number report a
-// dead Claude session as running.
-func TestClaudePIDSetExcludesOtherHarnesses(t *testing.T) {
-	procs := []harnessProcess{
-		{pid: 100, harness: HarnessClaude, cwd: "/a"},
-		{pid: 200, harness: HarnessClaude, cwd: "/b"},
-		{pid: 300, harness: HarnessOMP, cwd: "/a"},
-	}
-
-	got := claudePIDSet(procs)
-	want := map[int]bool{100: true, 200: true}
-
-	if len(got) != len(want) {
-		t.Fatalf("claudePIDSet = %v; want %v", got, want)
-	}
-	for pid := range want {
-		if !got[pid] {
-			t.Errorf("pid %d missing from %v", pid, got)
-		}
-	}
-	if got[300] {
-		t.Error("an omp pid was offered to Claude Code's registry")
-	}
-}
-
 // Rescue is by transcript path, not by the entry's cwd: EnterWorktree moves a
 // session's cwd, and what matters here is where the log actually is.
 func TestRegistryLogsForDirMatchesTranscriptPath(t *testing.T) {

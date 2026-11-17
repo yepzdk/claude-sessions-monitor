@@ -246,37 +246,71 @@ var processTerminalFn = processTerminal
 
 // getRunningHarnessProcs returns one entry per running coding-agent process,
 // carrying the harness it belongs to, its working directory, its controlling
-// terminal and whether it has been orphaned.
+// terminal and whether it has been orphaned -- together with Claude Code's pid
+// registry, validated against the same scan, and whether a registry exists.
 //
 // It reports the error rather than an empty slice: "nothing is running" and
 // "the process scan failed" produce identical results downstream, and every
 // session would be reported Inactive and filtered out of the dashboard. csm
 // would say "No active sessions." with total confidence while sessions ran.
 //
-// A process whose cwd cannot be read is dropped, because a project is the only
-// thing callers use the cwd for and an unplaceable process cannot be joined to
-// any log directory.
+// Three steps, in this order:
+//
+//  1. Identify the agents from the process table and argv alone.
+//  2. Read the registry against the claude pids step 1 found. That set is
+//     independent of working-directory resolution, so a claude process whose
+//     cwd cannot be read still vouches for its own registry entry -- and the
+//     registry can then supply that cwd, rather than the guard vouching for the
+//     registry using the registry.
+//  3. Resolve what is still unknown. A pid the registry names takes its cwd
+//     from the registry; only the rest cost a cwd lookup, which on macOS is an
+//     lsof spawn per pid. The controlling terminal is read for omp only, the
+//     one harness whose pairing uses it.
+//
+// A process whose cwd cannot be read any other way is dropped, because a
+// project is the only thing callers use the cwd for and an unplaceable process
+// cannot be joined to any log directory.
 //
 // orphan (ppid 1) is a field on the process rather than a side lookup because
-// it is read off this same ps output; splitting the two let them disagree about
-// what was running. That, not silence, is what distinguishes a ghost from a
-// session someone left open overnight.
+// it is read off this same process table; splitting the two let them disagree
+// about what was running. That, not silence, is what distinguishes a ghost from
+// a session someone left open overnight.
 //
 // ponytail: ppid==1 is exact on macOS; on Linux a subreaper (some systemd
 // user sessions) can adopt orphans instead of pid 1, which this misses.
-func getRunningHarnessProcs() ([]harnessProcess, error) {
+func getRunningHarnessProcs() ([]harnessProcess, map[string]registryEntry, bool, error) {
 	rows, err := listProcesses()
 	if err != nil {
-		return nil, fmt.Errorf("scanning processes: %w", err)
+		return nil, nil, false, fmt.Errorf("scanning processes: %w", err)
 	}
 	// A platform that returns an empty list with no error puts back the bug this
 	// whole path exists to remove, so the invariant is checked here rather than
 	// trusted to each implementation.
 	if len(rows) == 0 {
-		return nil, errors.New("scanning processes: the process table came back empty")
+		return nil, nil, false, errors.New("scanning processes: the process table came back empty")
 	}
 
-	var procs []harnessProcess
+	agents := identifyHarnessProcs(rows)
+
+	// The registry is Claude Code's file, so only claude pids may validate it:
+	// pids are unique per machine, not per harness, and a stale entry naming a
+	// number now held by an omp process would resurrect a dead Claude session.
+	claudePIDs := make(map[int]bool)
+	for _, a := range agents {
+		if a.harness == HarnessClaude {
+			claudePIDs[a.pid] = true
+		}
+	}
+	registry, haveRegistry := readSessionRegistry(claudePIDs)
+
+	return resolveHarnessProcs(agents, registryCwds(registry)), registry, haveRegistry, nil
+}
+
+// identifyHarnessProcs narrows the process table to the coding agents in it,
+// with nothing resolved yet but the harness and whether the process is
+// orphaned. Their cwd and terminal are left empty for resolveHarnessProcs.
+func identifyHarnessProcs(rows []procInfo) []harnessProcess {
+	var agents []harnessProcess
 	for _, row := range rows {
 		// comm narrows the table to the few pids worth a second read; argv is
 		// what actually identifies the process. Discovery and the pre-SIGTERM
@@ -295,27 +329,65 @@ func getRunningHarnessProcs() ([]harnessProcess, error) {
 		if harness == HarnessNone {
 			continue
 		}
-
-		cwd, err := getProcessCwdFn(row.pid)
-		if err != nil || cwd == "" {
-			continue
-		}
-		// The controlling terminal is read per candidate rather than carried in
-		// procInfo: only omp pairing uses it, and by here the table is already
-		// down to the few pids that are agents. A process without one, or whose
-		// stdin cannot be read, simply pairs unconfidently.
-		terminal, _ := processTerminalFn(row.pid)
-
-		procs = append(procs, harnessProcess{
-			pid:      row.pid,
-			harness:  harness,
-			cwd:      cwd,
-			terminal: terminal,
-			orphan:   row.ppid == 1,
+		agents = append(agents, harnessProcess{
+			pid:     row.pid,
+			harness: harness,
+			orphan:  row.ppid == 1,
 		})
 	}
+	return agents
+}
 
-	return procs, nil
+// registryCwds maps each registry-named pid to the working directory its entry
+// records. An entry whose cwd is not an absolute path is left out, so that pid
+// falls back to a lookup instead of being keyed to a project directory that
+// cannot exist.
+//
+// Every entry has already been validated against the scan's claude pids, so
+// this can only ever name a claude process.
+func registryCwds(registry map[string]registryEntry) map[int]string {
+	cwds := make(map[int]string, len(registry))
+	for _, re := range registry {
+		if filepath.IsAbs(re.Cwd) {
+			cwds[re.PID] = re.Cwd
+		}
+	}
+	return cwds
+}
+
+// resolveHarnessProcs fills in each agent's working directory and controlling
+// terminal, reading from the process only what knownCwds does not already say.
+//
+// Taking a registry-named claude process's cwd from the registry rather than
+// from the process is not a weaker source. It is the cwd pairProcess already
+// requires the registry entry to match before it pairs a log, so keying the
+// pid by the same value keeps the two from disagreeing; and Claude Code patches
+// it when EnterWorktree moves the process.
+func resolveHarnessProcs(agents []harnessProcess, knownCwds map[int]string) []harnessProcess {
+	procs := make([]harnessProcess, 0, len(agents))
+	for _, a := range agents {
+		cwd, known := knownCwds[a.pid]
+		if !known {
+			var err error
+			cwd, err = getProcessCwdFn(a.pid)
+			if err != nil || cwd == "" {
+				continue
+			}
+		}
+		a.cwd = cwd
+
+		// The controlling terminal is read per process rather than carried in
+		// procInfo, and only for omp: it names omp's session breadcrumbs and
+		// nothing reads it for any other harness, so reading it for a claude
+		// process was a second lsof spawn per pid on macOS with no consumer. A
+		// process without one, or whose stdin cannot be read, simply pairs
+		// unconfidently.
+		if a.harness == HarnessOMP {
+			a.terminal, _ = processTerminalFn(a.pid)
+		}
+		procs = append(procs, a)
+	}
+	return procs
 }
 
 // sessionIDFromLogFile returns the session UUID from a log file path.
