@@ -50,23 +50,35 @@ auto-refreshes, and the history and flags views are throttled to once per 30s.
 ### The process scan (`harness.go`, `session.go`)
 
 `getRunningHarnessProcs()` returns one `harnessProcess` per recognised agent,
-with its harness, cwd, controlling terminal and whether it has been orphaned. It
-reads the OS process table (`listProcesses`, see
-[Platform code](#platform-code)) — not `ps` output, whose columns are a text
-table meant for people and are not stable across platforms.
+with its harness, cwd, controlling terminal and whether it has been orphaned,
+plus Claude Code's pid registry validated against the same scan. It reads the
+OS process table (`listProcesses`, see [Platform code](#platform-code)) — not
+`ps` output, whose columns are a text table meant for people and are not
+stable across platforms.
 
-Three reads, narrowing: `comm` from the table is the loose prefilter
+Reads, narrowing: `comm` from the table is the loose prefilter
 (`harnessCandidate`), the full argument vector decides
-(`classifyProcess(argv)`), and only then are cwd and controlling terminal
-resolved per pid. `comm` alone cannot decide — omp runs as `bun /path/to/omp`,
-so its `comm` is `bun`, and Claude Code's native installer produces a `comm` of
-the *version number* — and argv costs one read per pid, so the order matters.
+(`classifyProcess(argv)`) — together `identifyHarnessProcs` — and only then
+is anything resolved per pid. `comm` alone cannot decide — omp runs as
+`bun /path/to/omp`, so its `comm` is `bun`, and Claude Code's native installer
+produces a `comm` of the *version number* — and argv costs one read per pid,
+so the order matters.
+
+Between identifying and resolving, the registry is read against the claude
+pids identified (see [Processes, ghosts and the pairing
+pitfall](#processes-ghosts-and-the-pairing-pitfall)). That set does not depend
+on cwd resolution, so the registry can then *supply* the cwd:
+`resolveHarnessProcs` takes a registry-named claude process's cwd from its
+entry and spends a lookup — an `lsof` spawn on macOS — only on the pids the
+registry cannot name. It is the same cwd `pairProcess` requires the entry to
+match, so keying the pid by it keeps the two from disagreeing.
 
 The controlling terminal is read from the process's **stdin**
 (`processTerminal`), because that is the descriptor omp itself calls
 `ttyname(3)` on to name its session breadcrumb. Reassembling a name from a
 device number would be a name csm then has to hope matches. Only omp pairing
-uses it, so it is a per-candidate read rather than a column on `procInfo`.
+uses it, so it is read for omp processes only, rather than as a column on
+`procInfo` or for every agent.
 
 A failed scan aborts `Discover` with an error rather than returning an empty
 slice: empty is indistinguishable from "nothing running" and would mark every
@@ -233,9 +245,12 @@ a pid one lists can only fail the other by having been recycled. `Session` and
 
 Claude Code (2.1.x) keeps a registry at `~/.claude/sessions/<pid>.json` with
 the pid, session id and cwd of every live session; `registry.go` reads it.
-Every entry is validated against the set of `claude` pids the scan found,
+Every entry is validated against the set of `claude` pids the scan
+identified from the process table and argv, before any cwd is resolved, and
 never against the bare pid — because a crash or reboot leaves files behind
-and the pid gets reused. `pairProcess` then decides, per log: registry hit →
+and the pid gets reused. Building the set before cwd resolution is what lets
+the registry supply the cwd without vouching for itself: a claude process whose
+cwd cannot be read still counts as a live claude. `pairProcess` then decides, per log: registry hit →
 that session's own pid, confident; registry present and every pid in the
 directory accounted for → not running; a pid the registry cannot name →
 running, no pid. Two files carrying one session id (`--resume` in two tabs)

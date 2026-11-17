@@ -174,14 +174,13 @@ func cachedRunningHarnessProcs() ([]harnessProcess, map[string]registryEntry, bo
 		return processScanProcs, processScanRegistry, processScanHaveReg, nil
 	}
 
-	procs, err := getRunningHarnessProcs()
+	procs, registry, haveRegistry, err := getRunningHarnessProcs()
 	if err != nil {
 		// Leave any previous result in place but do not extend its lifetime;
 		// a caller asking again should retry the scan rather than be handed
 		// a stale map as though it were fresh.
 		return nil, nil, false, err
 	}
-	registry, haveRegistry := readSessionRegistry(claudePIDSet(procs))
 
 	processScanProcs = procs
 	processScanRegistry, processScanHaveReg = registry, haveRegistry
